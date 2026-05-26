@@ -1,0 +1,88 @@
+*pr-review.nvim* Fast GitHub PR review mode for normal buffers
+
+==============================================================================
+CONTENTS                                                  *pr-review-contents*
+
+1. Overview                                      |pr-review-overview|
+2. Commands                                      |pr-review-commands|
+3. Setup                                         |pr-review-setup|
+
+==============================================================================
+OVERVIEW                                                  *pr-review-overview*
+
+pr-review.nvim keeps GitHub PR review in ordinary file buffers. It compares the
+current branch to the PR base, sets Gitsigns to that base when available, loads
+review comments asynchronously, and provides commands for jumping through PR
+hunks and changed files.
+
+The plugin uses `gh` for PR metadata, comments, and replies.
+
+==============================================================================
+COMMANDS                                                  *pr-review-commands*
+
+                                                        *:PrReviewStart*
+:PrReviewStart
+        Start normal-buffer PR review mode.
+
+                                                        *:PrReviewStop*
+:PrReviewStop
+        Stop PR review mode and clear plugin state.
+
+                                                        *:PrReviewRefresh*
+:PrReviewRefresh
+        Reload changed files and review comments.
+
+                                                        *:PrReviewNextChange*
+:PrReviewNextChange
+        Jump to the next PR hunk, wrapping across files.
+
+                                                        *:PrReviewPrevChange*
+:PrReviewPrevChange
+        Jump to the previous PR hunk, wrapping across files.
+
+                                                        *:PrReviewNextFile*
+:PrReviewNextFile
+        Jump to the next changed file.
+
+                                                        *:PrReviewPrevFile*
+:PrReviewPrevFile
+        Jump to the previous changed file.
+
+                                                        *:PrReviewOldToggle*
+:PrReviewOldToggle
+        Toggle a side-by-side diff split with the base version of the current
+        file.
+
+                                                        *:PrReviewThread*
+:PrReviewThread
+        Show PR comments on the current line.
+
+                                                        *:PrReviewReply*
+:PrReviewReply
+        Reply to the latest PR comment on the current line.
+
+                                                        *:PrReviewComment*
+:PrReviewComment
+        Create a PR comment on the current line or visual range.
+
+==============================================================================
+SETUP                                                        *pr-review-setup*
+
+>
+  require("pr_review").setup({
+    auto_open_first_change = true,
+    comments = {
+      enabled = true,
+      cache_ttl_seconds = 300,
+    },
+    gitsigns = {
+      enabled = true,
+    },
+    nvim_tree = {
+      enabled = true,
+    },
+    commands = true,
+  })
+<
+
+ vim:tw=78:ts=8:noet:ft=help:norl:
