@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/adrianmross/pr-review.nvim/compare/pr-review.nvim-v0.3.1...pr-review.nvim-v0.4.0) (2026-06-01)
+
+
+### Features
+
+* add normal-buffer PR review plugin ([ef0857b](https://github.com/adrianmross/pr-review.nvim/commit/ef0857b1071cfbf7177ca97ba6ca4ed4ca18a410))
+* add release automation ([62f14ee](https://github.com/adrianmross/pr-review.nvim/commit/62f14eeaa0a6d2967618a90ec38769cf9b69440e))
+
+
+### Bug Fixes
+
+* update CI cache action ([5e1cb57](https://github.com/adrianmross/pr-review.nvim/commit/5e1cb5707036edee2ae44208c2b296de64532e6c))
+
 ## v0.3.1 - 2026-06-01
 
 ### Changed
