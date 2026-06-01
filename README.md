@@ -127,14 +127,32 @@ require("pr_review").setup({
   },
   performance = {
     ui_refresh_debounce_ms = 50,
+    hunk_prefetch = {
+      enabled = true,
+      count = 8,
+      concurrency = 2,
+      focused_delay_ms = 0,
+      gitsigns_delay_ms = 5,
+    },
+    background_hunk_scan = {
+      enabled = true,
+      max_files = 5000,
+      delay_ms = 250,
+    },
   },
   commands = true,
 })
 ```
 
-`PrReviewStart` loads PR metadata and changed-file status asynchronously. Hunk
-locations are loaded lazily per file, so opening review mode does not parse the
-entire PR patch up front.
+`PrReviewStart` loads PR metadata and changed-file status asynchronously. If
+`GH_REVIEW_BASE` is set by a launcher, changed-file loading starts immediately
+without waiting for GitHub metadata. Hunk locations are loaded lazily per file,
+with immediate focused-file prefetch, opportunistic `gitsigns.nvim` hunk-cache
+reuse, and an optional delayed background scan for PRs under
+`performance.background_hunk_scan.max_files`.
+
+External launchers can provide `GH_REVIEW_REPO`, `GH_REVIEW_PR`,
+`GH_REVIEW_BASE`, and `GH_REVIEW_HEAD` to avoid startup discovery calls.
 
 The built-in old-version split remains the default backend. When
 `diff.use_fast_diffopt` is enabled, `PrReviewOldToggle` temporarily applies
