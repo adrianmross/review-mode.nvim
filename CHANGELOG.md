@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/adrianmross/pr-review.nvim/compare/v0.5.0...v0.6.0) (2026-06-01)
+
+
+### Features
+
+* remove legacy processing names ([d2db449](https://github.com/adrianmross/pr-review.nvim/commit/d2db449b3554d9716e958cc0efaf1cb0052b00e5))
+
 ## [0.5.0](https://github.com/adrianmross/pr-review.nvim/compare/v0.4.0...v0.5.0) (2026-06-01)
 
 
