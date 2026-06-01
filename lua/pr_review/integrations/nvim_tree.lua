@@ -1,4 +1,4 @@
-local state = require "pr_review"
+local state = require("pr_review")
 
 local Decorator = require("nvim-tree.renderer.decorator"):extend()
 
@@ -10,16 +10,29 @@ function Decorator:new()
   self.folder_icon = { str = "•", hl = { "DiagnosticInfo" } }
 end
 
+local relpath_cache = setmetatable({}, { __mode = "k" })
+
 local function relpath(node)
   local root = state.root()
   if not root or not node.absolute_path then
     return nil
   end
 
+  local cached = relpath_cache[node]
+  if cached and cached.root == root and cached.absolute_path == node.absolute_path then
+    return cached.rel
+  end
+
   local rel = vim.fs.relpath(root, node.absolute_path)
   if rel == "." then
-    return nil
+    rel = nil
   end
+
+  relpath_cache[node] = {
+    root = root,
+    absolute_path = node.absolute_path,
+    rel = rel,
+  }
 
   return rel
 end

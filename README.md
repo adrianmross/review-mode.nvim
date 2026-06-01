@@ -115,15 +115,31 @@ require("pr_review").setup({
     enabled = true,
     cache_ttl_seconds = 300,
   },
+  diff = {
+    fast_diffopt = "internal,filler,closeoff,indent-heuristic,linematch:0",
+    use_fast_diffopt = true,
+  },
   gitsigns = {
     enabled = true,
   },
   nvim_tree = {
     enabled = true,
   },
+  performance = {
+    ui_refresh_debounce_ms = 50,
+  },
   commands = true,
 })
 ```
+
+`PrReviewStart` loads PR metadata and changed-file status asynchronously. Hunk
+locations are loaded lazily per file, so opening review mode does not parse the
+entire PR patch up front.
+
+The built-in old-version split remains the default backend. When
+`diff.use_fast_diffopt` is enabled, `PrReviewOldToggle` temporarily applies
+`diff.fast_diffopt` while creating its side-by-side diff, then restores the
+previous `diffopt` when the split closes.
 
 ## Notes
 
