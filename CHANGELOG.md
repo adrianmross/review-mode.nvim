@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0](https://github.com/adrianmross/pr-review.nvim/compare/v0.3.1...v0.4.0) (2026-06-01)
+
+
+### Features
+
+* add release automation ([62f14ee](https://github.com/adrianmross/pr-review.nvim/commit/62f14eeaa0a6d2967618a90ec38769cf9b69440e))
+
+
+### Bug Fixes
+
+* accept release please changelog headers ([ab34200](https://github.com/adrianmross/pr-review.nvim/commit/ab3420095d2eaa96496baba128e219ea5266cfcf))
+* update CI cache action ([5e1cb57](https://github.com/adrianmross/pr-review.nvim/commit/5e1cb5707036edee2ae44208c2b296de64532e6c))
+* use plain release tags ([55d5146](https://github.com/adrianmross/pr-review.nvim/commit/55d5146edc2eafe3e51d9341bf5618815f044956))
+
 ## v0.3.1 - 2026-06-01
 
 ### Changed
