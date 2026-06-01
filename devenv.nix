@@ -29,7 +29,8 @@
   tasks = {
     "dev:validate".exec = "validate";
     "dev:benchmark".exec = "benchmark";
-    "dev:format".exec = "stylua lua plugin";
+    "dev:format".exec = "stylua lua plugin scripts/fixture.lua scripts/rest_fallback_fixture.lua";
+    "release:check".exec = "bash scripts/release-check.sh";
   };
 
   enterTest = ''
