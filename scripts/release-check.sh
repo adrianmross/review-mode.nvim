@@ -17,7 +17,9 @@ version="$(awk -F'"' '/"\."/ { print $4; exit }' "$manifest")"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]] || fail "invalid semver: $version"
 
 tag="v${version}"
-grep -Eq "^## ${tag}($| - )" "$changelog" || fail "$changelog is missing section ## $tag"
+plain_tag="${version}"
+grep -Eq "^## (${tag}($| - )|\\[${tag}\\]\\(|\\[${plain_tag}\\]\\()" "$changelog" \
+  || fail "$changelog is missing section for $tag"
 
 notes="$(bash scripts/release-notes.sh "$tag" | sed '/^[[:space:]]*$/d')"
 [[ -n "$notes" ]] || fail "$changelog section $tag is empty"
