@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.2.1 - 2026-06-01
+
 ### Changed
 
 - Start changed-file loading immediately when launchers provide
