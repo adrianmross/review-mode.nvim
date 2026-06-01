@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/adrianmross/pr-review.nvim/compare/v0.4.0...v0.5.0) (2026-06-01)
+
+
+### Features
+
+* improve review file markers and picker ([d14e5d3](https://github.com/adrianmross/pr-review.nvim/commit/d14e5d33528ca2d6570620c718820f3870a7ee8d))
+
 ## [0.4.0](https://github.com/adrianmross/pr-review.nvim/compare/v0.3.1...v0.4.0) (2026-06-01)
 
 
