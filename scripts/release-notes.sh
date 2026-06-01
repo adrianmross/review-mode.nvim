@@ -12,7 +12,14 @@ if [[ "$version" != v* ]]; then
 fi
 
 awk -v version="$version" '
-  $0 == "## " version || index($0, "## " version " - ") == 1 {
+  BEGIN {
+    plain = version
+    sub(/^v/, "", plain)
+  }
+  $0 == "## " version ||
+  index($0, "## " version " - ") == 1 ||
+  index($0, "## [" version "](") == 1 ||
+  index($0, "## [" plain "](") == 1 {
     found = 1
     next
   }
