@@ -24,6 +24,8 @@ local defaults = {
       enabled = true,
       count = 8,
       concurrency = 2,
+      focused_delay_ms = 0,
+      gitsigns_delay_ms = 5,
     },
     background_hunk_scan = {
       enabled = true,
@@ -309,12 +311,21 @@ local function hydrate_comments()
   return (os.time() - tonumber(cached.fetched_at or 0)) < state.config.comments.cache_ttl_seconds
 end
 
-local function current_relpath()
-  local name = vim.api.nvim_buf_get_name(0)
+local function buf_relpath(bufnr)
+  bufnr = bufnr or 0
+  if bufnr ~= 0 and not vim.api.nvim_buf_is_valid(bufnr) then
+    return nil
+  end
+
+  local name = vim.api.nvim_buf_get_name(bufnr or 0)
   if name == "" or not state.root then
     return nil
   end
   return vim.fs.relpath(state.root, name)
+end
+
+local function current_relpath()
+  return buf_relpath(0)
 end
 
 local function current_file_index(path)
@@ -586,12 +597,84 @@ local function finish_hunks_for_path(path, hunks)
   end
 end
 
+local function gitsigns_hunk_lines(bufnr)
+  if not state.config.gitsigns.enabled or not package.loaded["gitsigns"] then
+    return nil
+  end
+
+  bufnr = bufnr or 0
+  if bufnr ~= 0 and not vim.api.nvim_buf_is_valid(bufnr) then
+    return nil
+  end
+
+  if vim.bo[bufnr].modified then
+    return nil
+  end
+
+  local ok, gitsigns = pcall(require, "gitsigns")
+  if not ok or type(gitsigns.get_hunks) ~= "function" then
+    return nil
+  end
+
+  local hunks_ok, hunks = pcall(gitsigns.get_hunks, bufnr)
+  if not hunks_ok or type(hunks) ~= "table" then
+    return nil
+  end
+
+  local lines = {}
+  for _, hunk in ipairs(hunks) do
+    local added = type(hunk) == "table" and hunk.added or nil
+    local line = type(added) == "table" and tonumber(added.start) or nil
+    if line then
+      lines[#lines + 1] = math.max(1, line)
+    end
+  end
+
+  if #lines == 0 then
+    return nil
+  end
+
+  table.sort(lines)
+  return lines
+end
+
+local function should_delay_for_gitsigns(bufnr)
+  bufnr = bufnr or 0
+  if bufnr ~= 0 and not vim.api.nvim_buf_is_valid(bufnr) then
+    return false
+  end
+
+  return state.config.gitsigns.enabled and package.loaded["gitsigns"] and not vim.bo[bufnr].modified
+end
+
+local function finish_hunks_from_gitsigns(path, bufnr)
+  if not path or state.hunks_loaded[path] then
+    return state.hunks_loaded[path] == true
+  end
+
+  if buf_relpath(bufnr or 0) ~= path then
+    return false
+  end
+
+  local lines = gitsigns_hunk_lines(bufnr)
+  if not lines then
+    return false
+  end
+
+  finish_hunks_for_path(path, lines)
+  return true
+end
+
 local function load_hunks_for_paths(paths, on_done)
   local pending_paths = {}
+  local needs_rename_detection = false
   for _, path in ipairs(paths) do
     if path and state.files[path] and not state.hunks_loaded[path] and not state.hunks_loading[path] then
       state.hunks_loading[path] = true
       pending_paths[#pending_paths + 1] = path
+      if tostring(state.files[path]):match("^R") then
+        needs_rename_detection = true
+      end
     end
   end
 
@@ -607,13 +690,17 @@ local function load_hunks_for_paths(paths, on_done)
     "git",
     "diff",
     "--unified=0",
-    "--find-renames",
     "--diff-filter=ACMRT",
     "--no-ext-diff",
     "--no-color",
     base_ref() .. "...HEAD",
     "--",
   }
+  if needs_rename_detection then
+    table.insert(args, 5, "--find-renames")
+  else
+    table.insert(args, 5, "--no-renames")
+  end
   vim.list_extend(args, pending_paths)
 
   system_async(args, { cwd = state.root }, function(patch)
@@ -634,6 +721,11 @@ end
 
 local function load_hunks_for_path(path, callback)
   if state.hunks_loaded[path] then
+    callback(state.hunks[path] or {})
+    return
+  end
+
+  if finish_hunks_from_gitsigns(path, 0) then
     callback(state.hunks[path] or {})
     return
   end
@@ -735,13 +827,40 @@ local function prefetch_near_path(path)
   enqueue_hunk_prefetch(nearby_paths(path))
 end
 
-local function prefetch_focused_path(path)
+local function prefetch_focused_path(path, bufnr)
   if
     not state.config.performance.hunk_prefetch.enabled
     or not state.maps_loaded
     or not path
     or not state.files[path]
   then
+    return
+  end
+
+  if finish_hunks_from_gitsigns(path, bufnr or 0) then
+    prefetch_near_path(path)
+    return
+  end
+
+  if should_delay_for_gitsigns(bufnr or 0) then
+    local generation = state.generation
+    local delay = tonumber(state.config.performance.hunk_prefetch.gitsigns_delay_ms or 0) or 0
+    vim.defer_fn(function()
+      if not is_current(generation) then
+        return
+      end
+
+      if finish_hunks_from_gitsigns(path, bufnr or 0) then
+        prefetch_near_path(path)
+        return
+      end
+
+      if not state.hunks_loaded[path] and not state.hunks_loading[path] then
+        load_hunks_for_paths({ path }, function()
+          prefetch_near_path(path)
+        end)
+      end
+    end, delay)
     return
   end
 
@@ -759,14 +878,14 @@ local function prefetch_focused_path(path)
   end)
 end
 
-local function prefetch_current_buffer()
+local function prefetch_current_buffer(bufnr)
   if not state.active or not state.maps_loaded then
     return
   end
 
-  local path = current_relpath()
+  local path = buf_relpath(bufnr or 0)
   if path and state.files[path] then
-    prefetch_focused_path(path)
+    prefetch_focused_path(path, bufnr or 0)
   end
 end
 
@@ -927,7 +1046,11 @@ local function set_gitsigns_base()
   vim.schedule(function()
     local ok, gitsigns = pcall(require, "gitsigns")
     if ok and gitsigns.change_base then
-      gitsigns.change_base(base_ref(), true)
+      gitsigns.change_base(base_ref(), true, function()
+        if state.active then
+          prefetch_current_buffer(0)
+        end
+      end)
       return
     end
     pcall(vim.cmd, "Gitsigns change_base " .. base_ref() .. " --global")
@@ -1464,7 +1587,26 @@ function M.setup(opts)
     group = vim.api.nvim_create_augroup("normal_pr_review", { clear = true }),
     callback = function(args)
       annotate_buffer(args.buf)
-      vim.defer_fn(prefetch_current_buffer, 10)
+      local delay = tonumber(state.config.performance.hunk_prefetch.focused_delay_ms or 0) or 0
+      if delay > 0 then
+        vim.defer_fn(function()
+          prefetch_current_buffer(args.buf)
+        end, delay)
+      else
+        prefetch_current_buffer(args.buf)
+      end
+    end,
+  })
+
+  vim.api.nvim_create_autocmd("User", {
+    pattern = "GitSignsUpdate",
+    group = vim.api.nvim_create_augroup("normal_pr_review_gitsigns", { clear = true }),
+    callback = function(args)
+      local bufnr = args.data and args.data.buffer
+      local path = bufnr and buf_relpath(bufnr)
+      if state.active and state.maps_loaded and path and state.files[path] then
+        finish_hunks_from_gitsigns(path, bufnr)
+      end
     end,
   })
 end

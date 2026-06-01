@@ -131,6 +131,8 @@ require("pr_review").setup({
       enabled = true,
       count = 8,
       concurrency = 2,
+      focused_delay_ms = 0,
+      gitsigns_delay_ms = 5,
     },
     background_hunk_scan = {
       enabled = true,
@@ -145,7 +147,8 @@ require("pr_review").setup({
 `PrReviewStart` loads PR metadata and changed-file status asynchronously. If
 `GH_REVIEW_BASE` is set by a launcher, changed-file loading starts immediately
 without waiting for GitHub metadata. Hunk locations are loaded lazily per file,
-with focused-file prefetch and an optional delayed background scan for PRs under
+with immediate focused-file prefetch, opportunistic `gitsigns.nvim` hunk-cache
+reuse, and an optional delayed background scan for PRs under
 `performance.background_hunk_scan.max_files`.
 
 External launchers can provide `GH_REVIEW_REPO`, `GH_REVIEW_PR`,

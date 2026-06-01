@@ -9,23 +9,29 @@
   critical path.
 - Prefetch hunk locations for the active file first, then warm nearby files in
   bounded batches.
+- Start focused-file hunk prefetch immediately on buffer entry, with a short
+  `gitsigns.nvim` grace period when gitsigns is already attached so the two diff
+  engines do not race on normal review navigation.
+- Reuse cached `gitsigns.nvim` hunk locations for clean buffers when available,
+  while keeping the built-in Git diff loader as the fallback and authoritative
+  backend.
 - Add a delayed background hunk scan for PRs under the configured size limit, so
   idle review time fills the hunk cache without blocking startup.
+- Add gitsigns-enabled benchmark coverage via the `devenv` shell.
 
 ### Benchmarks
 
 - Against `v0.2.0` on a generated fixture with 1,000 changed files and 80 lines
-  per file, `PrReviewStart` returned in 2-3 ms, down from about 11 ms, and the
-  changed-file map was ready in 17-28 ms, down from about 40 ms.
-- On the same 1,000-file fixture, immediate middle-file hunk navigation improved
-  from about 43 ms to about 21 ms. With a 50 ms pause after opening the file,
-  navigation dropped to about 1.4 ms.
+  per file, `PrReviewStart` returned in 1.8-2.7 ms, down from 11-14 ms, and the
+  changed-file map was ready in 17-20 ms, down from 42-49 ms.
+- On the same 1,000-file fixture, same-tick middle-file hunk navigation stayed
+  bounded by the cold per-file Git diff at about 16-19 ms. With a 50 ms pause
+  after opening the file, navigation dropped to 1.3-1.6 ms.
 - Against `v0.2.0` on a generated fixture with 3,000 changed files and 80 lines
-  per file, `PrReviewStart` returned in about 2 ms, down from 11-38 ms, and the
-  changed-file map was ready in 21-23 ms, down from 47-84 ms.
-- On the same 3,000-file fixture, immediate middle-file hunk navigation stayed
-  around 21 ms, while a 50 ms pause after opening the file reduced navigation to
-  about 2.6 ms.
+  per file, `PrReviewStart` returned in about 2.2 ms, down from about 11.5 ms,
+  and the changed-file map was ready in about 21.9 ms, down from about 46.7 ms.
+- On the same 3,000-file fixture, a 50 ms pause after opening the file reduced
+  middle-file hunk navigation to about 2.6 ms, down from about 22.2 ms.
 
 ## v0.2.0 - 2026-06-01
 
