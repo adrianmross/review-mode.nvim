@@ -567,10 +567,6 @@ local function comments_for_line(path, line)
   return results
 end
 
-local function comments_for_path(path)
-  return state.comments[path] or {}
-end
-
 local function comment_line(comment)
   return tonumber(comment.line) or tonumber(comment.original_line) or tonumber(comment.start_line)
 end
@@ -2233,38 +2229,240 @@ function M.toggle_comments()
   vim.notify("PR review comments " .. (state.config.comments.enabled and "enabled" or "disabled"))
 end
 
+local viewed_picker = nil
+local viewed_picker_header_lines = 4
+
+local function normalize_viewed_filter(filter)
+  filter = filter or "all"
+  if filter == "processed" then
+    return "viewed"
+  end
+  if filter == "pending" then
+    return "unviewed"
+  end
+  if filter == "viewed" or filter == "unviewed" then
+    return filter
+  end
+  return "all"
+end
+
+local function fuzzy_match(value, query)
+  query = vim.trim(query or ""):lower()
+  if query == "" then
+    return true
+  end
+
+  value = tostring(value or ""):lower()
+  local index = 1
+  for char in query:gmatch(".") do
+    index = value:find(char, index, true)
+    if not index then
+      return false
+    end
+    index = index + 1
+  end
+
+  return true
+end
+
+local function viewed_picker_item(path)
+  local viewed = state.viewed[path] == true
+  local unviewed = M.unviewed_count(path)
+  local comments = M.unresolved_comment_count(path)
+  local review_icon = viewed and "✓" or string.format("☐ %d", unviewed)
+  local comment_icon = comments > 0 and string.format("◆ %d", comments) or "   "
+
+  return {
+    path = path,
+    viewed = viewed,
+    label = string.format("%-4s %-4s %s", review_icon, comment_icon, path),
+    search = table.concat({
+      path,
+      viewed and "viewed" or "unviewed",
+      comments > 0 and "comments unresolved" or "",
+    }, " "),
+  }
+end
+
+local function viewed_picker_items(filter, query)
+  local items = {}
+  for _, path in ipairs(state.file_order) do
+    local viewed = state.viewed[path] == true
+    if filter == "all" or (filter == "viewed" and viewed) or (filter == "unviewed" and not viewed) then
+      local item = viewed_picker_item(path)
+      if fuzzy_match(item.search, query) then
+        items[#items + 1] = item
+      end
+    end
+  end
+  return items
+end
+
+local function close_viewed_picker()
+  if viewed_picker and viewed_picker.winid and vim.api.nvim_win_is_valid(viewed_picker.winid) then
+    pcall(vim.api.nvim_win_close, viewed_picker.winid, true)
+  end
+  viewed_picker = nil
+end
+
+local function selected_viewed_picker_item()
+  if not viewed_picker or not viewed_picker.winid or not vim.api.nvim_win_is_valid(viewed_picker.winid) then
+    return nil
+  end
+
+  local line = vim.api.nvim_win_get_cursor(viewed_picker.winid)[1]
+  local index = line - viewed_picker_header_lines
+  if index < 1 then
+    index = 1
+    pcall(vim.api.nvim_win_set_cursor, viewed_picker.winid, { viewed_picker_header_lines + 1, 0 })
+  end
+
+  return viewed_picker.items[index]
+end
+
+local function render_viewed_picker()
+  if not viewed_picker or not vim.api.nvim_buf_is_valid(viewed_picker.bufnr) then
+    return
+  end
+
+  viewed_picker.items = viewed_picker_items(viewed_picker.filter, viewed_picker.query)
+
+  local lines = {
+    string.format("PR review files [%s]", viewed_picker.filter),
+    string.format("Search: %s", viewed_picker.query ~= "" and viewed_picker.query or "<empty>"),
+    "Enter/o open  Space/t toggle  / search  a all  v viewed  u unviewed  q close",
+    "",
+  }
+
+  if #viewed_picker.items == 0 then
+    lines[#lines + 1] = "No matching PR files"
+  else
+    for _, item in ipairs(viewed_picker.items) do
+      lines[#lines + 1] = item.label
+    end
+  end
+
+  vim.bo[viewed_picker.bufnr].modifiable = true
+  vim.api.nvim_buf_set_lines(viewed_picker.bufnr, 0, -1, false, lines)
+  vim.bo[viewed_picker.bufnr].modifiable = false
+
+  if viewed_picker.winid and vim.api.nvim_win_is_valid(viewed_picker.winid) then
+    local line =
+      math.min(math.max(viewed_picker_header_lines + 1, vim.api.nvim_win_get_cursor(viewed_picker.winid)[1]), #lines)
+    pcall(vim.api.nvim_win_set_cursor, viewed_picker.winid, { line, 0 })
+  end
+end
+
+local function prompt_viewed_picker_search()
+  if not viewed_picker then
+    return
+  end
+
+  local query = vim.fn.input("PR file search: ", viewed_picker.query)
+  viewed_picker.query = query or ""
+  render_viewed_picker()
+end
+
+local function set_viewed_picker_filter(filter)
+  if not viewed_picker then
+    return
+  end
+
+  viewed_picker.filter = normalize_viewed_filter(filter)
+  render_viewed_picker()
+end
+
+local function toggle_viewed_picker_item()
+  local item = selected_viewed_picker_item()
+  if not item then
+    return
+  end
+
+  M.toggle_viewed(item.path)
+  render_viewed_picker()
+end
+
+local function open_viewed_picker_item()
+  local item = selected_viewed_picker_item()
+  if not item then
+    return
+  end
+
+  close_viewed_picker()
+  jump_to_path(item.path, 1)
+end
+
+local function open_viewed_picker(filter)
+  filter = normalize_viewed_filter(filter)
+
+  if viewed_picker and viewed_picker.winid and vim.api.nvim_win_is_valid(viewed_picker.winid) then
+    viewed_picker.filter = filter
+    render_viewed_picker()
+    vim.api.nvim_set_current_win(viewed_picker.winid)
+    return
+  end
+
+  local bufnr = vim.api.nvim_create_buf(false, true)
+  vim.bo[bufnr].buftype = "nofile"
+  vim.bo[bufnr].bufhidden = "wipe"
+  vim.bo[bufnr].filetype = "pr-review-menu"
+  vim.bo[bufnr].swapfile = false
+
+  local width = math.min(math.max(64, math.floor(vim.o.columns * 0.72)), math.max(32, vim.o.columns - 4))
+  local height = math.min(math.max(10, #state.file_order + viewed_picker_header_lines), math.max(8, vim.o.lines - 4))
+  local row = math.max(0, math.floor((vim.o.lines - height) / 2) - 1)
+  local col = math.max(0, math.floor((vim.o.columns - width) / 2))
+  local winid = vim.api.nvim_open_win(bufnr, true, {
+    relative = "editor",
+    row = row,
+    col = col,
+    width = width,
+    height = height,
+    style = "minimal",
+    border = "rounded",
+  })
+
+  viewed_picker = {
+    bufnr = bufnr,
+    winid = winid,
+    filter = filter,
+    query = "",
+    items = {},
+  }
+
+  vim.wo[winid].cursorline = true
+  vim.wo[winid].wrap = false
+
+  local function map(lhs, callback)
+    vim.keymap.set("n", lhs, callback, { buffer = bufnr, nowait = true, silent = true })
+  end
+
+  map("q", close_viewed_picker)
+  map("<Esc>", close_viewed_picker)
+  map("<CR>", open_viewed_picker_item)
+  map("o", open_viewed_picker_item)
+  map("<Space>", toggle_viewed_picker_item)
+  map("t", toggle_viewed_picker_item)
+  map("/", prompt_viewed_picker_search)
+  map("a", function()
+    set_viewed_picker_filter("all")
+  end)
+  map("v", function()
+    set_viewed_picker_filter("viewed")
+  end)
+  map("u", function()
+    set_viewed_picker_filter("unviewed")
+  end)
+
+  render_viewed_picker()
+end
+
 function M.list_viewed(filter)
   if not ensure_active() then
     return
   end
 
-  filter = filter or "all"
-  if filter == "processed" then
-    filter = "viewed"
-  elseif filter == "pending" then
-    filter = "unviewed"
-  end
-
-  local items = {}
-  for _, path in ipairs(state.file_order) do
-    local viewed = state.viewed[path] == true
-    if filter == "all" or (filter == "viewed" and viewed) or (filter == "unviewed" and not viewed) then
-      items[#items + 1] = {
-        filename = vim.fs.joinpath(state.root, path),
-        lnum = 1,
-        text = string.format(
-          "[%s] %s%s",
-          viewed and "viewed" or "unviewed",
-          path,
-          (#comments_for_path(path) > 0 and string.format(" comments:%d", #comments_for_path(path)) or "")
-        ),
-      }
-    end
-  end
-
-  local label = filter
-  vim.fn.setqflist({}, " ", { title = "PR review files [" .. label .. "]", items = items })
-  vim.cmd.copen()
+  open_viewed_picker(filter)
 end
 
 M.list_processed = M.list_viewed
@@ -2496,8 +2694,83 @@ end
 
 M.is_processed_file = M.is_viewed_file
 
+function M.unviewed_count(path)
+  if not state.config.viewed.enabled or not path then
+    return 0
+  end
+
+  if state.files[path] then
+    return state.viewed[path] and 0 or 1
+  end
+
+  if not state.dirs[path] then
+    return 0
+  end
+
+  local count = 0
+  local prefix = path .. "/"
+  for _, file in ipairs(state.file_order) do
+    if vim.startswith(file, prefix) and not state.viewed[file] then
+      count = count + 1
+    end
+  end
+
+  return count
+end
+
+function M.is_viewed_dir(path)
+  if not state.config.viewed.enabled or not state.dirs[path] or M.unviewed_count(path) > 0 then
+    return false
+  end
+
+  local prefix = path .. "/"
+  local has_changed_child = false
+  for _, file in ipairs(state.file_order) do
+    if vim.startswith(file, prefix) then
+      has_changed_child = true
+      if not state.viewed[file] then
+        return false
+      end
+    end
+  end
+
+  return has_changed_child
+end
+
+M.is_processed_dir = M.is_viewed_dir
+
 function M.comment_count(path)
   return #(state.comments[path] or {})
+end
+
+function M.unresolved_comment_count(path)
+  if not state.config.comments.enabled or not path then
+    return 0
+  end
+
+  if state.files[path] then
+    local count = 0
+    for _, comment in ipairs(state.comments[path] or {}) do
+      if comment.is_resolved ~= true then
+        count = count + 1
+      end
+    end
+    return count
+  end
+
+  if not state.dirs[path] then
+    return 0
+  end
+
+  local count = 0
+  local prefix = path .. "/"
+  for _, file in ipairs(state.file_order) do
+    if vim.startswith(file, prefix) then
+      count = count + M.unresolved_comment_count(file)
+    end
+  end
+
+  return count
 end
 
 function M.config()
@@ -2573,7 +2846,7 @@ function M.setup(opts)
       complete = function()
         return { "all", "viewed", "unviewed" }
       end,
-      desc = "Open quickfix list of PR files by viewed state",
+      desc = "Open PR file picker by viewed state",
     })
     vim.api.nvim_create_user_command(
       "PrReviewViewedNext",

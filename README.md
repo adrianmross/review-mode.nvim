@@ -40,7 +40,7 @@ With `lazy.nvim`:
     { "<leader>rN", "<cmd>PrReviewStop<cr>", desc = "Review mode stop" },
     { "<leader>rb", "<cmd>PrReviewOldToggle<cr>", desc = "Review base file" },
     { "<leader>rv", "<cmd>PrReviewViewedToggle<cr>", desc = "Review toggle viewed" },
-    { "<leader>rw", "<cmd>PrReviewViewedList<cr>", desc = "Review viewed list" },
+    { "<leader>rw", "<cmd>PrReviewViewedList<cr>", desc = "Review files" },
     { "<leader>rV", "<cmd>PrReviewViewedFeatureToggle<cr>", desc = "Review toggle viewed state" },
     { "<leader>rC", "<cmd>PrReviewCommentsToggle<cr>", desc = "Review toggle comments" },
     { "<leader>rs", "<cmd>PrReviewViewedSync<cr>", desc = "Review sync viewed" },
@@ -95,8 +95,11 @@ require("nvim-tree").setup({
 })
 ```
 
-Changed files are marked with `●`, viewed files with `✓`, files with comments
-with `◆`, and changed parent folders with `•`.
+Unviewed changed files and parent folders are marked with `☐ N`, where `N` is
+the number of unviewed changed files under that node. Viewed files and folders
+are marked with `✓`; files and folders with unresolved comments are also marked
+with `◆ N`. A folder switches to viewed after every changed file under it is
+viewed.
 
 ## Commands
 
@@ -117,7 +120,7 @@ with `◆`, and changed parent folders with `•`.
 - `:PrReviewViewedNext` marks the current PR file viewed and jumps to the next unviewed file
 - `:PrReviewViewedFeatureToggle` toggles viewed-state tracking on or off
 - `:PrReviewCommentsToggle` toggles PR comments on or off
-- `:PrReviewViewedList [all|viewed|unviewed]` opens a quickfix list of PR files
+- `:PrReviewViewedList [all|viewed|unviewed]` opens a fuzzy PR file menu; press `Space` or `t` to toggle viewed state
 - `:PrReviewViewedClear` clears local viewed state for the current PR
 - `:PrReviewViewedSync` pulls viewed state from GitHub
 - `:PrReviewViewedSyncToggle` toggles GitHub viewed-state sync
