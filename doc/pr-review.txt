@@ -74,33 +74,46 @@ COMMANDS                                                  *pr-review-commands*
 :PrReviewComment
         Create a PR comment on the current line or visual range.
 
-                                                        *:PrReviewProcessedToggle*
-:PrReviewProcessedToggle
-        Toggle processed state for the current PR file.
+                                                        *:PrReviewViewedToggle*
+:PrReviewViewedToggle
+        Toggle viewed state for the current PR file.
 
-                                                        *:PrReviewProcessingToggle*
-:PrReviewProcessingToggle
-        Toggle processing state on or off.
+                                                        *:PrReviewViewedNext*
+:PrReviewViewedNext
+        Mark the current PR file viewed and jump to the next unviewed file.
+
+                                                        *:PrReviewViewedFeatureToggle*
+:PrReviewViewedFeatureToggle
+        Toggle viewed-state tracking on or off.
 
                                                         *:PrReviewCommentsToggle*
 :PrReviewCommentsToggle
         Toggle PR comments on or off.
 
-                                                        *:PrReviewProcessedList*
-:PrReviewProcessedList [all|processed|pending]
-        Open a quickfix list of PR files by processing state.
+                                                        *:PrReviewViewedList*
+:PrReviewViewedList [all|viewed|unviewed]
+        Open a quickfix list of PR files by viewed state.
 
-                                                        *:PrReviewProcessedClear*
-:PrReviewProcessedClear
-        Clear local processing state for the current PR.
+                                                        *:PrReviewViewedClear*
+:PrReviewViewedClear
+        Clear local viewed state for the current PR.
 
-                                                        *:PrReviewProcessedSync*
-:PrReviewProcessedSync
-        Pull processing state from GitHub for the current PR.
+                                                        *:PrReviewViewedSync*
+:PrReviewViewedSync
+        Pull viewed state from GitHub for the current PR.
 
-                                                        *:PrReviewProcessedSyncToggle*
-:PrReviewProcessedSyncToggle
-        Toggle GitHub processing-state sync.
+                                                        *:PrReviewViewedSyncToggle*
+:PrReviewViewedSyncToggle
+        Toggle GitHub viewed-state sync.
+
+                                                        *:PrReviewSummary*
+:PrReviewSummary
+        Show file, comment, thread, and viewed-sync counts.
+
+PrReviewProcessedToggle, PrReviewProcessedList, PrReviewProcessedClear,
+PrReviewProcessedSync, PrReviewProcessedSyncToggle, and
+PrReviewProcessingToggle remain available as v0.3.0 compatibility aliases for
+the viewed commands above.
 
 ==============================================================================
 KEYMAPS                                                    *pr-review-keymaps*
@@ -139,9 +152,9 @@ SETUP                                                        *pr-review-setup*
     nvim_tree = {
       enabled = true,
       show_comments = true,
-      show_processing = true,
+      show_viewed = true,
     },
-    processing = {
+    viewed = {
       enabled = true,
       sync = false,
       state_path = nil,
@@ -175,11 +188,11 @@ performance.background_hunk_scan.max_files.
 External launchers can provide GH_REVIEW_REPO, GH_REVIEW_PR, GH_REVIEW_BASE,
 and GH_REVIEW_HEAD to avoid startup discovery calls.
 
-Processing state is persisted in stdpath("state")/pr-review-state.json by
-default. Set processing.sync = true or run :PrReviewProcessedSyncToggle to pull
-GitHub's PR file viewed state at startup and push local processed/pending toggles
-back to GitHub. The older viewed config key remains accepted as a compatibility
-alias.
+Viewed state is persisted in stdpath("state")/pr-review-state.json by default.
+Set viewed.sync = true or run :PrReviewViewedSyncToggle to pull GitHub's PR file
+viewed state at startup and push local viewed/unviewed toggles back to GitHub.
+The v0.3.0 processing config key and nvim_tree.show_processing option remain
+accepted as compatibility aliases.
 
 PrReviewOldToggle uses the built-in Neovim side-by-side diff backend. When
 diff.use_fast_diffopt is enabled, it temporarily applies diff.fast_diffopt while

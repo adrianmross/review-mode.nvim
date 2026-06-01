@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.3.1 - 2026-06-01
+
+### Changed
+
+- Rename the primary review-state surface from processing/processed to
+  viewed/unviewed in commands, docs, quickfix labels, notifications, and
+  `nvim-tree` marker configuration.
+- Prefer `viewed.enabled`, `viewed.sync`, and `nvim_tree.show_viewed` in plugin
+  config while keeping the v0.3.0 `processing` and `show_processing` keys as
+  compatibility aliases.
+- Load GitHub review threads through GraphQL before falling back to the older PR
+  comments REST endpoint, preserving thread metadata for summaries and replies.
+
+### Added
+
+- Add `PrReviewViewedNext` to mark the current file viewed and jump to the next
+  unviewed PR file.
+- Add `PrReviewSummary` for file, comment, thread, and viewed-sync counts.
+- Persist and retry queued GitHub viewed-state mutations when sync is enabled
+  but a mutation fails.
+
 ## v0.3.0 - 2026-06-01
 
 ### Added
