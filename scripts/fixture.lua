@@ -24,9 +24,27 @@ local function has_icon(icons, icon)
   return false
 end
 
+local function has_icon_hl(icons, icon, hl)
+  for _, item in ipairs(icons or {}) do
+    if item.str == icon and vim.tbl_contains(item.hl or {}, hl) then
+      return true
+    end
+  end
+  return false
+end
+
 local function has_value(values, value)
   for _, item in ipairs(values or {}) do
     if item == value then
+      return true
+    end
+  end
+  return false
+end
+
+local function has_line(lines, needle)
+  for _, line in ipairs(lines or {}) do
+    if line:find(needle, 1, true) then
       return true
     end
   end
@@ -117,8 +135,8 @@ end, "PR comments did not load")
 
 pr.summary()
 assert(last_notification():find("Files: 1 viewed, 1 unviewed, 2 total", 1, true), "summary file counts were wrong")
-assert(last_notification():find("Comments: 2", 1, true), "summary comment count was wrong")
-assert(last_notification():find("Threads: 2 total, 1 unresolved", 1, true), "summary thread counts were wrong")
+assert(last_notification():find("Comments: 3", 1, true), "summary comment count was wrong")
+assert(last_notification():find("Threads: 3 total, 2 unresolved", 1, true), "summary thread counts were wrong")
 
 vim.cmd.edit("file.txt")
 wait_for(function()
@@ -138,13 +156,22 @@ pr.toggle_viewed()
 assert(not pr.is_viewed_file("file.txt"), "viewed toggle did not mark file unviewed")
 
 pr.list_viewed("unviewed")
-local unviewed_qf = vim.fn.getqflist({ items = 1, title = 1 })
-assert(#unviewed_qf.items == 2, "unviewed list did not include both unviewed files")
-assert(unviewed_qf.items[1].text:find("%[unviewed%] file.txt"), "unviewed list label was wrong")
+local unviewed_menu = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+assert(has_line(unviewed_menu, "PR review files [unviewed]"), "unviewed picker title was wrong")
+assert(has_line(unviewed_menu, "☐ 1 ◆ 1 file.txt"), "unviewed picker file label was wrong")
+assert(has_line(unviewed_menu, "☐ 1 ◆ 1 nested/other.txt"), "unviewed picker nested file label was wrong")
+vim.api.nvim_win_set_cursor(0, { 5, 0 })
+vim.api.nvim_feedkeys("t", "x", false)
+wait_for(function()
+  return pr.is_viewed_file("file.txt")
+end, "viewed picker toggle did not mark selected file viewed")
+pr.toggle_viewed("file.txt")
+assert(not pr.is_viewed_file("file.txt"), "viewed picker toggle restore failed")
 pr.list_viewed("viewed")
-local viewed_qf = vim.fn.getqflist({ items = 1, title = 1 })
-assert(#viewed_qf.items == 0, "viewed list should be empty")
-vim.cmd.cclose()
+local viewed_menu = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+assert(has_line(viewed_menu, "PR review files [viewed]"), "viewed picker title was wrong")
+assert(has_line(viewed_menu, "No matching PR files"), "viewed picker should be empty")
+vim.api.nvim_win_close(0, true)
 
 pr.config().viewed.sync = false
 pr.stop()
@@ -190,28 +217,61 @@ local decorator = setmetatable({}, { __index = Decorator })
 decorator:new()
 local tree_node = { absolute_path = vim.fs.joinpath(pr.root(), "file.txt") }
 local icons = decorator:icons(tree_node)
-assert(has_icon(icons, "◆"), "nvim-tree comment marker missing")
+assert(pr.unresolved_comment_count("file.txt") == 1, "unresolved file comment count was wrong")
+assert(has_icon(icons, "◆ 1"), "nvim-tree comment marker missing")
 assert(has_icon(icons, "✓"), "nvim-tree viewed marker missing")
-assert(not has_icon(icons, "●"), "nvim-tree changed marker shown for viewed file")
+assert(has_icon_hl(icons, "✓", "PrReviewTreeViewed"), "nvim-tree viewed marker highlight was wrong")
+assert(not has_icon(icons, "☐"), "nvim-tree changed marker shown for viewed file")
+assert(decorator:highlight_group(tree_node) == "PrReviewTreeViewed", "nvim-tree viewed file highlight was wrong")
 
 local unviewed_tree_node = { absolute_path = vim.fs.joinpath(pr.root(), "nested/other.txt") }
 icons = decorator:icons(unviewed_tree_node)
-assert(has_icon(icons, "●"), "nvim-tree changed marker missing for unviewed file")
+assert(pr.unresolved_comment_count("nested/other.txt") == 1, "unresolved nested file comment count was wrong")
+assert(has_icon(icons, "◆ 1"), "nvim-tree nested comment marker missing")
+assert(pr.unviewed_count("nested/other.txt") == 1, "unviewed file count was wrong")
+assert(has_icon(icons, "☐ 1"), "nvim-tree changed marker missing for unviewed file")
+assert(has_icon_hl(icons, "☐ 1", "PrReviewTreeChanged"), "nvim-tree changed marker highlight was wrong")
 assert(not has_icon(icons, "✓"), "nvim-tree viewed marker shown for unviewed file")
+assert(
+  decorator:highlight_group(unviewed_tree_node) == "PrReviewTreeChanged",
+  "nvim-tree changed file highlight was wrong"
+)
 
-local dir_icons = decorator:icons({ absolute_path = vim.fs.joinpath(pr.root(), "nested") })
-assert(has_icon(dir_icons, "•"), "nvim-tree changed folder marker missing")
+local dir_node = { absolute_path = vim.fs.joinpath(pr.root(), "nested") }
+local dir_icons = decorator:icons(dir_node)
+assert(pr.unresolved_comment_count("nested") == 1, "unresolved folder comment count was wrong")
+assert(has_icon(dir_icons, "◆ 1"), "nvim-tree folder comment marker missing")
+assert(pr.unviewed_count("nested") == 1, "unviewed folder count was wrong")
+assert(has_icon(dir_icons, "☐ 1"), "nvim-tree changed folder marker missing")
+assert(has_icon_hl(dir_icons, "☐ 1", "PrReviewTreeChanged"), "nvim-tree changed folder marker highlight was wrong")
+assert(not pr.is_viewed_dir("nested"), "viewed dir state was true before all children were viewed")
+assert(decorator:highlight_group(dir_node) == "PrReviewTreeChanged", "nvim-tree changed folder highlight was wrong")
+
+pr.mark_viewed("nested/other.txt", { silent = true })
+wait_for(function()
+  return pr.is_viewed_dir("nested")
+end, "viewed dir state did not cascade after all children were viewed")
+assert(pr.unviewed_count("nested") == 0, "unviewed folder count did not clear after children were viewed")
+dir_icons = decorator:icons(dir_node)
+assert(has_icon(dir_icons, "◆ 1"), "nvim-tree viewed folder comment marker missing")
+assert(has_icon(dir_icons, "✓"), "nvim-tree viewed folder marker missing")
+assert(has_icon_hl(dir_icons, "✓", "PrReviewTreeViewed"), "nvim-tree viewed folder marker highlight was wrong")
+assert(decorator:highlight_group(dir_node) == "PrReviewTreeViewed", "nvim-tree viewed folder highlight was wrong")
 
 pr.config().nvim_tree.show_viewed = false
 icons = decorator:icons(tree_node)
-assert(has_icon(icons, "◆"), "nvim-tree comment marker missing when viewed marker disabled")
-assert(has_icon(icons, "●"), "nvim-tree changed marker missing when viewed marker disabled")
+assert(has_icon(icons, "◆ 1"), "nvim-tree comment marker missing when viewed marker disabled")
+assert(has_icon(icons, "☐"), "nvim-tree changed marker missing when viewed marker disabled")
 assert(not has_icon(icons, "✓"), "nvim-tree viewed marker shown when disabled")
+dir_icons = decorator:icons(dir_node)
+assert(has_icon(dir_icons, "◆ 1"), "nvim-tree folder comment marker missing when viewed marker disabled")
+assert(has_icon(dir_icons, "☐"), "nvim-tree changed folder marker missing when viewed marker disabled")
+assert(not has_icon(dir_icons, "✓"), "nvim-tree viewed folder marker shown when disabled")
 pr.config().nvim_tree.show_viewed = true
 
 pr.config().nvim_tree.show_comments = false
 icons = decorator:icons(tree_node)
-assert(not has_icon(icons, "◆"), "nvim-tree comment marker shown when comments disabled")
+assert(not has_icon(icons, "◆ 1"), "nvim-tree comment marker shown when comments disabled")
 assert(has_icon(icons, "✓"), "nvim-tree viewed marker missing when comments disabled")
 pr.config().nvim_tree.show_comments = true
 

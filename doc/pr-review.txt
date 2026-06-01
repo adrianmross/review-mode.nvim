@@ -92,7 +92,8 @@ COMMANDS                                                  *pr-review-commands*
 
                                                         *:PrReviewViewedList*
 :PrReviewViewedList [all|viewed|unviewed]
-        Open a quickfix list of PR files by viewed state.
+        Open a fuzzy PR file menu by viewed state. Press Space or t to toggle
+        viewed state for the selected file.
 
                                                         *:PrReviewViewedClear*
 :PrReviewViewedClear
@@ -184,6 +185,12 @@ without waiting for GitHub metadata. Hunk locations are loaded lazily per file,
 with immediate focused-file prefetch, opportunistic gitsigns.nvim hunk-cache
 reuse, and an optional delayed background scan for PRs under
 performance.background_hunk_scan.max_files.
+
+The nvim-tree integration marks unviewed changed files and parent folders with
+`☐ N`, where `N` is the number of unviewed changed files under that node.
+Viewed files and folders use `✓`, and files and folders with unresolved
+comments also use `◆ N`. A folder switches to viewed after every changed file
+under it is viewed.
 
 External launchers can provide GH_REVIEW_REPO, GH_REVIEW_PR, GH_REVIEW_BASE,
 and GH_REVIEW_HEAD to avoid startup discovery calls.
