@@ -210,3 +210,23 @@ previous `diffopt` when the split closes.
 
 GitHub only accepts review comments on diff lines. If you comment on a line that
 is not part of the PR diff, GitHub may reject the request.
+
+## Release Workflow
+
+Pull requests run the same validation as local development with
+`devenv test --no-eval-cache`. Behavior, command, config, validation, and
+release-infrastructure changes also need a release-bearing Conventional Commit
+such as `fix:`/`feat:`/`perf:`, a `.changeset/*.md` file, or a direct
+`CHANGELOG.md` update so release intent is visible during review.
+
+Release Please owns the final release PR, changelog update, tag, and GitHub
+Release. The current released version is tracked in
+`.release-please-manifest.json`; `scripts/release-check.sh` verifies that the
+manifest, latest changelog section, and release tag agree.
+
+Local release checks:
+
+```sh
+devenv test --no-eval-cache
+bash scripts/release-check.sh
+```

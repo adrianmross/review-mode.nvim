@@ -21,6 +21,7 @@ nvim --headless -u NONE -i NONE \
 
 stylua --check lua plugin scripts/fixture.lua scripts/rest_fallback_fixture.lua
 git diff --check
+bash scripts/release-check.sh
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/pr-review-nvim-test.XXXXXX")"
 mkdir -p "$tmp/bin" "$tmp/repo" "$tmp/cache" "$tmp/state"
