@@ -39,6 +39,8 @@ With `lazy.nvim`:
     { "<leader>rm", "<cmd>PrReviewStart<cr>", desc = "Review mode" },
     { "<leader>rN", "<cmd>PrReviewStop<cr>", desc = "Review mode stop" },
     { "<leader>rd", "<cmd>PrReviewOldToggle<cr>", desc = "Review diff" },
+    { "<leader>rD", "<cmd>PrReviewDiffLayoutToggle<cr>", desc = "Review diff layout" },
+    { "<leader>rf", "<cmd>PrReviewDiffFullToggle<cr>", desc = "Review diff full file" },
     { "<leader>rv", "<cmd>PrReviewViewedToggle<cr>", desc = "Toggle file viewed" },
     { "<leader>rl", "<cmd>PrReviewViewedList<cr>", desc = "Review viewed files list" },
     { "<leader>rV", "<cmd>PrReviewViewedFeatureToggle<cr>", desc = "Review toggle viewed state" },
@@ -113,6 +115,8 @@ viewed.
 - `:PrReviewNextFile` jumps to the next changed file
 - `:PrReviewPrevFile` jumps to the previous changed file
 - `:PrReviewOldToggle` toggles the base version of the current file in a diff split
+- `:PrReviewDiffLayoutToggle` toggles the open diff between side-by-side and unified layout
+- `:PrReviewDiffFullToggle` toggles the open diff between condensed context and full-file context
 - `:PrReviewThread` shows comments on the current line
 - `:PrReviewReply` replies to the latest comment on the current line
 - `:PrReviewComment` creates a PR comment on the current line or visual range
@@ -151,6 +155,9 @@ require("pr_review").setup({
   },
   diff = {
     fast_diffopt = "internal,filler,closeoff,indent-heuristic,linematch:0",
+    full_file = false,
+    layout = "side_by_side",
+    unified_context = 3,
     use_fast_diffopt = true,
   },
   gitsigns = {
@@ -200,10 +207,14 @@ default. Set `viewed.sync = true` or run `:PrReviewViewedSyncToggle` to pull
 GitHub's PR file viewed state at startup and push local viewed/unviewed toggles
 back to GitHub.
 
-The built-in old-version split remains the default backend. When
-`diff.use_fast_diffopt` is enabled, `PrReviewOldToggle` temporarily applies
-`diff.fast_diffopt` while creating its side-by-side diff, then restores the
-previous `diffopt` when the split closes.
+The built-in side-by-side old-version split remains the default diff backend.
+Set `diff.layout = "unified"` or run `:PrReviewDiffLayoutToggle` to use an
+inline unified diff buffer instead. Set `diff.full_file = true` or run
+`:PrReviewDiffFullToggle` to show full-file context; condensed unified diffs
+use `diff.unified_context` common lines around each hunk, and condensed
+side-by-side diffs fold unchanged regions. When `diff.use_fast_diffopt` is
+enabled, side-by-side diffs temporarily apply `diff.fast_diffopt`, then restore
+the previous `diffopt` when the split closes.
 
 ## Notes
 

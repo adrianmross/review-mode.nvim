@@ -51,6 +51,16 @@ local function has_line(lines, needle)
   return false
 end
 
+local function buffer_lines_matching(pattern)
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    local name = vim.api.nvim_buf_get_name(buf)
+    if name:find(pattern, 1) then
+      return vim.api.nvim_buf_get_lines(buf, 0, -1, false), buf
+    end
+  end
+  return nil, nil
+end
+
 local notifications = {}
 local original_notify = vim.notify
 vim.notify = function(message, level, opts)
@@ -98,6 +108,8 @@ local commands = vim.api.nvim_get_commands({})
 assert(commands.PrReviewViewedToggle, "PrReviewViewedToggle command missing")
 assert(commands.PrReviewViewedList, "PrReviewViewedList command missing")
 assert(commands.PrReviewViewedFeatureToggle, "PrReviewViewedFeatureToggle command missing")
+assert(commands.PrReviewDiffLayoutToggle, "PrReviewDiffLayoutToggle command missing")
+assert(commands.PrReviewDiffFullToggle, "PrReviewDiffFullToggle command missing")
 assert(not commands.PrReviewProcessedToggle, "old viewed toggle command alias should be removed")
 assert(not commands.PrReviewProcessedList, "old viewed list command alias should be removed")
 assert(not commands.PrReviewProcessedClear, "old viewed clear command alias should be removed")
@@ -299,15 +311,30 @@ end, "old split did not open")
 assert(vim.o.diffopt:find("linematch:0", 1, true), "fast diffopt not applied")
 
 local found = false
-for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-  local name = vim.api.nvim_buf_get_name(buf)
-  if name:find("pr%-base://", 1) then
-    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-    assert(lines[1] == "one" and lines[2] == "" and lines[3] == "base", "base content not preserved")
-    found = true
-  end
+local base_lines = buffer_lines_matching("pr%-base://")
+if base_lines then
+  assert(base_lines[1] == "one" and base_lines[2] == "" and base_lines[3] == "base", "base content not preserved")
+  found = true
 end
 assert(found, "base buffer not found")
+
+pr.toggle_diff_layout()
+wait_for(function()
+  return buffer_lines_matching("pr%-diff://") ~= nil
+end, "unified diff did not open")
+local condensed_lines, diff_buf = buffer_lines_matching("pr%-diff://")
+assert(diff_buf and vim.bo[diff_buf].filetype == "diff", "unified diff buffer filetype was wrong")
+assert(has_line(condensed_lines, "diff --git base/file.txt head/file.txt"), "unified diff header was wrong")
+assert(has_line(condensed_lines, "-base"), "unified diff old line missing")
+assert(has_line(condensed_lines, "+base changed"), "unified diff new line missing")
+assert(not has_line(condensed_lines, "same5"), "condensed unified diff included distant common line")
+
+pr.toggle_diff_full_file()
+wait_for(function()
+  local full_lines = buffer_lines_matching("pr%-diff://")
+  return full_lines and #full_lines > #condensed_lines and has_line(full_lines, "same5")
+end, "full unified diff did not include distant common line")
+assert(pr.config().diff.full_file, "diff full-file toggle did not update config")
 
 pr.old_toggle()
 wait_for(function()
