@@ -7,6 +7,8 @@ function Decorator:new()
   self.highlight_range = "name"
   self.icon_placement = "after"
   self.changed_icon = { str = "●", hl = { "DiagnosticWarn" } }
+  self.processed_icon = { str = "✓", hl = { "DiagnosticOk" } }
+  self.comment_icon = { str = "◆", hl = { "DiagnosticInfo" } }
   self.folder_icon = { str = "•", hl = { "DiagnosticInfo" } }
 end
 
@@ -44,7 +46,17 @@ function Decorator:icons(node)
   end
 
   if state.is_changed_file(rel) then
-    return { self.changed_icon }
+    local config = state.config()
+    local icons = {}
+    if config.nvim_tree.show_comments and state.comment_count(rel) > 0 then
+      icons[#icons + 1] = self.comment_icon
+    end
+    if config.nvim_tree.show_processing and state.is_processed_file(rel) then
+      icons[#icons + 1] = self.processed_icon
+    else
+      icons[#icons + 1] = self.changed_icon
+    end
+    return icons
   end
 
   if state.is_changed_dir(rel) then
@@ -61,6 +73,10 @@ function Decorator:highlight_group(node)
   end
 
   if state.is_changed_file(rel) then
+    local config = state.config()
+    if config.nvim_tree.show_processing and state.is_processed_file(rel) then
+      return "DiagnosticOk"
+    end
     return "DiagnosticWarn"
   end
 

@@ -1,6 +1,20 @@
 # Changelog
 
-## Unreleased
+## v0.3.0 - 2026-06-01
+
+### Added
+
+- Track processed/pending state for changed PR files, persisted per PR and
+  exposed through `PrReviewProcessedToggle`, `PrReviewProcessedList`, and
+  `PrReviewProcessedClear`.
+- Add runtime toggles for processing state and PR comments.
+- Add optional processing-state sync backed by GitHub's PR file state through
+  GraphQL with `processing.sync`, `PrReviewProcessedSync`, and
+  `PrReviewProcessedSyncToggle`.
+- Add explicit hunk navigation commands and PR comment navigation commands for
+  `]h`/`[h` and `]c`/`[c` style mappings.
+- Show distinct PR comment gutter signs in normal buffers and expose comment and
+  processing-state markers through the `nvim-tree` decorator.
 
 ## v0.2.1 - 2026-06-01
 

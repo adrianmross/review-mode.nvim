@@ -7,6 +7,9 @@ local defaults = {
   comments = {
     enabled = true,
     cache_ttl_seconds = 300,
+    sign_text = "◆",
+    sign_hl_group = "DiagnosticInfo",
+    virtual_text = true,
   },
   diff = {
     fast_diffopt = "internal,filler,closeoff,indent-heuristic,linematch:0",
@@ -17,6 +20,13 @@ local defaults = {
   },
   nvim_tree = {
     enabled = true,
+    show_comments = true,
+    show_processing = true,
+  },
+  processing = {
+    enabled = true,
+    sync = false,
+    state_path = nil,
   },
   performance = {
     ui_refresh_debounce_ms = 50,
@@ -35,6 +45,7 @@ local defaults = {
   },
   commands = true,
 }
+defaults.viewed = vim.deepcopy(defaults.processing)
 
 local state = {
   active = false,
@@ -58,6 +69,11 @@ local state = {
   background_hunk_scan_loading = false,
   comments = {},
   comments_loading = false,
+  viewed = {},
+  viewed_order = {},
+  viewed_store = nil,
+  viewed_loading = false,
+  pr_node_id = nil,
   generation = 0,
   maps_loaded = false,
   maps_loading = false,
@@ -71,6 +87,26 @@ local state = {
 }
 
 local setup_done = false
+
+local function normalize_config(opts)
+  opts = opts or {}
+  local config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts)
+
+  if opts.viewed and opts.processing then
+    config.processing = vim.tbl_deep_extend("force", config.processing or {}, opts.viewed, opts.processing)
+  elseif opts.viewed then
+    config.processing = vim.tbl_deep_extend("force", config.processing or {}, opts.viewed)
+  end
+
+  config.viewed = config.processing
+
+  if opts.nvim_tree and opts.nvim_tree.show_viewed ~= nil and opts.nvim_tree.show_processing == nil then
+    config.nvim_tree.show_processing = opts.nvim_tree.show_viewed
+  end
+  config.nvim_tree.show_viewed = config.nvim_tree.show_processing
+
+  return config
+end
 
 local function env_value(name)
   local value = vim.env[name]
@@ -242,6 +278,10 @@ local function reset_review_data()
   reset_changed_data()
   state.comments = {}
   state.comments_loading = false
+  state.viewed = {}
+  state.viewed_order = {}
+  state.viewed_loading = false
+  state.pr_node_id = nil
 end
 
 local function split_blob_lines(content)
@@ -252,12 +292,7 @@ local function split_blob_lines(content)
   return lines
 end
 
-local function cache_path(key)
-  return vim.fs.joinpath(cache_dir, key:gsub("[^%w_.-]", "_") .. ".json")
-end
-
-local function read_comment_cache(key)
-  local path = cache_path(key)
+local function read_json_file(path)
   local fd = vim.uv.fs_open(path, "r", 420)
   if not fd then
     return nil
@@ -275,13 +310,29 @@ local function read_comment_cache(key)
   if not ok or type(decoded) ~= "table" then
     return nil
   end
+
   return decoded
+end
+
+local function write_json_file(path, value)
+  local dir = vim.fs.dirname(path)
+  if dir then
+    vim.fn.mkdir(dir, "p")
+  end
+  vim.fn.writefile({ vim.json.encode(value) }, path)
+end
+
+local function cache_path(key)
+  return vim.fs.joinpath(cache_dir, key:gsub("[^%w_.-]", "_") .. ".json")
+end
+
+local function read_comment_cache(key)
+  return read_json_file(cache_path(key))
 end
 
 local function write_comment_cache(key, grouped)
   pcall(function()
-    vim.fn.mkdir(cache_dir, "p")
-    vim.fn.writefile({ vim.json.encode({ fetched_at = os.time(), grouped = grouped }) }, cache_path(key))
+    write_json_file(cache_path(key), { fetched_at = os.time(), grouped = grouped })
   end)
 end
 
@@ -309,6 +360,99 @@ local function hydrate_comments()
 
   state.comments = cached.grouped
   return (os.time() - tonumber(cached.fetched_at or 0)) < state.config.comments.cache_ttl_seconds
+end
+
+local function viewed_state_path()
+  return state.config.viewed.state_path or vim.fs.joinpath(vim.fn.stdpath("state"), "pr-review-state.json")
+end
+
+local function load_viewed_store()
+  if state.viewed_store then
+    return state.viewed_store
+  end
+
+  state.viewed_store = read_json_file(viewed_state_path()) or {}
+  return state.viewed_store
+end
+
+local function viewed_state_entry()
+  local key = cache_key()
+  if not key then
+    return nil
+  end
+
+  local store = load_viewed_store()
+  store[key] = store[key] or { viewed = {}, order = {} }
+  store[key].viewed = store[key].viewed or {}
+  store[key].order = store[key].order or {}
+  return store[key]
+end
+
+local function add_viewed_order(path)
+  if vim.tbl_contains(state.viewed_order, path) then
+    return
+  end
+  state.viewed_order[#state.viewed_order + 1] = path
+end
+
+local function remove_viewed_order(path)
+  for index, item in ipairs(state.viewed_order) do
+    if item == path then
+      table.remove(state.viewed_order, index)
+      return
+    end
+  end
+end
+
+local function persist_viewed_state()
+  if not state.config.viewed.enabled then
+    return
+  end
+
+  local entry = viewed_state_entry()
+  if not entry then
+    return
+  end
+
+  entry.viewed = state.viewed
+  entry.order = state.viewed_order
+  local ok, err = pcall(write_json_file, viewed_state_path(), load_viewed_store())
+  if not ok then
+    vim.notify("PR review processing state: " .. tostring(err), vim.log.levels.WARN)
+  end
+end
+
+local function load_viewed_state()
+  state.viewed = {}
+  state.viewed_order = {}
+
+  if not state.config.viewed.enabled then
+    return
+  end
+
+  local entry = viewed_state_entry()
+  if not entry then
+    return
+  end
+
+  state.viewed = vim.deepcopy(entry.viewed or {})
+  state.viewed_order = vim.deepcopy(entry.order or {})
+end
+
+local function set_viewed_path(path, viewed)
+  if not path or not state.config.viewed.enabled then
+    return false
+  end
+
+  if viewed then
+    state.viewed[path] = true
+    add_viewed_order(path)
+    return true
+  end
+
+  state.viewed[path] = nil
+  remove_viewed_order(path)
+  return false
 end
 
 local function buf_relpath(bufnr)
@@ -370,6 +514,40 @@ local function comments_for_line(path, line)
   return results
 end
 
+local function comments_for_path(path)
+  return state.comments[path] or {}
+end
+
+local function comment_line(comment)
+  return tonumber(comment.line) or tonumber(comment.original_line) or tonumber(comment.start_line)
+end
+
+local function comment_positions()
+  local positions = {}
+  for _, path in ipairs(state.file_order) do
+    for _, comment in ipairs(state.comments[path] or {}) do
+      local line = comment_line(comment)
+      if line then
+        positions[#positions + 1] = {
+          path = path,
+          line = line,
+        }
+      end
+    end
+  end
+
+  table.sort(positions, function(left, right)
+    local left_index = state.file_index[left.path] or math.huge
+    local right_index = state.file_index[right.path] or math.huge
+    if left_index == right_index then
+      return left.line < right.line
+    end
+    return left_index < right_index
+  end)
+
+  return positions
+end
+
 local function comment_summary(comment)
   local body = trim((comment.body or ""):match("([^\n\r]+)") or "")
   if body == "" then
@@ -416,13 +594,14 @@ local function annotate_buffer(bufnr)
   end
 
   for line, line_comments in pairs(grouped) do
+    local sign_hl = state.config.comments.sign_hl_group or "DiagnosticInfo"
     vim.api.nvim_buf_set_extmark(bufnr, ns, line - 1, 0, {
-      sign_text = "●",
-      sign_hl_group = "DiagnosticInfo",
-      number_hl_group = "DiagnosticInfo",
-      virt_text = {
+      sign_text = state.config.comments.sign_text or "◆",
+      sign_hl_group = sign_hl,
+      number_hl_group = sign_hl,
+      virt_text = state.config.comments.virtual_text and {
         { " " .. comment_summary(line_comments[#line_comments]), "DiagnosticVirtualTextInfo" },
-      },
+      } or nil,
       virt_text_pos = "eol",
       priority = 160,
     })
@@ -503,6 +682,225 @@ local function load_comments_async()
       write_comment_cache(key, state.comments)
     end
     schedule_comments_ui_refresh()
+  end)
+end
+
+local function repo_parts()
+  local owner, name = tostring(state.repo or ""):match("^([^/]+)/(.+)$")
+  return owner, name
+end
+
+local function github_viewed_files_async(generation, after, viewed, callback)
+  local owner, name = repo_parts()
+  if not owner or not name or not state.pr then
+    callback(nil, "could not determine GitHub repository or PR")
+    return
+  end
+
+  local query = [[
+query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      id
+      files(first: 100, after: $after) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        nodes {
+          path
+          viewerViewedState
+        }
+      }
+    }
+  }
+}
+]]
+
+  local args = {
+    "api",
+    "graphql",
+    "-f",
+    "query=" .. query,
+    "-F",
+    "owner=" .. owner,
+    "-F",
+    "name=" .. name,
+    "-F",
+    "number=" .. tostring(state.pr),
+  }
+
+  if after then
+    vim.list_extend(args, { "-F", "after=" .. after })
+  end
+
+  gh_json_async(args, function(result, err)
+    if not is_current(generation) then
+      return
+    end
+
+    if not result then
+      callback(nil, err or "GitHub processing state query failed")
+      return
+    end
+
+    local pr = result.data and result.data.repository and result.data.repository.pullRequest
+    local files = pr and pr.files
+    if not pr or not files then
+      callback(nil, "GitHub processing state query returned no PR files")
+      return
+    end
+
+    state.pr_node_id = pr.id
+    for _, file in ipairs(files.nodes or {}) do
+      if file.path and file.viewerViewedState == "VIEWED" then
+        viewed[file.path] = true
+      end
+    end
+
+    local page_info = files.pageInfo or {}
+    if page_info.hasNextPage and page_info.endCursor then
+      github_viewed_files_async(generation, page_info.endCursor, viewed, callback)
+      return
+    end
+
+    callback(viewed, nil)
+  end)
+end
+
+local function refresh_viewed_order()
+  local ordered = {}
+  for _, path in ipairs(state.file_order) do
+    if state.viewed[path] then
+      ordered[#ordered + 1] = path
+    end
+  end
+  state.viewed_order = ordered
+end
+
+local function sync_viewed_from_github_async(generation, force)
+  if
+    not state.config.viewed.enabled
+    or (not force and not state.config.viewed.sync)
+    or state.viewed_loading
+    or not state.repo
+    or not state.pr
+  then
+    return
+  end
+
+  state.viewed_loading = true
+  github_viewed_files_async(generation, nil, {}, function(viewed, err)
+    state.viewed_loading = false
+    if not is_current(generation) then
+      return
+    end
+
+    if not viewed then
+      vim.notify("PR review processing sync failed: " .. tostring(err or "unknown error"), vim.log.levels.WARN)
+      return
+    end
+
+    state.viewed = viewed
+    refresh_viewed_order()
+    persist_viewed_state()
+    schedule_comments_ui_refresh()
+  end)
+end
+
+local function github_pr_node_id_async(generation, callback)
+  if state.pr_node_id then
+    callback(state.pr_node_id, nil)
+    return
+  end
+
+  local owner, name = repo_parts()
+  if not owner or not name or not state.pr then
+    callback(nil, "could not determine GitHub repository or PR")
+    return
+  end
+
+  local query = [[
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      id
+    }
+  }
+}
+]]
+
+  gh_json_async({
+    "api",
+    "graphql",
+    "-f",
+    "query=" .. query,
+    "-F",
+    "owner=" .. owner,
+    "-F",
+    "name=" .. name,
+    "-F",
+    "number=" .. tostring(state.pr),
+  }, function(result, err)
+    if not is_current(generation) then
+      return
+    end
+
+    local pr_id = result
+      and result.data
+      and result.data.repository
+      and result.data.repository.pullRequest
+      and result.data.repository.pullRequest.id
+    state.pr_node_id = pr_id
+    callback(pr_id, pr_id and nil or err or "GitHub PR id query failed")
+  end)
+end
+
+local function sync_viewed_path_to_github_async(path, viewed)
+  if not state.config.viewed.enabled or not state.config.viewed.sync or not path then
+    return
+  end
+
+  local generation = state.generation
+  github_pr_node_id_async(generation, function(pr_id, err)
+    if not pr_id then
+      vim.notify("PR review processing sync failed: " .. tostring(err or "unknown error"), vim.log.levels.WARN)
+      return
+    end
+
+    local field = viewed and "markFileAsViewed" or "unmarkFileAsViewed"
+    local mutation = string.format(
+      [[
+mutation($pullRequestId: ID!, $path: String!) {
+  %s(input: {pullRequestId: $pullRequestId, path: $path}) {
+    clientMutationId
+  }
+}
+]],
+      field
+    )
+
+    gh_json_async({
+      "api",
+      "graphql",
+      "-f",
+      "query=" .. mutation,
+      "-F",
+      "pullRequestId=" .. pr_id,
+      "-F",
+      "path=" .. path,
+    }, function(result, mutation_err)
+      if not is_current(generation) then
+        return
+      end
+
+      if not result then
+        vim.notify(
+          "PR review processing sync failed: " .. tostring(mutation_err or "unknown error"),
+          vim.log.levels.WARN
+        )
+      end
+    end)
   end)
 end
 
@@ -1038,6 +1436,59 @@ local function jump_hunk(delta)
   jump_changed_file(delta)
 end
 
+local function jump_comment(delta)
+  if not ensure_active() then
+    return
+  end
+
+  if not state.config.comments.enabled then
+    vim.notify("PR review comments are disabled", vim.log.levels.WARN)
+    return
+  end
+
+  if vim.tbl_isempty(state.comments) then
+    hydrate_comments()
+    load_comments_async()
+  end
+
+  local positions = comment_positions()
+  if #positions == 0 then
+    vim.notify(
+      state.comments_loading and "PR review comments are still loading" or "No PR comments loaded",
+      vim.log.levels.INFO
+    )
+    return
+  end
+
+  local path = current_relpath()
+  local current_line = vim.api.nvim_win_get_cursor(0)[1]
+  local current_index = current_file_index(path) or (delta > 0 and 0 or math.huge)
+  local target = nil
+
+  if delta > 0 then
+    for _, position in ipairs(positions) do
+      local index = state.file_index[position.path] or math.huge
+      if index > current_index or (index == current_index and position.line > current_line) then
+        target = position
+        break
+      end
+    end
+    target = target or positions[1]
+  else
+    for index = #positions, 1, -1 do
+      local position = positions[index]
+      local file_index = state.file_index[position.path] or 0
+      if file_index < current_index or (file_index == current_index and position.line < current_line) then
+        target = position
+        break
+      end
+    end
+    target = target or positions[#positions]
+  end
+
+  jump_to_path(target.path, target.line)
+end
+
 local function set_gitsigns_base()
   if not state.config.gitsigns.enabled then
     return
@@ -1118,8 +1569,10 @@ local function load_review_async(generation, opts)
       return
     end
 
+    load_viewed_state()
     refresh_tree()
     annotate_open_buffers()
+    sync_viewed_from_github_async(generation)
     prefetch_current_buffer()
     prefetch_near_path(state.file_order[1])
     start_background_hunk_scan()
@@ -1230,6 +1683,9 @@ function M.start()
     state.head = state.head or meta.headRefOid
     state.metadata_loaded = true
 
+    load_viewed_state()
+    schedule_comments_ui_refresh()
+    sync_viewed_from_github_async(generation)
     load_comments_async()
     if not review_loading_started then
       set_gitsigns_base()
@@ -1339,12 +1795,23 @@ function M.old_toggle()
   end)
 end
 
-function M.next_change()
+function M.next_hunk()
   jump_hunk(1)
 end
 
-function M.prev_change()
+function M.prev_hunk()
   jump_hunk(-1)
+end
+
+M.next_change = M.next_hunk
+M.prev_change = M.prev_hunk
+
+function M.next_comment()
+  jump_comment(1)
+end
+
+function M.prev_comment()
+  jump_comment(-1)
 end
 
 function M.next_file()
@@ -1354,6 +1821,137 @@ end
 function M.prev_file()
   jump_changed_file(-1)
 end
+
+function M.toggle_viewed(path)
+  if not ensure_active() then
+    return
+  end
+
+  if not state.config.viewed.enabled then
+    vim.notify("PR review processing state is disabled", vim.log.levels.WARN)
+    return
+  end
+
+  path = path or current_relpath()
+  if not path or not state.files[path] then
+    vim.notify("PR review processing state: current buffer is not a changed PR file", vim.log.levels.WARN)
+    return
+  end
+
+  local viewed = not state.viewed[path]
+  set_viewed_path(path, viewed)
+  persist_viewed_state()
+  sync_viewed_path_to_github_async(path, viewed)
+  schedule_comments_ui_refresh()
+  vim.notify((viewed and "Marked processed: " or "Marked pending: ") .. path, vim.log.levels.INFO)
+end
+
+M.toggle_processed = M.toggle_viewed
+
+function M.clear_viewed()
+  if not ensure_active() then
+    return
+  end
+
+  state.viewed = {}
+  state.viewed_order = {}
+  persist_viewed_state()
+  schedule_comments_ui_refresh()
+  vim.notify("Cleared PR processing state")
+end
+
+M.clear_processed = M.clear_viewed
+
+function M.sync_viewed()
+  if not ensure_active() then
+    return
+  end
+
+  if not state.config.viewed.enabled then
+    vim.notify("PR review processing state is disabled", vim.log.levels.WARN)
+    return
+  end
+
+  sync_viewed_from_github_async(state.generation, true)
+end
+
+M.sync_processed = M.sync_viewed
+
+function M.toggle_viewed_sync()
+  state.config.viewed.sync = not state.config.viewed.sync
+  vim.notify("PR review GitHub processing sync " .. (state.config.viewed.sync and "enabled" or "disabled"))
+  if state.config.viewed.sync and state.active then
+    sync_viewed_from_github_async(state.generation)
+  end
+end
+
+M.toggle_processed_sync = M.toggle_viewed_sync
+
+function M.toggle_processing()
+  state.config.processing.enabled = not state.config.processing.enabled
+  state.config.viewed = state.config.processing
+
+  if state.config.processing.enabled then
+    if state.active then
+      load_viewed_state()
+      sync_viewed_from_github_async(state.generation)
+    end
+  else
+    state.viewed = {}
+    state.viewed_order = {}
+  end
+
+  schedule_comments_ui_refresh()
+  vim.notify("PR review processing " .. (state.config.processing.enabled and "enabled" or "disabled"))
+end
+
+function M.toggle_comments()
+  state.config.comments.enabled = not state.config.comments.enabled
+  state.comments = {}
+
+  if state.config.comments.enabled then
+    load_comments_async()
+  end
+
+  schedule_comments_ui_refresh()
+  vim.notify("PR review comments " .. (state.config.comments.enabled and "enabled" or "disabled"))
+end
+
+function M.list_viewed(filter)
+  if not ensure_active() then
+    return
+  end
+
+  filter = filter or "all"
+  if filter == "processed" then
+    filter = "viewed"
+  elseif filter == "pending" then
+    filter = "unviewed"
+  end
+
+  local items = {}
+  for _, path in ipairs(state.file_order) do
+    local viewed = state.viewed[path] == true
+    if filter == "all" or (filter == "viewed" and viewed) or (filter == "unviewed" and not viewed) then
+      items[#items + 1] = {
+        filename = vim.fs.joinpath(state.root, path),
+        lnum = 1,
+        text = string.format(
+          "[%s] %s%s",
+          viewed and "processed" or "pending",
+          path,
+          (#comments_for_path(path) > 0 and string.format(" comments:%d", #comments_for_path(path)) or "")
+        ),
+      }
+    end
+  end
+
+  local label = ({ viewed = "processed", unviewed = "pending" })[filter] or filter
+  vim.fn.setqflist({}, " ", { title = "PR review files [" .. label .. "]", items = items })
+  vim.cmd.copen()
+end
+
+M.list_processed = M.list_viewed
 
 function M.show_thread()
   local path = current_relpath()
@@ -1528,22 +2126,48 @@ function M.is_changed_dir(path)
   return state.dirs[path] == true
 end
 
+function M.is_viewed_file(path)
+  return state.config.viewed.enabled and state.viewed[path] == true
+end
+
+M.is_processed_file = M.is_viewed_file
+
+function M.comment_count(path)
+  return #(state.comments[path] or {})
+end
+
+function M.config()
+  return state.config
+end
+
 function M.setup(opts)
-  state.config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
+  state.config = normalize_config(opts)
 
   if state.config.commands then
     vim.api.nvim_create_user_command("PrReviewStart", M.start, { desc = "Start normal PR review mode" })
     vim.api.nvim_create_user_command("PrReviewStop", M.stop, { desc = "Stop normal PR review mode" })
     vim.api.nvim_create_user_command("PrReviewRefresh", M.refresh, { desc = "Refresh normal PR review mode" })
+    vim.api.nvim_create_user_command("PrReviewNextChange", M.next_change, { desc = "Alias for PrReviewNextHunk" })
+    vim.api.nvim_create_user_command("PrReviewPrevChange", M.prev_change, { desc = "Alias for PrReviewPrevHunk" })
     vim.api.nvim_create_user_command(
-      "PrReviewNextChange",
-      M.next_change,
-      { desc = "Jump to next PR change in normal review mode" }
+      "PrReviewNextHunk",
+      M.next_hunk,
+      { desc = "Jump to next PR hunk in normal review mode" }
     )
     vim.api.nvim_create_user_command(
-      "PrReviewPrevChange",
-      M.prev_change,
-      { desc = "Jump to previous PR change in normal review mode" }
+      "PrReviewPrevHunk",
+      M.prev_hunk,
+      { desc = "Jump to previous PR hunk in normal review mode" }
+    )
+    vim.api.nvim_create_user_command(
+      "PrReviewNextComment",
+      M.next_comment,
+      { desc = "Jump to next PR comment in normal review mode" }
+    )
+    vim.api.nvim_create_user_command(
+      "PrReviewPrevComment",
+      M.prev_comment,
+      { desc = "Jump to previous PR comment in normal review mode" }
     )
     vim.api.nvim_create_user_command(
       "PrReviewNextFile",
@@ -1575,6 +2199,74 @@ function M.setup(opts)
       M.comment,
       { range = true, desc = "Create PR review comment for current line or visual range" }
     )
+    vim.api.nvim_create_user_command("PrReviewViewedToggle", function()
+      M.toggle_viewed()
+    end, { desc = "Alias for PrReviewProcessedToggle" })
+    vim.api.nvim_create_user_command("PrReviewViewedList", function(command)
+      M.list_viewed(command.args ~= "" and command.args or "all")
+    end, {
+      nargs = "?",
+      complete = function()
+        return { "all", "processed", "pending" }
+      end,
+      desc = "Alias for PrReviewProcessedList",
+    })
+    vim.api.nvim_create_user_command("PrReviewProcessedToggle", function()
+      M.toggle_processed()
+    end, { desc = "Toggle processed state for the current PR file" })
+    vim.api.nvim_create_user_command(
+      "PrReviewProcessingToggle",
+      M.toggle_processing,
+      { desc = "Toggle PR processing state" }
+    )
+    vim.api.nvim_create_user_command("PrReviewCommentsToggle", M.toggle_comments, { desc = "Toggle PR comments" })
+    vim.api.nvim_create_user_command("PrReviewProcessedList", function(command)
+      M.list_processed(command.args ~= "" and command.args or "all")
+    end, {
+      nargs = "?",
+      complete = function()
+        return { "all", "processed", "pending" }
+      end,
+      desc = "Open quickfix list of PR files by processing state",
+    })
+    vim.api.nvim_create_user_command(
+      "PrReviewViewedClear",
+      M.clear_viewed,
+      { desc = "Alias for PrReviewProcessedClear" }
+    )
+    vim.api.nvim_create_user_command(
+      "PrReviewProcessedClear",
+      M.clear_processed,
+      { desc = "Clear processing state for the current PR" }
+    )
+    vim.api.nvim_create_user_command("PrReviewViewedSync", M.sync_viewed, { desc = "Alias for PrReviewProcessedSync" })
+    vim.api.nvim_create_user_command(
+      "PrReviewProcessedSync",
+      M.sync_processed,
+      { desc = "Pull processing state from GitHub for the current PR" }
+    )
+    vim.api.nvim_create_user_command(
+      "PrReviewViewedSyncToggle",
+      M.toggle_viewed_sync,
+      { desc = "Alias for PrReviewProcessedSyncToggle" }
+    )
+    vim.api.nvim_create_user_command(
+      "PrReviewProcessedSyncToggle",
+      M.toggle_processed_sync,
+      { desc = "Toggle GitHub processing-state sync" }
+    )
+    vim.api.nvim_create_user_command("PrViewedToggle", function()
+      M.toggle_viewed()
+    end, { desc = "Alias for PrReviewProcessedToggle" })
+    vim.api.nvim_create_user_command("PrViewedList", function(command)
+      M.list_viewed(command.args ~= "" and command.args or "all")
+    end, {
+      nargs = "?",
+      complete = function()
+        return { "all", "processed", "pending" }
+      end,
+      desc = "Alias for PrReviewProcessedList",
+    })
   end
 
   if setup_done then

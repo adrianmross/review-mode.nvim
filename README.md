@@ -6,9 +6,10 @@ The goal is to keep review inside normal files instead of a dedicated diff UI:
 
 - opens the first changed file when review mode starts
 - uses Gitsigns against the PR base branch for gutter changes
-- jumps between PR hunks and changed files
+- jumps between PR hunks, PR comments, and changed files
 - shows changed files/folders in `nvim-tree`
 - loads GitHub review comments asynchronously with a small disk cache
+- tracks processed/pending PR files locally, with optional GitHub-backed processing sync
 - opens the base version of the current file in a side-by-side diff split
 - creates line or visual-range PR comments through `gh`
 
@@ -38,6 +39,12 @@ With `lazy.nvim`:
     { "<leader>rm", "<cmd>PrReviewStart<cr>", desc = "Review mode" },
     { "<leader>rN", "<cmd>PrReviewStop<cr>", desc = "Review mode stop" },
     { "<leader>rb", "<cmd>PrReviewOldToggle<cr>", desc = "Review base file" },
+    { "<leader>rv", "<cmd>PrReviewProcessedToggle<cr>", desc = "Review toggle processed" },
+    { "<leader>rw", "<cmd>PrReviewProcessedList<cr>", desc = "Review processing list" },
+    { "<leader>rV", "<cmd>PrReviewProcessingToggle<cr>", desc = "Review toggle processing" },
+    { "<leader>rC", "<cmd>PrReviewCommentsToggle<cr>", desc = "Review toggle comments" },
+    { "<leader>rs", "<cmd>PrReviewProcessedSync<cr>", desc = "Review sync processing" },
+    { "<leader>rS", "<cmd>PrReviewProcessedSyncToggle<cr>", desc = "Review toggle processing sync" },
     { "<leader>rc", "<cmd>PrReviewThread<cr>", desc = "Review line comments" },
     { "<leader>rr", "<cmd>PrReviewReply<cr>", desc = "Review reply" },
     {
@@ -48,13 +55,22 @@ With `lazy.nvim`:
       mode = { "n", "v" },
       desc = "Review comment",
     },
-    { "]c", "<cmd>PrReviewNextChange<cr>", desc = "Next PR change" },
-    { "[c", "<cmd>PrReviewPrevChange<cr>", desc = "Previous PR change" },
+    { "]h", "<cmd>PrReviewNextHunk<cr>", desc = "Next PR hunk" },
+    { "[h", "<cmd>PrReviewPrevHunk<cr>", desc = "Previous PR hunk" },
+    { "]c", "<cmd>PrReviewNextComment<cr>", desc = "Next PR comment" },
+    { "[c", "<cmd>PrReviewPrevComment<cr>", desc = "Previous PR comment" },
     { "]f", "<cmd>PrReviewNextFile<cr>", desc = "Next changed file" },
     { "[f", "<cmd>PrReviewPrevFile<cr>", desc = "Previous changed file" },
   },
 }
 ```
+
+Suggested navigation uses hunk keys for changed regions and comment keys for
+review discussion:
+
+- `]h` / `[h` jump to the next/previous PR hunk
+- `]c` / `[c` jump to the next/previous PR comment
+- `]f` / `[f` jump to the next/previous changed file
 
 ## nvim-tree Integration
 
@@ -79,21 +95,31 @@ require("nvim-tree").setup({
 })
 ```
 
-Changed files are marked with `●`; changed parent folders are marked with `•`.
+Changed files are marked with `●`, processed files with `✓`, files with comments
+with `◆`, and changed parent folders with `•`.
 
 ## Commands
 
 - `:PrReviewStart` starts normal-buffer PR review mode
 - `:PrReviewStop` stops review mode and clears plugin state
 - `:PrReviewRefresh` reloads changed files and comments
-- `:PrReviewNextChange` jumps to the next PR hunk
-- `:PrReviewPrevChange` jumps to the previous PR hunk
+- `:PrReviewNextHunk` jumps to the next PR hunk
+- `:PrReviewPrevHunk` jumps to the previous PR hunk
+- `:PrReviewNextComment` jumps to the next PR comment
+- `:PrReviewPrevComment` jumps to the previous PR comment
 - `:PrReviewNextFile` jumps to the next changed file
 - `:PrReviewPrevFile` jumps to the previous changed file
 - `:PrReviewOldToggle` toggles the base version of the current file in a diff split
 - `:PrReviewThread` shows comments on the current line
 - `:PrReviewReply` replies to the latest comment on the current line
 - `:PrReviewComment` creates a PR comment on the current line or visual range
+- `:PrReviewProcessedToggle` toggles processed state for the current PR file
+- `:PrReviewProcessingToggle` toggles processing state on or off
+- `:PrReviewCommentsToggle` toggles PR comments on or off
+- `:PrReviewProcessedList [all|processed|pending]` opens a quickfix list of PR files
+- `:PrReviewProcessedClear` clears local processing state for the current PR
+- `:PrReviewProcessedSync` pulls processing state from GitHub
+- `:PrReviewProcessedSyncToggle` toggles GitHub processing-state sync
 
 ## gh-dash / Worktree Handoff
 
@@ -114,6 +140,9 @@ require("pr_review").setup({
   comments = {
     enabled = true,
     cache_ttl_seconds = 300,
+    sign_text = "◆",
+    sign_hl_group = "DiagnosticInfo",
+    virtual_text = true,
   },
   diff = {
     fast_diffopt = "internal,filler,closeoff,indent-heuristic,linematch:0",
@@ -124,6 +153,13 @@ require("pr_review").setup({
   },
   nvim_tree = {
     enabled = true,
+    show_comments = true,
+    show_processing = true,
+  },
+  processing = {
+    enabled = true,
+    sync = false,
+    state_path = nil,
   },
   performance = {
     ui_refresh_debounce_ms = 50,
@@ -153,6 +189,12 @@ reuse, and an optional delayed background scan for PRs under
 
 External launchers can provide `GH_REVIEW_REPO`, `GH_REVIEW_PR`,
 `GH_REVIEW_BASE`, and `GH_REVIEW_HEAD` to avoid startup discovery calls.
+
+Processing state is persisted in `stdpath("state")/pr-review-state.json` by
+default. Set `processing.sync = true` or run `:PrReviewProcessedSyncToggle` to
+pull GitHub's PR file viewed state at startup and push local processed/pending
+toggles back to GitHub. The older `viewed` config key remains accepted as a
+compatibility alias.
 
 The built-in old-version split remains the default backend. When
 `diff.use_fast_diffopt` is enabled, `PrReviewOldToggle` temporarily applies

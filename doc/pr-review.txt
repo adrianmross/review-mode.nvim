@@ -5,7 +5,8 @@ CONTENTS                                                  *pr-review-contents*
 
 1. Overview                                      |pr-review-overview|
 2. Commands                                      |pr-review-commands|
-3. Setup                                         |pr-review-setup|
+3. Keymaps                                       |pr-review-keymaps|
+4. Setup                                         |pr-review-setup|
 
 ==============================================================================
 OVERVIEW                                                  *pr-review-overview*
@@ -13,7 +14,7 @@ OVERVIEW                                                  *pr-review-overview*
 pr-review.nvim keeps GitHub PR review in ordinary file buffers. It compares the
 current branch to the PR base, sets Gitsigns to that base when available, loads
 review comments asynchronously, and provides commands for jumping through PR
-hunks and changed files.
+hunks, PR comments, and changed files.
 
 The plugin uses `gh` for PR metadata, comments, and replies.
 
@@ -32,13 +33,21 @@ COMMANDS                                                  *pr-review-commands*
 :PrReviewRefresh
         Reload changed files and review comments.
 
-                                                        *:PrReviewNextChange*
-:PrReviewNextChange
+                                                        *:PrReviewNextHunk*
+:PrReviewNextHunk
         Jump to the next PR hunk, wrapping across files.
 
-                                                        *:PrReviewPrevChange*
-:PrReviewPrevChange
+                                                        *:PrReviewPrevHunk*
+:PrReviewPrevHunk
         Jump to the previous PR hunk, wrapping across files.
+
+                                                        *:PrReviewNextComment*
+:PrReviewNextComment
+        Jump to the next PR comment.
+
+                                                        *:PrReviewPrevComment*
+:PrReviewPrevComment
+        Jump to the previous PR comment.
 
                                                         *:PrReviewNextFile*
 :PrReviewNextFile
@@ -65,6 +74,48 @@ COMMANDS                                                  *pr-review-commands*
 :PrReviewComment
         Create a PR comment on the current line or visual range.
 
+                                                        *:PrReviewProcessedToggle*
+:PrReviewProcessedToggle
+        Toggle processed state for the current PR file.
+
+                                                        *:PrReviewProcessingToggle*
+:PrReviewProcessingToggle
+        Toggle processing state on or off.
+
+                                                        *:PrReviewCommentsToggle*
+:PrReviewCommentsToggle
+        Toggle PR comments on or off.
+
+                                                        *:PrReviewProcessedList*
+:PrReviewProcessedList [all|processed|pending]
+        Open a quickfix list of PR files by processing state.
+
+                                                        *:PrReviewProcessedClear*
+:PrReviewProcessedClear
+        Clear local processing state for the current PR.
+
+                                                        *:PrReviewProcessedSync*
+:PrReviewProcessedSync
+        Pull processing state from GitHub for the current PR.
+
+                                                        *:PrReviewProcessedSyncToggle*
+:PrReviewProcessedSyncToggle
+        Toggle GitHub processing-state sync.
+
+==============================================================================
+KEYMAPS                                                    *pr-review-keymaps*
+
+Suggested navigation uses hunk keys for changed regions and comment keys for
+review discussion:
+>
+  ]h    next PR hunk
+  [h    previous PR hunk
+  ]c    next PR comment
+  [c    previous PR comment
+  ]f    next changed file
+  [f    previous changed file
+<
+
 ==============================================================================
 SETUP                                                        *pr-review-setup*
 
@@ -74,6 +125,9 @@ SETUP                                                        *pr-review-setup*
     comments = {
       enabled = true,
       cache_ttl_seconds = 300,
+      sign_text = "◆",
+      sign_hl_group = "DiagnosticInfo",
+      virtual_text = true,
     },
     diff = {
       fast_diffopt = "internal,filler,closeoff,indent-heuristic,linematch:0",
@@ -84,6 +138,13 @@ SETUP                                                        *pr-review-setup*
     },
     nvim_tree = {
       enabled = true,
+      show_comments = true,
+      show_processing = true,
+    },
+    processing = {
+      enabled = true,
+      sync = false,
+      state_path = nil,
     },
     performance = {
       ui_refresh_debounce_ms = 50,
@@ -113,6 +174,12 @@ performance.background_hunk_scan.max_files.
 
 External launchers can provide GH_REVIEW_REPO, GH_REVIEW_PR, GH_REVIEW_BASE,
 and GH_REVIEW_HEAD to avoid startup discovery calls.
+
+Processing state is persisted in stdpath("state")/pr-review-state.json by
+default. Set processing.sync = true or run :PrReviewProcessedSyncToggle to pull
+GitHub's PR file viewed state at startup and push local processed/pending toggles
+back to GitHub. The older viewed config key remains accepted as a compatibility
+alias.
 
 PrReviewOldToggle uses the built-in Neovim side-by-side diff backend. When
 diff.use_fast_diffopt is enabled, it temporarily applies diff.fast_diffopt while
