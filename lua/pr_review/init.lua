@@ -45,7 +45,6 @@ local defaults = {
   },
   commands = true,
 }
-defaults.processing = vim.deepcopy(defaults.viewed)
 
 local state = {
   active = false,
@@ -94,19 +93,6 @@ local setup_done = false
 local function normalize_config(opts)
   opts = opts or {}
   local config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts)
-
-  if opts.processing and opts.viewed then
-    config.viewed = vim.tbl_deep_extend("force", config.viewed or {}, opts.processing, opts.viewed)
-  elseif opts.processing then
-    config.viewed = vim.tbl_deep_extend("force", config.viewed or {}, opts.processing)
-  end
-
-  config.processing = config.viewed
-
-  if opts.nvim_tree and opts.nvim_tree.show_processing ~= nil and opts.nvim_tree.show_viewed == nil then
-    config.nvim_tree.show_viewed = opts.nvim_tree.show_processing
-  end
-  config.nvim_tree.show_processing = config.nvim_tree.show_viewed
 
   return config
 end
@@ -2097,8 +2083,6 @@ function M.toggle_viewed(path)
   vim.notify((viewed and "Marked viewed: " or "Marked unviewed: ") .. path, vim.log.levels.INFO)
 end
 
-M.toggle_processed = M.toggle_viewed
-
 function M.mark_viewed(path, opts)
   opts = opts or {}
   if not ensure_active() then
@@ -2169,8 +2153,6 @@ function M.clear_viewed()
   vim.notify("Cleared PR viewed state")
 end
 
-M.clear_processed = M.clear_viewed
-
 function M.sync_viewed()
   if not ensure_active() then
     return
@@ -2185,8 +2167,6 @@ function M.sync_viewed()
   M.flush_viewed_sync()
 end
 
-M.sync_processed = M.sync_viewed
-
 function M.toggle_viewed_sync()
   state.config.viewed.sync = not state.config.viewed.sync
   vim.notify("PR review GitHub viewed sync " .. (state.config.viewed.sync and "enabled" or "disabled"))
@@ -2195,12 +2175,8 @@ function M.toggle_viewed_sync()
   end
 end
 
-M.toggle_processed_sync = M.toggle_viewed_sync
-
 function M.toggle_viewed_feature()
   state.config.viewed.enabled = not state.config.viewed.enabled
-  state.config.processing = state.config.viewed
-
   if state.config.viewed.enabled then
     if state.active then
       load_viewed_state()
@@ -2214,8 +2190,6 @@ function M.toggle_viewed_feature()
   schedule_comments_ui_refresh()
   vim.notify("PR review viewed state " .. (state.config.viewed.enabled and "enabled" or "disabled"))
 end
-
-M.toggle_processing = M.toggle_viewed_feature
 
 function M.toggle_comments()
   state.config.comments.enabled = not state.config.comments.enabled
@@ -2234,12 +2208,6 @@ local viewed_picker_header_lines = 4
 
 local function normalize_viewed_filter(filter)
   filter = filter or "all"
-  if filter == "processed" then
-    return "viewed"
-  end
-  if filter == "pending" then
-    return "unviewed"
-  end
   if filter == "viewed" or filter == "unviewed" then
     return filter
   end
@@ -2464,8 +2432,6 @@ function M.list_viewed(filter)
 
   open_viewed_picker(filter)
 end
-
-M.list_processed = M.list_viewed
 
 function M.summary()
   if not ensure_active() then
@@ -2692,8 +2658,6 @@ function M.is_viewed_file(path)
   return state.config.viewed.enabled and state.viewed[path] == true
 end
 
-M.is_processed_file = M.is_viewed_file
-
 function M.unviewed_count(path)
   if not state.config.viewed.enabled or not path then
     return 0
@@ -2736,8 +2700,6 @@ function M.is_viewed_dir(path)
 
   return has_changed_child
 end
-
-M.is_processed_dir = M.is_viewed_dir
 
 function M.comment_count(path)
   return #(state.comments[path] or {})
@@ -2853,38 +2815,16 @@ function M.setup(opts)
       M.mark_viewed_next,
       { desc = "Mark current PR file viewed and jump to next unviewed file" }
     )
-    vim.api.nvim_create_user_command("PrReviewProcessedToggle", function()
-      M.toggle_processed()
-    end, { desc = "Alias for PrReviewViewedToggle" })
     vim.api.nvim_create_user_command(
       "PrReviewViewedFeatureToggle",
       M.toggle_viewed_feature,
       { desc = "Toggle PR viewed state" }
     )
-    vim.api.nvim_create_user_command(
-      "PrReviewProcessingToggle",
-      M.toggle_processing,
-      { desc = "Alias for PrReviewViewedFeatureToggle" }
-    )
     vim.api.nvim_create_user_command("PrReviewCommentsToggle", M.toggle_comments, { desc = "Toggle PR comments" })
-    vim.api.nvim_create_user_command("PrReviewProcessedList", function(command)
-      M.list_processed(command.args ~= "" and command.args or "all")
-    end, {
-      nargs = "?",
-      complete = function()
-        return { "all", "processed", "pending" }
-      end,
-      desc = "Alias for PrReviewViewedList",
-    })
     vim.api.nvim_create_user_command(
       "PrReviewViewedClear",
       M.clear_viewed,
       { desc = "Clear viewed state for the current PR" }
-    )
-    vim.api.nvim_create_user_command(
-      "PrReviewProcessedClear",
-      M.clear_processed,
-      { desc = "Alias for PrReviewViewedClear" }
     )
     vim.api.nvim_create_user_command(
       "PrReviewViewedSync",
@@ -2892,19 +2832,9 @@ function M.setup(opts)
       { desc = "Pull viewed state from GitHub for the current PR" }
     )
     vim.api.nvim_create_user_command(
-      "PrReviewProcessedSync",
-      M.sync_processed,
-      { desc = "Alias for PrReviewViewedSync" }
-    )
-    vim.api.nvim_create_user_command(
       "PrReviewViewedSyncToggle",
       M.toggle_viewed_sync,
       { desc = "Toggle GitHub viewed-state sync" }
-    )
-    vim.api.nvim_create_user_command(
-      "PrReviewProcessedSyncToggle",
-      M.toggle_processed_sync,
-      { desc = "Alias for PrReviewViewedSyncToggle" }
     )
     vim.api.nvim_create_user_command("PrViewedToggle", function()
       M.toggle_viewed()

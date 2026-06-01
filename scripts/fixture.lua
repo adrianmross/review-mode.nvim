@@ -82,41 +82,32 @@ end
 local pr = require("pr_review")
 pr.setup({
   gitsigns = { enabled = false },
-  nvim_tree = { enabled = false, show_processing = false, show_viewed = true },
+  nvim_tree = { enabled = false, show_viewed = true },
   comments = { enabled = true, sign_text = "◆" },
-  processing = { enabled = false, sync = false },
   viewed = { enabled = true, sync = true },
   auto_open_first_change = false,
 })
 
-assert(pr.config().viewed.enabled, "viewed config did not override processing compatibility config")
-assert(pr.config().viewed.sync, "viewed sync config did not override processing compatibility config")
-assert(pr.config().processing == pr.config().viewed, "processing compatibility alias did not point to viewed config")
-assert(pr.config().nvim_tree.show_viewed, "show_viewed config did not override show_processing compatibility config")
-assert(
-  pr.config().nvim_tree.show_processing == pr.config().nvim_tree.show_viewed,
-  "show_processing compatibility alias did not mirror show_viewed"
-)
+assert(pr.config().viewed.enabled, "viewed config was not enabled")
+assert(pr.config().viewed.sync, "viewed sync config was not enabled")
+assert(pr.config().processing == nil, "old viewed config alias should not be exposed")
+assert(pr.config().nvim_tree.show_viewed, "show_viewed config was not enabled")
+assert(pr.config().nvim_tree.show_processing == nil, "old nvim-tree viewed option alias should not be exposed")
 
 local commands = vim.api.nvim_get_commands({})
 assert(commands.PrReviewViewedToggle, "PrReviewViewedToggle command missing")
 assert(commands.PrReviewViewedList, "PrReviewViewedList command missing")
 assert(commands.PrReviewViewedFeatureToggle, "PrReviewViewedFeatureToggle command missing")
-assert(commands.PrReviewProcessedToggle, "PrReviewProcessedToggle compatibility command missing")
-assert(commands.PrReviewProcessingToggle, "PrReviewProcessingToggle compatibility command missing")
-assert(not commands.PrReviewProcessedNext, "unexpected new PrReviewProcessedNext compatibility command")
+assert(not commands.PrReviewProcessedToggle, "old viewed toggle command alias should be removed")
+assert(not commands.PrReviewProcessedList, "old viewed list command alias should be removed")
+assert(not commands.PrReviewProcessedClear, "old viewed clear command alias should be removed")
+assert(not commands.PrReviewProcessedSync, "old viewed sync command alias should be removed")
+assert(not commands.PrReviewProcessedSyncToggle, "old viewed sync-toggle command alias should be removed")
+assert(not commands.PrReviewProcessingToggle, "old viewed feature-toggle command alias should be removed")
 assert(has_value(vim.fn.getcompletion("PrReviewViewedList ", "cmdline"), "viewed"), "viewed list completion missing")
 assert(
   has_value(vim.fn.getcompletion("PrReviewViewedList ", "cmdline"), "unviewed"),
   "unviewed list completion missing"
-)
-assert(
-  has_value(vim.fn.getcompletion("PrReviewProcessedList ", "cmdline"), "processed"),
-  "processed alias completion missing"
-)
-assert(
-  has_value(vim.fn.getcompletion("PrReviewProcessedList ", "cmdline"), "pending"),
-  "pending alias completion missing"
 )
 
 pr.start()
@@ -293,10 +284,6 @@ assert(pr.config().viewed.enabled, "viewed feature toggle did not enable viewed 
 wait_for(function()
   return pr.is_viewed_file("file.txt")
 end, "viewed feature toggle did not restore viewed state")
-
-pr.config().processing.enabled = false
-assert(not pr.config().viewed.enabled, "processing compatibility alias did not update viewed config")
-pr.config().processing.enabled = true
 
 vim.api.nvim_win_set_cursor(0, { 1, 0 })
 pr.next_hunk()
