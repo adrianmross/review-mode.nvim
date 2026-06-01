@@ -38,9 +38,9 @@ With `lazy.nvim`:
   keys = {
     { "<leader>rm", "<cmd>PrReviewStart<cr>", desc = "Review mode" },
     { "<leader>rN", "<cmd>PrReviewStop<cr>", desc = "Review mode stop" },
-    { "<leader>rb", "<cmd>PrReviewOldToggle<cr>", desc = "Review base file" },
-    { "<leader>rv", "<cmd>PrReviewViewedToggle<cr>", desc = "Review toggle viewed" },
-    { "<leader>rw", "<cmd>PrReviewViewedList<cr>", desc = "Review files" },
+    { "<leader>rd", "<cmd>PrReviewOldToggle<cr>", desc = "Review diff" },
+    { "<leader>rv", "<cmd>PrReviewViewedToggle<cr>", desc = "Toggle file viewed" },
+    { "<leader>rl", "<cmd>PrReviewViewedList<cr>", desc = "Review viewed files list" },
     { "<leader>rV", "<cmd>PrReviewViewedFeatureToggle<cr>", desc = "Review toggle viewed state" },
     { "<leader>rC", "<cmd>PrReviewCommentsToggle<cr>", desc = "Review toggle comments" },
     { "<leader>rs", "<cmd>PrReviewViewedSync<cr>", desc = "Review sync viewed" },
@@ -124,9 +124,6 @@ viewed.
 - `:PrReviewViewedClear` clears local viewed state for the current PR
 - `:PrReviewViewedSync` pulls viewed state from GitHub
 - `:PrReviewViewedSyncToggle` toggles GitHub viewed-state sync
-- `:PrReviewProcessedToggle`, `:PrReviewProcessedList`, `:PrReviewProcessedClear`,
-  `:PrReviewProcessedSync`, `:PrReviewProcessedSyncToggle`, and
-  `:PrReviewProcessingToggle` remain as v0.3.0 compatibility aliases.
 - `:PrReviewSummary` shows file, comment, thread, and viewed-sync counts.
 
 ## gh-dash / Worktree Handoff
@@ -201,8 +198,7 @@ External launchers can provide `GH_REVIEW_REPO`, `GH_REVIEW_PR`,
 Viewed state is persisted in `stdpath("state")/pr-review-state.json` by
 default. Set `viewed.sync = true` or run `:PrReviewViewedSyncToggle` to pull
 GitHub's PR file viewed state at startup and push local viewed/unviewed toggles
-back to GitHub. The v0.3.0 `processing` config key and
-`nvim_tree.show_processing` option remain accepted as compatibility aliases.
+back to GitHub.
 
 The built-in old-version split remains the default backend. When
 `diff.use_fast_diffopt` is enabled, `PrReviewOldToggle` temporarily applies
