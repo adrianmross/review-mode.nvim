@@ -1,2 +1,10 @@
 .luarc.json
 .DS_Store
+
+# local dev workflow
+.direnv/
+.devenv*
+devenv.local.nix
+.cache/
+.local/
+nvim.log

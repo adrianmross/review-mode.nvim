@@ -75,14 +75,29 @@ SETUP                                                        *pr-review-setup*
       enabled = true,
       cache_ttl_seconds = 300,
     },
+    diff = {
+      fast_diffopt = "internal,filler,closeoff,indent-heuristic,linematch:0",
+      use_fast_diffopt = true,
+    },
     gitsigns = {
       enabled = true,
     },
     nvim_tree = {
       enabled = true,
     },
+    performance = {
+      ui_refresh_debounce_ms = 50,
+    },
     commands = true,
   })
 <
+
+PrReviewStart loads PR metadata and changed-file status asynchronously. Hunk
+locations are loaded lazily per file, so opening review mode does not parse the
+entire PR patch up front.
+
+PrReviewOldToggle uses the built-in Neovim side-by-side diff backend. When
+diff.use_fast_diffopt is enabled, it temporarily applies diff.fast_diffopt while
+creating the base split and restores the previous diffopt when the split closes.
 
  vim:tw=78:ts=8:noet:ft=help:norl:
