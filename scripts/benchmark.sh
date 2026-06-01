@@ -6,6 +6,10 @@ cd "$repo_root"
 
 files="${PR_REVIEW_BENCH_FILES:-1000}"
 lines="${PR_REVIEW_BENCH_LINES:-80}"
+target_index="${PR_REVIEW_BENCH_TARGET_INDEX:-$((files / 2))}"
+idle_ms="${PR_REVIEW_BENCH_IDLE_MS:-0}"
+post_edit_idle_ms="${PR_REVIEW_BENCH_POST_EDIT_IDLE_MS:-0}"
+baseline_ref="${PR_REVIEW_BENCH_BASELINE_REF:-v0.2.0}"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/pr-review-bench.XXXXXX")"
 mkdir -p "$tmp/bin" "$tmp/repo" "$tmp/current-cache" "$tmp/current-state" "$tmp/baseline-cache" "$tmp/baseline-state"
 
@@ -68,10 +72,10 @@ git commit -q -m feature
 git remote add origin .
 git update-ref refs/remotes/origin/main refs/heads/main
 
-target_file="$(printf 'src/file_%04d.txt' "$((files / 2))")"
+target_file="$(printf 'src/file_%04d.txt' "$target_index")"
 baseline="$tmp/baseline-plugin"
 mkdir -p "$baseline"
-git -C "$repo_root" archive --format=tar HEAD | tar -xf - -C "$baseline"
+git -C "$repo_root" archive --format=tar "$baseline_ref" | tar -xf - -C "$baseline"
 
 run_case() {
   local label="$1"
@@ -84,16 +88,20 @@ run_case() {
     XDG_STATE_HOME="$state" \
     GH_REVIEW_REPO=owner/repo \
     GH_REVIEW_PR=123 \
+    GH_REVIEW_BASE=main \
+    GH_REVIEW_HEAD=abc123 \
     PR_REVIEW_PLUGIN_ROOT="$plugin_root" \
     PR_REVIEW_BENCH_FILE="$target_file" \
     PR_REVIEW_BENCH_LABEL="$label" \
+    PR_REVIEW_BENCH_IDLE_MS="$idle_ms" \
+    PR_REVIEW_BENCH_POST_EDIT_IDLE_MS="$post_edit_idle_ms" \
     nvim --headless -u NONE -i NONE \
       -c "set noswapfile" \
       -l "$repo_root/scripts/benchmark.lua"
 }
 
-echo "Benchmarking baseline HEAD" >&2
-run_case "baseline_head" "$baseline" "$tmp/baseline-cache" "$tmp/baseline-state"
+echo "Benchmarking baseline $baseline_ref" >&2
+run_case "baseline_$baseline_ref" "$baseline" "$tmp/baseline-cache" "$tmp/baseline-state"
 
 echo "Benchmarking current worktree" >&2
 run_case "current_worktree" "$repo_root" "$tmp/current-cache" "$tmp/current-state"

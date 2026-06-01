@@ -1,6 +1,8 @@
 local plugin_root = assert(os.getenv("PR_REVIEW_PLUGIN_ROOT"), "PR_REVIEW_PLUGIN_ROOT is required")
 local target_file = assert(os.getenv("PR_REVIEW_BENCH_FILE"), "PR_REVIEW_BENCH_FILE is required")
 local label = os.getenv("PR_REVIEW_BENCH_LABEL") or "plugin"
+local idle_ms = tonumber(os.getenv("PR_REVIEW_BENCH_IDLE_MS") or "0") or 0
+local post_edit_idle_ms = tonumber(os.getenv("PR_REVIEW_BENCH_POST_EDIT_IDLE_MS") or "0") or 0
 
 vim.opt.runtimepath:prepend(plugin_root)
 package.path = plugin_root .. "/lua/?.lua;" .. plugin_root .. "/lua/?/init.lua;" .. package.path
@@ -26,8 +28,18 @@ local map_ready = vim.wait(60000, function()
 end, 20)
 assert(map_ready, "changed file map did not load")
 local map_ready_ms = ms_since(start)
+if idle_ms > 0 then
+  vim.wait(idle_ms, function()
+    return false
+  end, idle_ms)
+end
 
 vim.cmd.edit(target_file)
+if post_edit_idle_ms > 0 then
+  vim.wait(post_edit_idle_ms, function()
+    return false
+  end, post_edit_idle_ms)
+end
 local nav_start = vim.uv.hrtime()
 pr.next_change()
 local nav_ready = vim.wait(60000, function()
@@ -41,6 +53,8 @@ local result = {
   start_return_ms = start_return_ms,
   map_ready_ms = map_ready_ms,
   first_nav_ms = first_nav_ms,
+  idle_ms = idle_ms,
+  post_edit_idle_ms = post_edit_idle_ms,
   cursor_line = vim.api.nvim_win_get_cursor(0)[1],
 }
 

@@ -67,6 +67,8 @@ XDG_CACHE_HOME="$tmp/cache" \
 XDG_STATE_HOME="$tmp/state" \
 GH_REVIEW_REPO=owner/repo \
 GH_REVIEW_PR=123 \
+GH_REVIEW_BASE=main \
+GH_REVIEW_HEAD=abc123 \
 PR_REVIEW_PLUGIN_ROOT="$repo_root" \
 nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \

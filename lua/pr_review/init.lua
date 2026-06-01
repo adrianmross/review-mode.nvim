@@ -20,6 +20,16 @@ local defaults = {
   },
   performance = {
     ui_refresh_debounce_ms = 50,
+    hunk_prefetch = {
+      enabled = true,
+      count = 8,
+      concurrency = 2,
+    },
+    background_hunk_scan = {
+      enabled = true,
+      max_files = 5000,
+      delay_ms = 250,
+    },
   },
   commands = true,
 }
@@ -40,10 +50,15 @@ local state = {
   hunks_loaded = {},
   hunks_loading = {},
   hunk_callbacks = {},
+  prefetch_queue = {},
+  prefetch_seen = {},
+  prefetch_active = 0,
+  background_hunk_scan_loading = false,
   comments = {},
   comments_loading = false,
   generation = 0,
   maps_loaded = false,
+  maps_loading = false,
   metadata_loaded = false,
   ui_refresh_pending = false,
   old_win = nil,
@@ -54,6 +69,14 @@ local state = {
 }
 
 local setup_done = false
+
+local function env_value(name)
+  local value = vim.env[name]
+  if value and value ~= "" then
+    return value
+  end
+  return nil
+end
 
 local function trim(value)
   return vim.trim(value or "")
@@ -120,8 +143,9 @@ end
 local is_current
 
 local function repo_slug_async(generation, callback)
-  if vim.env.GH_REVIEW_REPO and vim.env.GH_REVIEW_REPO ~= "" then
-    callback(vim.env.GH_REVIEW_REPO, nil)
+  local repo = env_value("GH_REVIEW_REPO")
+  if repo then
+    callback(repo, nil)
     return
   end
 
@@ -139,8 +163,9 @@ local function pr_view_args()
     "view",
   }
 
-  if vim.env.GH_REVIEW_PR and vim.env.GH_REVIEW_PR ~= "" then
-    args[#args + 1] = vim.env.GH_REVIEW_PR
+  local pr = env_value("GH_REVIEW_PR")
+  if pr then
+    args[#args + 1] = pr
   end
 
   vim.list_extend(args, {
@@ -160,11 +185,22 @@ local function pr_meta_async(generation, callback)
 end
 
 local function repo_root()
-  return system({ "git", "rev-parse", "--show-toplevel" }, { cwd = vim.uv.cwd() })
+  local cwd = vim.uv.cwd()
+  if vim.fs.root then
+    local root = vim.fs.root(cwd, ".git")
+    if root then
+      return root
+    end
+  end
+  return system({ "git", "rev-parse", "--show-toplevel" }, { cwd = cwd })
 end
 
 local function base_ref()
-  return "origin/" .. (state.base or "main")
+  local base = state.base or "main"
+  if base:match("^origin/") or base:match("^refs/") or base:match("^%x%x%x%x%x%x%x+") then
+    return base
+  end
+  return "origin/" .. base
 end
 
 local function cache_key()
@@ -192,7 +228,12 @@ local function reset_changed_data()
   state.hunks_loaded = {}
   state.hunks_loading = {}
   state.hunk_callbacks = {}
+  state.prefetch_queue = {}
+  state.prefetch_seen = {}
+  state.prefetch_active = 0
+  state.background_hunk_scan_loading = false
   state.maps_loaded = false
+  state.maps_loading = false
 end
 
 local function reset_review_data()
@@ -413,7 +454,13 @@ local function schedule_comments_ui_refresh()
 end
 
 local function load_comments_async()
-  if not state.config.comments.enabled or not state.active or state.comments_loading then
+  if
+    not state.config.comments.enabled
+    or not state.active
+    or state.comments_loading
+    or not state.repo
+    or not state.pr
+  then
     return
   end
 
@@ -477,35 +524,42 @@ local function parse_changed_files(output)
   end
 end
 
-local function parse_hunks(patch)
-  local hunks = {}
+local function parse_hunks_by_path(patch)
+  local by_path = {}
   local current_path = nil
   for line in (patch or ""):gmatch("[^\n]+") do
     local path = line:match("^%+%+%+ b/(.+)$")
     if path then
       current_path = path
+      by_path[current_path] = by_path[current_path] or {}
     elseif line:match("^%+%+%+ /dev/null$") then
       current_path = nil
     elseif current_path then
       local new_start = line:match("^@@ %-%d+,?%d* %+(%d+),?%d* @@")
       if new_start then
-        hunks[#hunks + 1] = math.max(1, tonumber(new_start) or 1)
+        by_path[current_path][#by_path[current_path] + 1] = math.max(1, tonumber(new_start) or 1)
       end
     end
   end
-  return hunks
+  return by_path
+end
+
+local function parse_hunks(patch, path)
+  return parse_hunks_by_path(patch)[path] or {}
 end
 
 local function build_changed_maps_async(generation, callback)
   reset_changed_data()
+  state.maps_loading = true
   system_async(
-    { "git", "diff", "--name-status", "--find-renames", base_ref() .. "...HEAD" },
+    { "git", "diff", "--name-status", "--find-renames", "--no-ext-diff", "--no-color", base_ref() .. "...HEAD" },
     { cwd = state.root },
     function(output, err)
       if not is_current(generation) then
         return
       end
 
+      state.maps_loading = false
       if not output then
         state.maps_loaded = true
         callback(err or "failed to load changed files")
@@ -517,6 +571,65 @@ local function build_changed_maps_async(generation, callback)
       callback(nil)
     end
   )
+end
+
+local function finish_hunks_for_path(path, hunks)
+  state.hunks[path] = hunks or {}
+  state.hunks_loaded[path] = true
+  state.hunks_loading[path] = false
+  state.prefetch_seen[path] = nil
+
+  local callbacks = state.hunk_callbacks[path] or {}
+  state.hunk_callbacks[path] = nil
+  for _, queued_callback in ipairs(callbacks) do
+    queued_callback(state.hunks[path])
+  end
+end
+
+local function load_hunks_for_paths(paths, on_done)
+  local pending_paths = {}
+  for _, path in ipairs(paths) do
+    if path and state.files[path] and not state.hunks_loaded[path] and not state.hunks_loading[path] then
+      state.hunks_loading[path] = true
+      pending_paths[#pending_paths + 1] = path
+    end
+  end
+
+  if #pending_paths == 0 then
+    if on_done then
+      on_done()
+    end
+    return
+  end
+
+  local generation = state.generation
+  local args = {
+    "git",
+    "diff",
+    "--unified=0",
+    "--find-renames",
+    "--diff-filter=ACMRT",
+    "--no-ext-diff",
+    "--no-color",
+    base_ref() .. "...HEAD",
+    "--",
+  }
+  vim.list_extend(args, pending_paths)
+
+  system_async(args, { cwd = state.root }, function(patch)
+    if not is_current(generation) then
+      return
+    end
+
+    local by_path = parse_hunks_by_path(patch or "")
+    for _, path in ipairs(pending_paths) do
+      finish_hunks_for_path(path, by_path[path] or {})
+    end
+
+    if on_done then
+      on_done()
+    end
+  end)
 end
 
 local function load_hunks_for_path(path, callback)
@@ -531,32 +644,7 @@ local function load_hunks_for_path(path, callback)
     return
   end
 
-  local generation = state.generation
-  state.hunks_loading[path] = true
-  system_async({
-    "git",
-    "diff",
-    "--unified=0",
-    "--find-renames",
-    "--diff-filter=ACMRT",
-    base_ref() .. "...HEAD",
-    "--",
-    path,
-  }, { cwd = state.root }, function(patch)
-    if not is_current(generation) then
-      return
-    end
-
-    state.hunks[path] = parse_hunks(patch or "")
-    state.hunks_loaded[path] = true
-    state.hunks_loading[path] = false
-
-    local callbacks = state.hunk_callbacks[path] or {}
-    state.hunk_callbacks[path] = nil
-    for _, queued_callback in ipairs(callbacks) do
-      queued_callback(state.hunks[path])
-    end
-  end)
+  load_hunks_for_paths({ path })
 end
 
 local function maybe_with_hunks(path, callback)
@@ -565,6 +653,166 @@ local function maybe_with_hunks(path, callback)
   end
 
   load_hunks_for_path(path, callback)
+end
+
+local function pump_hunk_prefetch()
+  local config = state.config.performance.hunk_prefetch
+  if not config.enabled then
+    return
+  end
+
+  while state.prefetch_active < config.concurrency and #state.prefetch_queue > 0 do
+    local batch = {}
+    while #batch < config.count and #state.prefetch_queue > 0 do
+      local path = table.remove(state.prefetch_queue, 1)
+      if path and state.files[path] and not state.hunks_loaded[path] and not state.hunks_loading[path] then
+        batch[#batch + 1] = path
+      end
+    end
+
+    if #batch == 0 then
+      return
+    end
+
+    state.prefetch_active = state.prefetch_active + 1
+    load_hunks_for_paths(batch, function()
+      state.prefetch_active = math.max(0, state.prefetch_active - 1)
+      pump_hunk_prefetch()
+    end)
+  end
+end
+
+local function enqueue_hunk_prefetch(paths)
+  local config = state.config.performance.hunk_prefetch
+  if not config.enabled or not state.maps_loaded then
+    return
+  end
+
+  for _, path in ipairs(paths or {}) do
+    if
+      path
+      and state.files[path]
+      and not state.hunks_loaded[path]
+      and not state.hunks_loading[path]
+      and not state.prefetch_seen[path]
+    then
+      state.prefetch_seen[path] = true
+      state.prefetch_queue[#state.prefetch_queue + 1] = path
+    end
+  end
+
+  pump_hunk_prefetch()
+end
+
+local function nearby_paths(path)
+  local results = {}
+  local count = state.config.performance.hunk_prefetch.count
+  local index = path and state.file_index[path] or 1
+  if not index then
+    index = 1
+  end
+
+  for offset = 0, count - 1 do
+    local next_path = state.file_order[index + offset]
+    if next_path then
+      results[#results + 1] = next_path
+    end
+  end
+
+  if path and state.file_index[path] then
+    for offset = 1, math.floor(count / 2) do
+      local prev_path = state.file_order[state.file_index[path] - offset]
+      if prev_path then
+        results[#results + 1] = prev_path
+      end
+    end
+  end
+
+  return results
+end
+
+local function prefetch_near_path(path)
+  enqueue_hunk_prefetch(nearby_paths(path))
+end
+
+local function prefetch_focused_path(path)
+  if
+    not state.config.performance.hunk_prefetch.enabled
+    or not state.maps_loaded
+    or not path
+    or not state.files[path]
+  then
+    return
+  end
+
+  if state.hunks_loaded[path] then
+    prefetch_near_path(path)
+    return
+  end
+
+  if state.hunks_loading[path] then
+    return
+  end
+
+  load_hunks_for_paths({ path }, function()
+    prefetch_near_path(path)
+  end)
+end
+
+local function prefetch_current_buffer()
+  if not state.active or not state.maps_loaded then
+    return
+  end
+
+  local path = current_relpath()
+  if path and state.files[path] then
+    prefetch_focused_path(path)
+  end
+end
+
+local function start_background_hunk_scan()
+  local config = state.config.performance.background_hunk_scan
+  if
+    not config.enabled
+    or state.background_hunk_scan_loading
+    or #state.file_order == 0
+    or #state.file_order > config.max_files
+  then
+    return
+  end
+
+  state.background_hunk_scan_loading = true
+  local generation = state.generation
+  vim.defer_fn(function()
+    if not is_current(generation) or not state.maps_loaded then
+      state.background_hunk_scan_loading = false
+      return
+    end
+
+    system_async({
+      "git",
+      "diff",
+      "--unified=0",
+      "--find-renames",
+      "--diff-filter=ACMRT",
+      "--no-ext-diff",
+      "--no-color",
+      base_ref() .. "...HEAD",
+    }, { cwd = state.root }, function(patch)
+      if not is_current(generation) then
+        state.background_hunk_scan_loading = false
+        return
+      end
+
+      local by_path = parse_hunks_by_path(patch or "")
+      for _, path in ipairs(state.file_order) do
+        if not state.hunks_loaded[path] then
+          finish_hunks_for_path(path, by_path[path] or {})
+        end
+      end
+      state.background_hunk_scan_loading = false
+    end)
+  end, config.delay_ms)
 end
 
 local function first_hunk_line(path)
@@ -615,6 +863,7 @@ local function jump_changed_file(delta)
   local next_index = ((index - 1 + delta) % #state.file_order) + 1
   local path = state.file_order[next_index]
   jump_to_path(path, first_hunk_line(path))
+  prefetch_focused_path(path)
   maybe_with_hunks(path, function(hunks)
     if current_relpath() == path then
       jump_to_path(path, hunks[1] or 1)
@@ -635,6 +884,7 @@ local function jump_hunk(delta)
   local path = current_relpath()
   local hunks = path and state.hunks[path] or nil
   if path and not state.hunks_loaded[path] then
+    prefetch_focused_path(path)
     maybe_with_hunks(path, function()
       if current_relpath() == path then
         jump_hunk(delta)
@@ -747,6 +997,9 @@ local function load_review_async(generation, opts)
 
     refresh_tree()
     annotate_open_buffers()
+    prefetch_current_buffer()
+    prefetch_near_path(state.file_order[1])
+    start_background_hunk_scan()
     if opts.open_initial and state.config.auto_open_first_change then
       open_initial_change()
     end
@@ -810,32 +1063,55 @@ function M.start()
   state.root = root
   state.active = true
   state.metadata_loaded = false
+  state.repo = env_value("GH_REVIEW_REPO")
+  state.pr = env_value("GH_REVIEW_PR")
+  state.base = env_value("GH_REVIEW_BASE")
+  state.head = env_value("GH_REVIEW_HEAD")
   local generation = next_generation()
   reset_review_data()
   close_old_view()
 
-  vim.notify("PR review mode: loading PR metadata")
+  local review_loading_started = false
+  if state.base then
+    review_loading_started = true
+    set_gitsigns_base()
+    load_comments_async()
+    load_review_async(generation, { open_initial = true })
+  else
+    vim.notify("PR review mode: loading PR metadata")
+  end
+
   load_metadata_async(generation, function(result, err)
     if not is_current(generation) then
       return
     end
 
     if not result then
+      if review_loading_started then
+        state.metadata_loaded = true
+        vim.notify(
+          "PR review mode metadata refresh failed: " .. tostring(err or "could not load PR metadata"),
+          vim.log.levels.WARN
+        )
+        return
+      end
       state.active = false
       vim.notify("PR review mode: " .. tostring(err or "could not load PR metadata"), vim.log.levels.ERROR)
       return
     end
 
     local meta = result.meta or {}
-    state.repo = result.repo
-    state.pr = tostring(meta.number or vim.env.GH_REVIEW_PR or "")
-    state.base = meta.baseRefName or "main"
-    state.head = meta.headRefOid
+    state.repo = state.repo or result.repo
+    state.pr = state.pr or tostring(meta.number or env_value("GH_REVIEW_PR") or "")
+    state.base = state.base or meta.baseRefName or "main"
+    state.head = state.head or meta.headRefOid
     state.metadata_loaded = true
 
-    set_gitsigns_base()
     load_comments_async()
-    load_review_async(generation, { open_initial = true })
+    if not review_loading_started then
+      set_gitsigns_base()
+      load_review_async(generation, { open_initial = true })
+    end
   end)
 end
 
@@ -1188,6 +1464,7 @@ function M.setup(opts)
     group = vim.api.nvim_create_augroup("normal_pr_review", { clear = true }),
     callback = function(args)
       annotate_buffer(args.buf)
+      vim.defer_fn(prefetch_current_buffer, 10)
     end,
   })
 end
