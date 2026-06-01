@@ -9,7 +9,7 @@ The goal is to keep review inside normal files instead of a dedicated diff UI:
 - jumps between PR hunks, PR comments, and changed files
 - shows changed files/folders in `nvim-tree`
 - loads GitHub review comments asynchronously with a small disk cache
-- tracks processed/pending PR files locally, with optional GitHub-backed processing sync
+- tracks viewed/unviewed PR files locally, with optional GitHub-backed viewed sync
 - opens the base version of the current file in a side-by-side diff split
 - creates line or visual-range PR comments through `gh`
 
@@ -39,12 +39,12 @@ With `lazy.nvim`:
     { "<leader>rm", "<cmd>PrReviewStart<cr>", desc = "Review mode" },
     { "<leader>rN", "<cmd>PrReviewStop<cr>", desc = "Review mode stop" },
     { "<leader>rb", "<cmd>PrReviewOldToggle<cr>", desc = "Review base file" },
-    { "<leader>rv", "<cmd>PrReviewProcessedToggle<cr>", desc = "Review toggle processed" },
-    { "<leader>rw", "<cmd>PrReviewProcessedList<cr>", desc = "Review processing list" },
-    { "<leader>rV", "<cmd>PrReviewProcessingToggle<cr>", desc = "Review toggle processing" },
+    { "<leader>rv", "<cmd>PrReviewViewedToggle<cr>", desc = "Review toggle viewed" },
+    { "<leader>rw", "<cmd>PrReviewViewedList<cr>", desc = "Review viewed list" },
+    { "<leader>rV", "<cmd>PrReviewViewedFeatureToggle<cr>", desc = "Review toggle viewed state" },
     { "<leader>rC", "<cmd>PrReviewCommentsToggle<cr>", desc = "Review toggle comments" },
-    { "<leader>rs", "<cmd>PrReviewProcessedSync<cr>", desc = "Review sync processing" },
-    { "<leader>rS", "<cmd>PrReviewProcessedSyncToggle<cr>", desc = "Review toggle processing sync" },
+    { "<leader>rs", "<cmd>PrReviewViewedSync<cr>", desc = "Review sync viewed" },
+    { "<leader>rS", "<cmd>PrReviewViewedSyncToggle<cr>", desc = "Review toggle viewed sync" },
     { "<leader>rc", "<cmd>PrReviewThread<cr>", desc = "Review line comments" },
     { "<leader>rr", "<cmd>PrReviewReply<cr>", desc = "Review reply" },
     {
@@ -95,7 +95,7 @@ require("nvim-tree").setup({
 })
 ```
 
-Changed files are marked with `●`, processed files with `✓`, files with comments
+Changed files are marked with `●`, viewed files with `✓`, files with comments
 with `◆`, and changed parent folders with `•`.
 
 ## Commands
@@ -113,13 +113,18 @@ with `◆`, and changed parent folders with `•`.
 - `:PrReviewThread` shows comments on the current line
 - `:PrReviewReply` replies to the latest comment on the current line
 - `:PrReviewComment` creates a PR comment on the current line or visual range
-- `:PrReviewProcessedToggle` toggles processed state for the current PR file
-- `:PrReviewProcessingToggle` toggles processing state on or off
+- `:PrReviewViewedToggle` toggles viewed state for the current PR file
+- `:PrReviewViewedNext` marks the current PR file viewed and jumps to the next unviewed file
+- `:PrReviewViewedFeatureToggle` toggles viewed-state tracking on or off
 - `:PrReviewCommentsToggle` toggles PR comments on or off
-- `:PrReviewProcessedList [all|processed|pending]` opens a quickfix list of PR files
-- `:PrReviewProcessedClear` clears local processing state for the current PR
-- `:PrReviewProcessedSync` pulls processing state from GitHub
-- `:PrReviewProcessedSyncToggle` toggles GitHub processing-state sync
+- `:PrReviewViewedList [all|viewed|unviewed]` opens a quickfix list of PR files
+- `:PrReviewViewedClear` clears local viewed state for the current PR
+- `:PrReviewViewedSync` pulls viewed state from GitHub
+- `:PrReviewViewedSyncToggle` toggles GitHub viewed-state sync
+- `:PrReviewProcessedToggle`, `:PrReviewProcessedList`, `:PrReviewProcessedClear`,
+  `:PrReviewProcessedSync`, `:PrReviewProcessedSyncToggle`, and
+  `:PrReviewProcessingToggle` remain as v0.3.0 compatibility aliases.
+- `:PrReviewSummary` shows file, comment, thread, and viewed-sync counts.
 
 ## gh-dash / Worktree Handoff
 
@@ -154,9 +159,9 @@ require("pr_review").setup({
   nvim_tree = {
     enabled = true,
     show_comments = true,
-    show_processing = true,
+    show_viewed = true,
   },
-  processing = {
+  viewed = {
     enabled = true,
     sync = false,
     state_path = nil,
@@ -190,11 +195,11 @@ reuse, and an optional delayed background scan for PRs under
 External launchers can provide `GH_REVIEW_REPO`, `GH_REVIEW_PR`,
 `GH_REVIEW_BASE`, and `GH_REVIEW_HEAD` to avoid startup discovery calls.
 
-Processing state is persisted in `stdpath("state")/pr-review-state.json` by
-default. Set `processing.sync = true` or run `:PrReviewProcessedSyncToggle` to
-pull GitHub's PR file viewed state at startup and push local processed/pending
-toggles back to GitHub. The older `viewed` config key remains accepted as a
-compatibility alias.
+Viewed state is persisted in `stdpath("state")/pr-review-state.json` by
+default. Set `viewed.sync = true` or run `:PrReviewViewedSyncToggle` to pull
+GitHub's PR file viewed state at startup and push local viewed/unviewed toggles
+back to GitHub. The v0.3.0 `processing` config key and
+`nvim_tree.show_processing` option remain accepted as compatibility aliases.
 
 The built-in old-version split remains the default backend. When
 `diff.use_fast_diffopt` is enabled, `PrReviewOldToggle` temporarily applies

@@ -24,25 +24,101 @@ local function has_icon(icons, icon)
   return false
 end
 
+local function has_value(values, value)
+  for _, item in ipairs(values or {}) do
+    if item == value then
+      return true
+    end
+  end
+  return false
+end
+
+local notifications = {}
+local original_notify = vim.notify
+vim.notify = function(message, level, opts)
+  notifications[#notifications + 1] = tostring(message)
+  return original_notify(message, level, opts)
+end
+
+local function last_notification()
+  return notifications[#notifications] or ""
+end
+
+local function viewed_sync_queue_count()
+  local path = vim.fs.joinpath(vim.fn.stdpath("state"), "pr-review-state.json")
+  local ok, lines = pcall(vim.fn.readfile, path)
+  if not ok or #lines == 0 then
+    return 0
+  end
+
+  local decoded = vim.json.decode(table.concat(lines, "\n"))
+  local count = 0
+  for _, entry in pairs(decoded or {}) do
+    for _ in pairs(entry.sync_queue or {}) do
+      count = count + 1
+    end
+  end
+  return count
+end
+
 local pr = require("pr_review")
 pr.setup({
   gitsigns = { enabled = false },
-  nvim_tree = { enabled = false },
+  nvim_tree = { enabled = false, show_processing = false, show_viewed = true },
   comments = { enabled = true, sign_text = "◆" },
-  processing = { enabled = true, sync = true },
+  processing = { enabled = false, sync = false },
+  viewed = { enabled = true, sync = true },
   auto_open_first_change = false,
 })
+
+assert(pr.config().viewed.enabled, "viewed config did not override processing compatibility config")
+assert(pr.config().viewed.sync, "viewed sync config did not override processing compatibility config")
+assert(pr.config().processing == pr.config().viewed, "processing compatibility alias did not point to viewed config")
+assert(pr.config().nvim_tree.show_viewed, "show_viewed config did not override show_processing compatibility config")
+assert(
+  pr.config().nvim_tree.show_processing == pr.config().nvim_tree.show_viewed,
+  "show_processing compatibility alias did not mirror show_viewed"
+)
+
+local commands = vim.api.nvim_get_commands({})
+assert(commands.PrReviewViewedToggle, "PrReviewViewedToggle command missing")
+assert(commands.PrReviewViewedList, "PrReviewViewedList command missing")
+assert(commands.PrReviewViewedFeatureToggle, "PrReviewViewedFeatureToggle command missing")
+assert(commands.PrReviewProcessedToggle, "PrReviewProcessedToggle compatibility command missing")
+assert(commands.PrReviewProcessingToggle, "PrReviewProcessingToggle compatibility command missing")
+assert(not commands.PrReviewProcessedNext, "unexpected new PrReviewProcessedNext compatibility command")
+assert(has_value(vim.fn.getcompletion("PrReviewViewedList ", "cmdline"), "viewed"), "viewed list completion missing")
+assert(
+  has_value(vim.fn.getcompletion("PrReviewViewedList ", "cmdline"), "unviewed"),
+  "unviewed list completion missing"
+)
+assert(
+  has_value(vim.fn.getcompletion("PrReviewProcessedList ", "cmdline"), "processed"),
+  "processed alias completion missing"
+)
+assert(
+  has_value(vim.fn.getcompletion("PrReviewProcessedList ", "cmdline"), "pending"),
+  "pending alias completion missing"
+)
 
 pr.start()
 wait_for(function()
   return pr.is_changed_file("file.txt")
 end, "changed file map did not load")
 wait_for(function()
-  return pr.is_processed_file("file.txt")
-end, "GitHub processing state did not load")
+  return pr.is_changed_file("nested/other.txt")
+end, "second changed file did not load")
+wait_for(function()
+  return pr.is_viewed_file("file.txt")
+end, "GitHub viewed state did not load")
 wait_for(function()
   return pr.comment_count("file.txt") == 2
 end, "PR comments did not load")
+
+pr.summary()
+assert(last_notification():find("Files: 1 viewed, 1 unviewed, 2 total", 1, true), "summary file counts were wrong")
+assert(last_notification():find("Comments: 2", 1, true), "summary comment count was wrong")
+assert(last_notification():find("Threads: 2 total, 1 unresolved", 1, true), "summary thread counts were wrong")
 
 vim.cmd.edit("file.txt")
 wait_for(function()
@@ -58,31 +134,48 @@ assert(vim.api.nvim_win_get_cursor(0)[1] == 4, "next comment did not jump to sec
 pr.prev_comment()
 assert(vim.api.nvim_win_get_cursor(0)[1] == 2, "previous comment did not jump back")
 
-pr.toggle_processed()
-assert(not pr.is_processed_file("file.txt"), "processing toggle did not mark file pending")
+pr.toggle_viewed()
+assert(not pr.is_viewed_file("file.txt"), "viewed toggle did not mark file unviewed")
 
-pr.list_processed("pending")
-local pending_qf = vim.fn.getqflist({ items = 1, title = 1 })
-assert(#pending_qf.items == 1, "pending processing list did not include file")
-assert(pending_qf.items[1].text:find("%[pending%] file.txt"), "pending processing list label was wrong")
-pr.list_processed("processed")
-local processed_qf = vim.fn.getqflist({ items = 1, title = 1 })
-assert(#processed_qf.items == 0, "processed processing list should be empty")
+pr.list_viewed("unviewed")
+local unviewed_qf = vim.fn.getqflist({ items = 1, title = 1 })
+assert(#unviewed_qf.items == 2, "unviewed list did not include both unviewed files")
+assert(unviewed_qf.items[1].text:find("%[unviewed%] file.txt"), "unviewed list label was wrong")
+pr.list_viewed("viewed")
+local viewed_qf = vim.fn.getqflist({ items = 1, title = 1 })
+assert(#viewed_qf.items == 0, "viewed list should be empty")
 vim.cmd.cclose()
 
-pr.config().processing.sync = false
+pr.config().viewed.sync = false
 pr.stop()
 pr.start()
 wait_for(function()
   return pr.is_changed_file("file.txt")
 end, "changed file map did not reload")
-assert(not pr.is_processed_file("file.txt"), "local pending processing state did not persist")
+assert(not pr.is_viewed_file("file.txt"), "local unviewed state did not persist")
 
-pr.config().processing.sync = true
-pr.sync_processed()
+pr.config().viewed.sync = true
+pr.sync_viewed()
 wait_for(function()
-  return pr.is_processed_file("file.txt")
-end, "GitHub processing sync did not restore processed state")
+  return pr.is_viewed_file("file.txt")
+end, "GitHub viewed sync did not restore viewed state")
+
+vim.env.PR_REVIEW_FAIL_MUTATION = "1"
+pr.toggle_viewed()
+wait_for(function()
+  return viewed_sync_queue_count() == 1
+end, "failed viewed sync mutation was not queued")
+vim.env.PR_REVIEW_FAIL_MUTATION = nil
+pr.flush_viewed_sync()
+wait_for(function()
+  return viewed_sync_queue_count() == 0
+end, "queued viewed sync mutation was not flushed")
+
+vim.cmd.edit("file.txt")
+pr.mark_viewed_next()
+wait_for(function()
+  return vim.api.nvim_buf_get_name(0):find("nested/other%.txt$", 1) ~= nil
+end, "mark viewed next did not jump to next unviewed file")
 
 package.preload["nvim-tree.renderer.decorator"] = function()
   return {
@@ -98,22 +191,31 @@ decorator:new()
 local tree_node = { absolute_path = vim.fs.joinpath(pr.root(), "file.txt") }
 local icons = decorator:icons(tree_node)
 assert(has_icon(icons, "◆"), "nvim-tree comment marker missing")
-assert(has_icon(icons, "✓"), "nvim-tree processed marker missing")
-assert(not has_icon(icons, "●"), "nvim-tree pending marker shown for processed file")
+assert(has_icon(icons, "✓"), "nvim-tree viewed marker missing")
+assert(not has_icon(icons, "●"), "nvim-tree changed marker shown for viewed file")
 
-pr.config().nvim_tree.show_processing = false
+local unviewed_tree_node = { absolute_path = vim.fs.joinpath(pr.root(), "nested/other.txt") }
+icons = decorator:icons(unviewed_tree_node)
+assert(has_icon(icons, "●"), "nvim-tree changed marker missing for unviewed file")
+assert(not has_icon(icons, "✓"), "nvim-tree viewed marker shown for unviewed file")
+
+local dir_icons = decorator:icons({ absolute_path = vim.fs.joinpath(pr.root(), "nested") })
+assert(has_icon(dir_icons, "•"), "nvim-tree changed folder marker missing")
+
+pr.config().nvim_tree.show_viewed = false
 icons = decorator:icons(tree_node)
-assert(has_icon(icons, "◆"), "nvim-tree comment marker missing when processing disabled")
-assert(has_icon(icons, "●"), "nvim-tree pending marker missing when processing disabled")
-assert(not has_icon(icons, "✓"), "nvim-tree processed marker shown when processing disabled")
-pr.config().nvim_tree.show_processing = true
+assert(has_icon(icons, "◆"), "nvim-tree comment marker missing when viewed marker disabled")
+assert(has_icon(icons, "●"), "nvim-tree changed marker missing when viewed marker disabled")
+assert(not has_icon(icons, "✓"), "nvim-tree viewed marker shown when disabled")
+pr.config().nvim_tree.show_viewed = true
 
 pr.config().nvim_tree.show_comments = false
 icons = decorator:icons(tree_node)
 assert(not has_icon(icons, "◆"), "nvim-tree comment marker shown when comments disabled")
-assert(has_icon(icons, "✓"), "nvim-tree processed marker missing when comments disabled")
+assert(has_icon(icons, "✓"), "nvim-tree viewed marker missing when comments disabled")
 pr.config().nvim_tree.show_comments = true
 
+vim.cmd.edit("file.txt")
 pr.toggle_comments()
 wait_for(function()
   return pr.comment_count("file.txt") == 0 and #comment_marks() == 0
@@ -123,14 +225,18 @@ wait_for(function()
   return pr.comment_count("file.txt") == 2 and #comment_marks() == 2
 end, "comment toggle did not restore comment markers")
 
-pr.toggle_processing()
-assert(not pr.config().processing.enabled, "processing toggle did not disable processing")
-assert(not pr.is_processed_file("file.txt"), "processing marker stayed active while processing disabled")
-pr.toggle_processing()
-assert(pr.config().processing.enabled, "processing toggle did not enable processing")
+pr.toggle_viewed_feature()
+assert(not pr.config().viewed.enabled, "viewed feature toggle did not disable viewed tracking")
+assert(not pr.is_viewed_file("file.txt"), "viewed marker stayed active while viewed tracking disabled")
+pr.toggle_viewed_feature()
+assert(pr.config().viewed.enabled, "viewed feature toggle did not enable viewed tracking")
 wait_for(function()
-  return pr.is_processed_file("file.txt")
-end, "processing toggle did not restore processing state")
+  return pr.is_viewed_file("file.txt")
+end, "viewed feature toggle did not restore viewed state")
+
+pr.config().processing.enabled = false
+assert(not pr.config().viewed.enabled, "processing compatibility alias did not update viewed config")
+pr.config().processing.enabled = true
 
 vim.api.nvim_win_set_cursor(0, { 1, 0 })
 pr.next_hunk()
