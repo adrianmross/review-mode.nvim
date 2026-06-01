@@ -37,7 +37,22 @@ case "$1 $2" in
     printf 'owner/repo\n'
     ;;
   "api repos/owner/repo/pulls/123/comments?per_page=100")
-    printf '[]\n'
+    printf '[{"id":1,"path":"file.txt","line":2,"body":"Needs review","user":{"login":"reviewer"}},{"id":2,"path":"file.txt","line":4,"body":"Check final line","user":{"login":"reviewer"}}]\n'
+    ;;
+  "api graphql")
+    args="$*"
+    if [[ "$args" == *"viewerViewedState"* ]]; then
+      printf '{"data":{"repository":{"pullRequest":{"id":"PR_node","files":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"path":"file.txt","viewerViewedState":"VIEWED"}]}}}}}\n'
+    elif [[ "$args" == *"pullRequest(number"* ]]; then
+      printf '{"data":{"repository":{"pullRequest":{"id":"PR_node"}}}}\n'
+    elif [[ "$args" == *"markFileAsViewed"* ]]; then
+      printf '{"data":{"markFileAsViewed":{"clientMutationId":null}}}\n'
+    elif [[ "$args" == *"unmarkFileAsViewed"* ]]; then
+      printf '{"data":{"unmarkFileAsViewed":{"clientMutationId":null}}}\n'
+    else
+      echo "unexpected gh graphql args: $*" >&2
+      exit 1
+    fi
     ;;
   *)
     echo "unexpected gh args: $*" >&2
