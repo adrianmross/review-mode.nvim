@@ -82,13 +82,13 @@ git init -q
 git config user.email test@example.com
 git config user.name Test
 git checkout -q -B main
-printf 'one\n\nbase\n' > file.txt
+printf 'one\n\nbase\nsame1\nsame2\nsame3\nsame4\nsame5\ntail\n' > file.txt
 mkdir -p nested
 printf 'alpha\nbase\nomega\n' > nested/other.txt
 git add file.txt nested/other.txt
 git commit -q -m base
 git checkout -q -b feature
-printf 'one\ntwo\n\nbase changed\n' > file.txt
+printf 'one\ntwo\n\nbase changed\nsame1\nsame2\nsame3\nsame4\nsame5\ntail\n' > file.txt
 printf 'alpha\nfeature\nomega\n' > nested/other.txt
 git add file.txt nested/other.txt
 git commit -q -m feature

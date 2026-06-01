@@ -13,6 +13,9 @@ local defaults = {
   },
   diff = {
     fast_diffopt = "internal,filler,closeoff,indent-heuristic,linematch:0",
+    full_file = false,
+    layout = "side_by_side",
+    unified_context = 3,
     use_fast_diffopt = true,
   },
   gitsigns = {
@@ -86,6 +89,9 @@ local state = {
   old_target_win = nil,
   old_loading = false,
   old_diffopt = nil,
+  old_fold_options = nil,
+  old_layout = nil,
+  old_path = nil,
 }
 
 local setup_done = false
@@ -93,6 +99,10 @@ local setup_done = false
 local function normalize_config(opts)
   opts = opts or {}
   local config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts)
+  if config.diff.layout ~= "side_by_side" and config.diff.layout ~= "unified" then
+    config.diff.layout = defaults.diff.layout
+  end
+  config.diff.unified_context = math.max(0, tonumber(config.diff.unified_context) or defaults.diff.unified_context)
 
   return config
 end
@@ -1776,9 +1786,65 @@ local function disable_diff_for_window(win)
   end
 end
 
+local function capture_fold_options(win)
+  if not win or not vim.api.nvim_win_is_valid(win) then
+    return
+  end
+
+  state.old_fold_options = state.old_fold_options or {}
+  if state.old_fold_options[win] then
+    return
+  end
+
+  state.old_fold_options[win] = {
+    foldenable = vim.wo[win].foldenable,
+    foldlevel = vim.wo[win].foldlevel,
+    foldmethod = vim.wo[win].foldmethod,
+  }
+end
+
+local function restore_fold_options()
+  for win, options in pairs(state.old_fold_options or {}) do
+    if vim.api.nvim_win_is_valid(win) then
+      pcall(function()
+        vim.wo[win].foldmethod = options.foldmethod
+        vim.wo[win].foldlevel = options.foldlevel
+        vim.wo[win].foldenable = options.foldenable
+      end)
+    end
+  end
+  state.old_fold_options = nil
+end
+
+local function apply_side_by_side_context()
+  local condensed = not state.config.diff.full_file
+  local previous_win = vim.api.nvim_get_current_win()
+  for _, win in ipairs({ state.old_target_win, state.old_win }) do
+    if win and vim.api.nvim_win_is_valid(win) then
+      capture_fold_options(win)
+      pcall(function()
+        vim.wo[win].foldmethod = "diff"
+        vim.wo[win].foldenable = condensed
+        if condensed then
+          vim.api.nvim_set_current_win(win)
+          vim.cmd("silent! normal! zM")
+        else
+          vim.wo[win].foldlevel = 99
+          vim.api.nvim_set_current_win(win)
+          vim.cmd("silent! normal! zR")
+        end
+      end)
+    end
+  end
+  if vim.api.nvim_win_is_valid(previous_win) then
+    vim.api.nvim_set_current_win(previous_win)
+  end
+end
+
 local function close_old_view()
   disable_diff_for_window(state.old_target_win)
   disable_diff_for_window(state.old_win)
+  restore_fold_options()
 
   if state.old_win and vim.api.nvim_win_is_valid(state.old_win) then
     vim.api.nvim_win_close(state.old_win, true)
@@ -1790,6 +1856,8 @@ local function close_old_view()
   state.old_buf = nil
   state.old_target_win = nil
   state.old_loading = false
+  state.old_layout = nil
+  state.old_path = nil
   restore_old_diffopt()
 end
 
@@ -1965,19 +2033,186 @@ function M.refresh()
   load_review_async(generation, { open_initial = false })
 end
 
+local function diff_context_lines()
+  if state.config.diff.full_file then
+    return 1000000
+  end
+  return state.config.diff.unified_context
+end
+
+local function write_temp_diff_file(tmpdir, side, path, lines)
+  local rel = vim.fs.joinpath(side, path)
+  local file = vim.fs.joinpath(tmpdir, rel)
+  local dir = vim.fs.dirname(file)
+  if dir then
+    vim.fn.mkdir(dir, "p")
+  end
+  vim.fn.writefile(lines, file, "b")
+  return rel
+end
+
+local function unified_diff_lines(diff, path)
+  local lines = split_blob_lines(diff)
+  if #lines == 0 then
+    return { "No differences: " .. path }
+  end
+
+  for index, line in ipairs(lines) do
+    if line:find("^diff %-%-git ") then
+      lines[index] = "diff --git base/" .. path .. " head/" .. path
+    elseif line:find("^%-%-%- ") then
+      lines[index] = "--- base/" .. path
+    elseif line:find("^%+%+%+ ") then
+      lines[index] = "+++ head/" .. path
+    end
+  end
+
+  return lines
+end
+
+local function open_old_side_by_side(path, current_win, current_buf, current_filetype, base_content)
+  close_old_view()
+
+  vim.api.nvim_set_current_win(current_win)
+  vim.cmd("vsplit")
+  state.old_win = vim.api.nvim_get_current_win()
+  state.old_target_win = current_win
+  state.old_buf = vim.api.nvim_create_buf(false, true)
+  state.old_layout = "side_by_side"
+  state.old_path = path
+  vim.api.nvim_win_set_buf(state.old_win, state.old_buf)
+  vim.api.nvim_buf_set_name(state.old_buf, "pr-base://" .. base_ref() .. "/" .. path)
+  vim.api.nvim_buf_set_lines(state.old_buf, 0, -1, false, split_blob_lines(base_content))
+  vim.bo[state.old_buf].buftype = "nofile"
+  vim.bo[state.old_buf].bufhidden = "wipe"
+  vim.bo[state.old_buf].modifiable = false
+  vim.bo[state.old_buf].readonly = true
+  vim.bo[state.old_buf].filetype = current_filetype
+
+  apply_old_diffopt()
+
+  vim.cmd("diffthis")
+  vim.api.nvim_set_current_win(current_win)
+  vim.cmd("diffthis")
+  apply_side_by_side_context()
+  vim.api.nvim_set_current_win(current_win)
+end
+
+local function open_old_unified(path, current_win, current_buf, base_content, generation)
+  local tmpdir = vim.fn.tempname()
+  local base_rel = write_temp_diff_file(tmpdir, "base", path, split_blob_lines(base_content))
+  local head_rel = write_temp_diff_file(tmpdir, "head", path, vim.api.nvim_buf_get_lines(current_buf, 0, -1, false))
+  local context = diff_context_lines()
+
+  vim.system(
+    { "git", "diff", "--no-index", "--no-color", "--unified=" .. tostring(context), "--", base_rel, head_rel },
+    { text = true, cwd = tmpdir },
+    function(result)
+      vim.schedule(function()
+        pcall(vim.fn.delete, tmpdir, "rf")
+        if not is_current(generation) then
+          return
+        end
+
+        state.old_loading = false
+        if result.code ~= 0 and result.code ~= 1 then
+          vim.notify(
+            "PR review unified diff: " .. trim(result.stderr ~= "" and result.stderr or result.stdout),
+            vim.log.levels.WARN
+          )
+          return
+        end
+
+        if not vim.api.nvim_win_is_valid(current_win) or not vim.api.nvim_buf_is_valid(current_buf) then
+          vim.notify("PR review unified diff: target window is no longer valid", vim.log.levels.WARN)
+          return
+        end
+
+        close_old_view()
+
+        vim.api.nvim_set_current_win(current_win)
+        vim.cmd("vsplit")
+        state.old_win = vim.api.nvim_get_current_win()
+        state.old_target_win = current_win
+        state.old_buf = vim.api.nvim_create_buf(false, true)
+        state.old_layout = "unified"
+        state.old_path = path
+        vim.api.nvim_win_set_buf(state.old_win, state.old_buf)
+        vim.api.nvim_buf_set_name(state.old_buf, "pr-diff://" .. base_ref() .. "/" .. path)
+        vim.api.nvim_buf_set_lines(state.old_buf, 0, -1, false, unified_diff_lines(result.stdout or "", path))
+        vim.bo[state.old_buf].buftype = "nofile"
+        vim.bo[state.old_buf].bufhidden = "wipe"
+        vim.bo[state.old_buf].modifiable = false
+        vim.bo[state.old_buf].readonly = true
+        vim.bo[state.old_buf].filetype = "diff"
+        vim.api.nvim_set_current_win(current_win)
+      end)
+    end
+  )
+end
+
+local function open_old_view(path, current_win, current_buf)
+  local current_filetype = vim.bo[current_buf].filetype
+  local generation = state.generation
+  state.old_loading = true
+
+  system_async({ "git", "show", base_ref() .. ":" .. path }, { cwd = state.root, raw = true }, function(content, err)
+    if not is_current(generation) then
+      return
+    end
+
+    if content == nil then
+      state.old_loading = false
+      vim.notify("PR review old version: " .. tostring(err or "file not present at base"), vim.log.levels.WARN)
+      return
+    end
+
+    if not vim.api.nvim_win_is_valid(current_win) or not vim.api.nvim_buf_is_valid(current_buf) then
+      state.old_loading = false
+      vim.notify("PR review old version: target window is no longer valid", vim.log.levels.WARN)
+      return
+    end
+
+    if state.config.diff.layout == "unified" then
+      open_old_unified(path, current_win, current_buf, content, generation)
+      return
+    end
+
+    state.old_loading = false
+    open_old_side_by_side(path, current_win, current_buf, current_filetype, content)
+  end)
+end
+
+local function refresh_old_view()
+  if not (state.old_win and vim.api.nvim_win_is_valid(state.old_win)) then
+    return false
+  end
+
+  local path = state.old_path
+  local target_win = state.old_target_win
+  if not path or not target_win or not vim.api.nvim_win_is_valid(target_win) then
+    return false
+  end
+
+  local target_buf = vim.api.nvim_win_get_buf(target_win)
+  close_old_view()
+  open_old_view(path, target_win, target_buf)
+  return true
+end
+
 function M.old_toggle()
   if not ensure_active() then
+    return
+  end
+
+  if state.old_win and vim.api.nvim_win_is_valid(state.old_win) then
+    close_old_view()
     return
   end
 
   local path = current_relpath()
   if not path then
     vim.notify("PR review old version: current buffer is not under repo root", vim.log.levels.WARN)
-    return
-  end
-
-  if state.old_win and vim.api.nvim_win_is_valid(state.old_win) then
-    close_old_view()
     return
   end
 
@@ -1988,48 +2223,19 @@ function M.old_toggle()
 
   local current_win = vim.api.nvim_get_current_win()
   local current_buf = vim.api.nvim_get_current_buf()
-  local current_filetype = vim.bo[current_buf].filetype
-  local generation = state.generation
-  state.old_loading = true
+  open_old_view(path, current_win, current_buf)
+end
 
-  system_async({ "git", "show", base_ref() .. ":" .. path }, { cwd = state.root, raw = true }, function(content, err)
-    if not is_current(generation) then
-      return
-    end
+function M.toggle_diff_layout()
+  state.config.diff.layout = state.config.diff.layout == "side_by_side" and "unified" or "side_by_side"
+  vim.notify("PR review diff layout: " .. (state.config.diff.layout == "unified" and "unified" or "side-by-side"))
+  refresh_old_view()
+end
 
-    state.old_loading = false
-    if content == nil then
-      vim.notify("PR review old version: " .. tostring(err or "file not present at base"), vim.log.levels.WARN)
-      return
-    end
-
-    if not vim.api.nvim_win_is_valid(current_win) or not vim.api.nvim_buf_is_valid(current_buf) then
-      vim.notify("PR review old version: target window is no longer valid", vim.log.levels.WARN)
-      return
-    end
-
-    close_old_view()
-
-    vim.api.nvim_set_current_win(current_win)
-    vim.cmd("vsplit")
-    state.old_win = vim.api.nvim_get_current_win()
-    state.old_target_win = current_win
-    state.old_buf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_win_set_buf(state.old_win, state.old_buf)
-    vim.api.nvim_buf_set_name(state.old_buf, "pr-base://" .. base_ref() .. "/" .. path)
-    vim.api.nvim_buf_set_lines(state.old_buf, 0, -1, false, split_blob_lines(content))
-    vim.bo[state.old_buf].buftype = "nofile"
-    vim.bo[state.old_buf].bufhidden = "wipe"
-    vim.bo[state.old_buf].modifiable = false
-    vim.bo[state.old_buf].readonly = true
-    vim.bo[state.old_buf].filetype = current_filetype
-
-    apply_old_diffopt()
-
-    vim.cmd("diffthis")
-    vim.api.nvim_set_current_win(current_win)
-    vim.cmd("diffthis")
-  end)
+function M.toggle_diff_full_file()
+  state.config.diff.full_file = not state.config.diff.full_file
+  vim.notify("PR review diff context: " .. (state.config.diff.full_file and "full file" or "condensed"))
+  refresh_old_view()
 end
 
 function M.next_hunk()
@@ -2782,6 +2988,16 @@ function M.setup(opts)
       "PrReviewOldToggle",
       M.old_toggle,
       { desc = "Toggle old PR base version beside current file" }
+    )
+    vim.api.nvim_create_user_command(
+      "PrReviewDiffLayoutToggle",
+      M.toggle_diff_layout,
+      { desc = "Toggle PR diff layout between side-by-side and unified" }
+    )
+    vim.api.nvim_create_user_command(
+      "PrReviewDiffFullToggle",
+      M.toggle_diff_full_file,
+      { desc = "Toggle PR diff context between condensed and full file" }
     )
     vim.api.nvim_create_user_command(
       "PrReviewThread",
