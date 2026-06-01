@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/adrianmross/pr-review.nvim/compare/v0.6.0...v0.7.0) (2026-06-01)
+
+
+### Features
+
+* add diff view toggles ([8fa1627](https://github.com/adrianmross/pr-review.nvim/commit/8fa162746bc2d254fe4fdd193e50806671f3c3b7))
+
 ## [0.6.0](https://github.com/adrianmross/pr-review.nvim/compare/v0.5.0...v0.6.0) (2026-06-01)
 
 
