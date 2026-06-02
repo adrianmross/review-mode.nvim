@@ -2260,6 +2260,7 @@ function M.toggle_diff_layout()
   state.config.diff.layout = state.config.diff.layout == "side_by_side" and "unified" or "side_by_side"
   vim.notify("PR review diff layout: " .. (state.config.diff.layout == "unified" and "unified" or "side-by-side"))
   refresh_old_view()
+  vim.cmd("redrawtabline")
 end
 
 function M.toggle_diff_full_file()
@@ -2267,9 +2268,11 @@ function M.toggle_diff_full_file()
   vim.notify("PR review diff context: " .. (state.config.diff.full_file and "full file" or "condensed"))
   if state.old_layout == "side_by_side" and old_view_is_open() then
     apply_side_by_side_context()
+    vim.cmd("redrawtabline")
     return
   end
   refresh_old_view()
+  vim.cmd("redrawtabline")
 end
 
 function M.next_hunk()
