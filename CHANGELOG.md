@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/adrianmross/pr-review.nvim/compare/v0.7.1...v0.7.2) (2026-06-02)
+
+
+### Bug Fixes
+
+* redraw tabline after diff toggles ([b50e35f](https://github.com/adrianmross/pr-review.nvim/commit/b50e35ffd33ae6a61fd478acfb6ba37750a25ebc))
+
 ## [0.7.1](https://github.com/adrianmross/pr-review.nvim/compare/v0.7.0...v0.7.1) (2026-06-02)
 
 
