@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.3](https://github.com/adrianmross/pr-review.nvim/compare/v0.8.2...v0.8.3) (2026-06-02)
+
+
+### Bug Fixes
+
+* show side-by-side partial highlights ([d0710af](https://github.com/adrianmross/pr-review.nvim/commit/d0710af5f1172202b9d9a434117da2d559670059))
+
 ## [0.8.2](https://github.com/adrianmross/pr-review.nvim/compare/v0.8.1...v0.8.2) (2026-06-02)
 
 
