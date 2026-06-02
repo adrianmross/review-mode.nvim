@@ -2,6 +2,7 @@ local M = {}
 
 local ns = vim.api.nvim_create_namespace("pr_review_normal")
 local diff_ns = vim.api.nvim_create_namespace("pr_review_diff")
+local picker_ns = vim.api.nvim_create_namespace("pr_review_picker")
 local cache_dir = vim.fs.joinpath(vim.fn.stdpath("cache"), "pr-review-comments")
 local default_comment_sign_text = ""
 local defaults = {
@@ -61,6 +62,7 @@ local state = {
   head = nil,
   root = nil,
   files = {},
+  file_stats = {},
   file_order = {},
   file_index = {},
   dirs = {},
@@ -275,6 +277,7 @@ end
 
 local function reset_changed_data()
   state.files = {}
+  state.file_stats = {}
   state.file_order = {}
   state.file_index = {}
   state.dirs = {}
@@ -1178,6 +1181,7 @@ end
 
 local function parse_changed_files(output)
   state.files = {}
+  state.file_stats = {}
   state.file_order = {}
   state.file_index = {}
   state.dirs = {}
@@ -1201,6 +1205,36 @@ local function parse_changed_files(output)
         state.dirs[dir] = true
         dir = vim.fs.dirname(dir)
       end
+    end
+  end
+end
+
+local function parse_numstat_count(value)
+  if value == "-" then
+    return nil
+  end
+  return tonumber(value) or 0
+end
+
+local function numstat_path(path)
+  path = path or ""
+  local renamed = path:match("{.-=>%s*(.-)}")
+  if renamed then
+    return (path:gsub("{.-=>%s*.-}", renamed))
+  end
+  return path:match("[^\t]+$") or path
+end
+
+local function parse_changed_file_stats(output)
+  state.file_stats = {}
+
+  for line in (output or ""):gmatch("[^\n]+") do
+    local additions, deletions, path = line:match("^(%S+)%s+(%S+)%s+(.+)$")
+    if additions and deletions and path then
+      state.file_stats[numstat_path(path)] = {
+        additions = parse_numstat_count(additions),
+        deletions = parse_numstat_count(deletions),
+      }
     end
   end
 end
@@ -1248,8 +1282,22 @@ local function build_changed_maps_async(generation, callback)
       end
 
       parse_changed_files(output)
-      state.maps_loaded = true
-      callback(nil)
+      system_async(
+        { "git", "diff", "--numstat", "--find-renames", "--no-ext-diff", "--no-color", base_ref() .. "...HEAD" },
+        { cwd = state.root },
+        function(numstat)
+          if not is_current(generation) then
+            return
+          end
+
+          if numstat then
+            parse_changed_file_stats(numstat)
+          end
+          state.maps_loaded = true
+          state.maps_loading = false
+          callback(nil)
+        end
+      )
     end
   )
 end
@@ -2747,7 +2795,22 @@ function M.toggle_comments()
 end
 
 local viewed_picker = nil
-local viewed_picker_header_lines = 4
+
+local picker_hls = {
+  add = "PrReviewPickerAdd",
+  delete = "PrReviewPickerDelete",
+  prompt = "PrReviewPickerPrompt",
+  viewed = "PrReviewPickerViewed",
+  unviewed = "PrReviewPickerUnviewed",
+}
+
+local function ensure_viewed_picker_highlights()
+  pcall(vim.api.nvim_set_hl, 0, picker_hls.add, { default = true, fg = "#22C55E" })
+  pcall(vim.api.nvim_set_hl, 0, picker_hls.delete, { default = true, fg = "#EF4444" })
+  pcall(vim.api.nvim_set_hl, 0, picker_hls.prompt, { default = true, fg = "#38BDF8", bold = true })
+  pcall(vim.api.nvim_set_hl, 0, picker_hls.viewed, { default = true, fg = "#22C55E" })
+  pcall(vim.api.nvim_set_hl, 0, picker_hls.unviewed, { default = true, fg = "#F59E0B" })
+end
 
 local function normalize_viewed_filter(filter)
   filter = filter or "all"
@@ -2757,36 +2820,79 @@ local function normalize_viewed_filter(filter)
   return "all"
 end
 
-local function fuzzy_match(value, query)
+local function fuzzy_score(value, query)
   query = vim.trim(query or ""):lower()
   if query == "" then
-    return true
+    return 0
   end
 
   value = tostring(value or ""):lower()
   local index = 1
+  local score = 0
+  local streak = 0
+  local first_match = nil
   for char in query:gmatch(".") do
-    index = value:find(char, index, true)
-    if not index then
-      return false
+    local found = value:find(char, index, true)
+    if not found then
+      return nil
     end
-    index = index + 1
+
+    first_match = first_match or found
+    if found == index then
+      streak = streak + 1
+      score = score + 8 + streak
+    else
+      streak = 0
+      score = score + 2
+    end
+    if found == 1 or value:sub(found - 1, found - 1):match("[/%-_%.%s]") then
+      score = score + 4
+    end
+    index = found + 1
   end
 
-  return true
+  return score - (first_match or 0)
+end
+
+local function file_stats(path)
+  return state.file_stats[path] or { additions = 0, deletions = 0 }
+end
+
+local function stat_text(value, prefix)
+  if value == nil then
+    return prefix .. "-"
+  end
+  return prefix .. tostring(value)
+end
+
+local function viewed_picker_status(viewed, unviewed)
+  if viewed then
+    return "✓"
+  end
+  return string.format("☐ %d", unviewed)
 end
 
 local function viewed_picker_item(path)
   local viewed = state.viewed[path] == true
   local unviewed = M.unviewed_count(path)
   local comments = M.unresolved_comment_count(path)
-  local review_icon = viewed and "✓" or string.format("☐ %d", unviewed)
-  local comment_icon = comments > 0 and comment_count_label(comments) or "   "
+  local stats = file_stats(path)
+  local review_icon = viewed_picker_status(viewed, unviewed)
+  local comment_icon = comments > 0 and comment_count_label(comments) or ""
+  local additions = stat_text(stats.additions, "+")
+  local deletions = stat_text(stats.deletions, "-")
+  local label = vim.trim(string.format("%-4s %5s %5s %-4s %s", review_icon, additions, deletions, comment_icon, path))
 
   return {
     path = path,
     viewed = viewed,
-    label = string.format("%-4s %-4s %s", review_icon, comment_icon, path),
+    unviewed = unviewed,
+    comments = comments,
+    additions = stats.additions,
+    deletions = stats.deletions,
+    review_icon = review_icon,
+    comment_icon = comment_icon,
+    label = label,
     search = table.concat({
       path,
       viewed and "viewed" or "unviewed",
@@ -2801,49 +2907,228 @@ local function viewed_picker_items(filter, query)
     local viewed = state.viewed[path] == true
     if filter == "all" or (filter == "viewed" and viewed) or (filter == "unviewed" and not viewed) then
       local item = viewed_picker_item(path)
-      if fuzzy_match(item.search, query) then
+      local score = fuzzy_score(item.search, query)
+      if score then
+        item.score = score
+        item.index = state.file_index[path] or math.huge
         items[#items + 1] = item
       end
     end
   end
+  table.sort(items, function(left, right)
+    if left.score == right.score then
+      return left.index < right.index
+    end
+    return left.score > right.score
+  end)
   return items
 end
 
-local function close_viewed_picker()
-  if viewed_picker and viewed_picker.winid and vim.api.nvim_win_is_valid(viewed_picker.winid) then
-    pcall(vim.api.nvim_win_close, viewed_picker.winid, true)
+local function close_win(winid)
+  if winid and vim.api.nvim_win_is_valid(winid) then
+    pcall(vim.api.nvim_win_close, winid, true)
   end
+end
+
+local function close_viewed_picker()
+  close_win(viewed_picker and viewed_picker.prompt_winid)
+  close_win(viewed_picker and viewed_picker.list_winid)
+  close_win(viewed_picker and viewed_picker.preview_winid)
   viewed_picker = nil
 end
 
 local function selected_viewed_picker_item()
-  if not viewed_picker or not viewed_picker.winid or not vim.api.nvim_win_is_valid(viewed_picker.winid) then
+  if not viewed_picker then
     return nil
   end
 
-  local line = vim.api.nvim_win_get_cursor(viewed_picker.winid)[1]
-  local index = line - viewed_picker_header_lines
-  if index < 1 then
-    index = 1
-    pcall(vim.api.nvim_win_set_cursor, viewed_picker.winid, { viewed_picker_header_lines + 1, 0 })
+  if
+    viewed_picker.list_winid
+    and vim.api.nvim_win_is_valid(viewed_picker.list_winid)
+    and vim.api.nvim_get_current_win() == viewed_picker.list_winid
+  then
+    local line = vim.api.nvim_win_get_cursor(viewed_picker.list_winid)[1]
+    if viewed_picker.items[line] then
+      viewed_picker.selected = line
+    end
   end
 
-  return viewed_picker.items[index]
+  return viewed_picker.items[viewed_picker.selected or 1]
 end
 
-local function render_viewed_picker()
-  if not viewed_picker or not vim.api.nvim_buf_is_valid(viewed_picker.bufnr) then
+local function prompt_query()
+  if not viewed_picker or not vim.api.nvim_buf_is_valid(viewed_picker.prompt_bufnr) then
+    return ""
+  end
+
+  local line = vim.api.nvim_buf_get_lines(viewed_picker.prompt_bufnr, 0, 1, false)[1] or ""
+  return line:gsub("^%s*❯%s*", "")
+end
+
+local function set_buffer_lines(bufnr, lines)
+  if not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
 
-  viewed_picker.items = viewed_picker_items(viewed_picker.filter, viewed_picker.query)
+  vim.bo[bufnr].modifiable = true
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+  vim.bo[bufnr].modifiable = false
+end
 
+local function viewed_picker_preview_lines(item)
+  if not item then
+    return { "No matching PR files" }
+  end
+
+  local stats = file_stats(item.path)
   local lines = {
-    string.format("PR review files [%s]", viewed_picker.filter),
-    string.format("Search: %s", viewed_picker.query ~= "" and viewed_picker.query or "<empty>"),
-    "Enter/o open  Space/t toggle  / search  a all  v viewed  u unviewed  q close",
+    item.path,
+    string.format(
+      "%s  %s  %s",
+      item.viewed and "viewed" or "unviewed",
+      stat_text(stats.additions, "+"),
+      stat_text(stats.deletions, "-")
+    ),
     "",
   }
+
+  viewed_picker.preview_cache[item.path] = viewed_picker.preview_cache[item.path]
+    or system({
+      "git",
+      "diff",
+      "--find-renames",
+      "--no-ext-diff",
+      "--no-color",
+      "--unified=80",
+      base_ref() .. "...HEAD",
+      "--",
+      item.path,
+    }, { cwd = state.root, raw = true })
+
+  local diff = viewed_picker.preview_cache[item.path] or ""
+  if diff == "" then
+    lines[#lines + 1] = "No diff preview available"
+    return lines
+  end
+
+  for line in diff:gmatch("[^\n]+") do
+    lines[#lines + 1] = line
+    if #lines >= math.max(20, vim.o.lines - 8) then
+      lines[#lines + 1] = "..."
+      break
+    end
+  end
+
+  return lines
+end
+
+local function highlight_diff_preview(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+
+  vim.api.nvim_buf_clear_namespace(bufnr, picker_ns, 0, -1)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  for index, line in ipairs(lines) do
+    local hl = nil
+    if line:match("^%+") and not line:match("^%+%+%+") then
+      hl = "DiffAdd"
+    elseif line:match("^%-") and not line:match("^%-%-%-") then
+      hl = "DiffDelete"
+    elseif line:match("^@@") then
+      hl = "DiffText"
+    end
+    if hl then
+      vim.api.nvim_buf_set_extmark(bufnr, picker_ns, index - 1, 0, {
+        end_col = #line,
+        hl_group = hl,
+      })
+    end
+  end
+end
+
+local function render_viewed_picker_preview()
+  if not viewed_picker or not vim.api.nvim_buf_is_valid(viewed_picker.preview_bufnr) then
+    return
+  end
+
+  set_buffer_lines(viewed_picker.preview_bufnr, viewed_picker_preview_lines(selected_viewed_picker_item()))
+  highlight_diff_preview(viewed_picker.preview_bufnr)
+end
+
+local function highlight_viewed_picker_items()
+  if not viewed_picker or not vim.api.nvim_buf_is_valid(viewed_picker.list_bufnr) then
+    return
+  end
+
+  vim.api.nvim_buf_clear_namespace(viewed_picker.list_bufnr, picker_ns, 0, -1)
+  for index, item in ipairs(viewed_picker.items) do
+    local line = item.label
+    local add_start = line:find("%+", 1, true)
+    local delete_start = line:find("%-", add_start and add_start + 1 or 1, true)
+    local path_start = line:find(item.path, 1, true)
+    vim.api.nvim_buf_set_extmark(viewed_picker.list_bufnr, picker_ns, index - 1, 0, {
+      end_col = #item.review_icon,
+      hl_group = item.viewed and picker_hls.viewed or picker_hls.unviewed,
+    })
+    if add_start then
+      vim.api.nvim_buf_set_extmark(viewed_picker.list_bufnr, picker_ns, index - 1, add_start - 1, {
+        end_col = add_start + #stat_text(item.additions, "+") - 1,
+        hl_group = picker_hls.add,
+      })
+    end
+    if delete_start then
+      vim.api.nvim_buf_set_extmark(viewed_picker.list_bufnr, picker_ns, index - 1, delete_start - 1, {
+        end_col = delete_start + #stat_text(item.deletions, "-") - 1,
+        hl_group = picker_hls.delete,
+      })
+    end
+    if item.comments > 0 then
+      local comment_start = line:find(item.comment_icon, 1, true)
+      if comment_start then
+        vim.api.nvim_buf_set_extmark(viewed_picker.list_bufnr, picker_ns, index - 1, comment_start - 1, {
+          end_col = comment_start + #item.comment_icon - 1,
+          hl_group = state.config.comments.sign_hl_group or "DiagnosticInfo",
+        })
+      end
+    end
+    if path_start then
+      vim.api.nvim_buf_set_extmark(viewed_picker.list_bufnr, picker_ns, index - 1, path_start - 1, {
+        end_col = #line,
+        hl_group = "Directory",
+      })
+    end
+  end
+end
+
+local function render_viewed_picker_prompt()
+  if not viewed_picker or not vim.api.nvim_buf_is_valid(viewed_picker.prompt_bufnr) then
+    return
+  end
+
+  local query = viewed_picker.query or ""
+  vim.bo[viewed_picker.prompt_bufnr].modifiable = true
+  vim.api.nvim_buf_set_lines(viewed_picker.prompt_bufnr, 0, -1, false, { "❯ " .. query })
+  vim.api.nvim_buf_clear_namespace(viewed_picker.prompt_bufnr, picker_ns, 0, -1)
+  vim.api.nvim_buf_set_extmark(viewed_picker.prompt_bufnr, picker_ns, 0, 0, {
+    end_col = 1,
+    hl_group = picker_hls.prompt,
+  })
+  if viewed_picker.prompt_winid and vim.api.nvim_win_is_valid(viewed_picker.prompt_winid) then
+    pcall(vim.api.nvim_win_set_cursor, viewed_picker.prompt_winid, { 1, #("❯ " .. query) })
+  end
+end
+
+local function render_viewed_picker()
+  if not viewed_picker or not vim.api.nvim_buf_is_valid(viewed_picker.list_bufnr) then
+    return
+  end
+
+  viewed_picker.query = prompt_query()
+  viewed_picker.items = viewed_picker_items(viewed_picker.filter, viewed_picker.query)
+  viewed_picker.selected = math.min(math.max(viewed_picker.selected or 1, 1), math.max(#viewed_picker.items, 1))
+
+  local lines = {}
 
   if #viewed_picker.items == 0 then
     lines[#lines + 1] = "No matching PR files"
@@ -2853,14 +3138,12 @@ local function render_viewed_picker()
     end
   end
 
-  vim.bo[viewed_picker.bufnr].modifiable = true
-  vim.api.nvim_buf_set_lines(viewed_picker.bufnr, 0, -1, false, lines)
-  vim.bo[viewed_picker.bufnr].modifiable = false
+  set_buffer_lines(viewed_picker.list_bufnr, lines)
+  highlight_viewed_picker_items()
+  render_viewed_picker_preview()
 
-  if viewed_picker.winid and vim.api.nvim_win_is_valid(viewed_picker.winid) then
-    local line =
-      math.min(math.max(viewed_picker_header_lines + 1, vim.api.nvim_win_get_cursor(viewed_picker.winid)[1]), #lines)
-    pcall(vim.api.nvim_win_set_cursor, viewed_picker.winid, { line, 0 })
+  if viewed_picker.list_winid and vim.api.nvim_win_is_valid(viewed_picker.list_winid) and #viewed_picker.items > 0 then
+    pcall(vim.api.nvim_win_set_cursor, viewed_picker.list_winid, { viewed_picker.selected, 0 })
   end
 end
 
@@ -2869,9 +3152,10 @@ local function prompt_viewed_picker_search()
     return
   end
 
-  local query = vim.fn.input("PR file search: ", viewed_picker.query)
-  viewed_picker.query = query or ""
-  render_viewed_picker()
+  if viewed_picker.prompt_winid and vim.api.nvim_win_is_valid(viewed_picker.prompt_winid) then
+    vim.api.nvim_set_current_win(viewed_picker.prompt_winid)
+    vim.cmd.startinsert({ bang = true })
+  end
 end
 
 local function set_viewed_picker_filter(filter)
@@ -2880,7 +3164,26 @@ local function set_viewed_picker_filter(filter)
   end
 
   viewed_picker.filter = normalize_viewed_filter(filter)
+  viewed_picker.selected = 1
+  if viewed_picker.prompt_winid and vim.api.nvim_win_is_valid(viewed_picker.prompt_winid) then
+    vim.api.nvim_win_set_config(viewed_picker.prompt_winid, {
+      title = string.format(" PR review files [%s] ", viewed_picker.filter),
+      title_pos = "left",
+    })
+  end
   render_viewed_picker()
+end
+
+local function move_viewed_picker_selection(delta)
+  if not viewed_picker or #viewed_picker.items == 0 then
+    return
+  end
+
+  viewed_picker.selected = ((viewed_picker.selected or 1) - 1 + delta) % #viewed_picker.items + 1
+  if viewed_picker.list_winid and vim.api.nvim_win_is_valid(viewed_picker.list_winid) then
+    pcall(vim.api.nvim_win_set_cursor, viewed_picker.list_winid, { viewed_picker.selected, 0 })
+  end
+  render_viewed_picker_preview()
 end
 
 local function toggle_viewed_picker_item()
@@ -2890,6 +3193,7 @@ local function toggle_viewed_picker_item()
   end
 
   M.toggle_viewed(item.path)
+  viewed_picker.preview_cache[item.path] = nil
   render_viewed_picker()
 end
 
@@ -2903,69 +3207,212 @@ local function open_viewed_picker_item()
   jump_to_path(item.path, 1)
 end
 
-local function open_viewed_picker(filter)
-  filter = normalize_viewed_filter(filter)
-
-  if viewed_picker and viewed_picker.winid and vim.api.nvim_win_is_valid(viewed_picker.winid) then
-    viewed_picker.filter = filter
-    render_viewed_picker()
-    vim.api.nvim_set_current_win(viewed_picker.winid)
+local function update_viewed_picker_query()
+  if not viewed_picker then
     return
   end
 
+  local query = prompt_query()
+  if query == viewed_picker.query then
+    return
+  end
+
+  viewed_picker.query = query
+  viewed_picker.selected = 1
+  render_viewed_picker()
+end
+
+local function set_picker_window_options(winid)
+  if not winid or not vim.api.nvim_win_is_valid(winid) then
+    return
+  end
+
+  vim.wo[winid].number = false
+  vim.wo[winid].relativenumber = false
+  vim.wo[winid].signcolumn = "no"
+  vim.wo[winid].wrap = false
+end
+
+local function create_picker_buffer(filetype)
   local bufnr = vim.api.nvim_create_buf(false, true)
   vim.bo[bufnr].buftype = "nofile"
   vim.bo[bufnr].bufhidden = "wipe"
-  vim.bo[bufnr].filetype = "pr-review-menu"
+  vim.bo[bufnr].filetype = filetype
   vim.bo[bufnr].swapfile = false
+  return bufnr
+end
 
-  local width = math.min(math.max(64, math.floor(vim.o.columns * 0.72)), math.max(32, vim.o.columns - 4))
-  local height = math.min(math.max(10, #state.file_order + viewed_picker_header_lines), math.max(8, vim.o.lines - 4))
+local function open_viewed_picker(filter)
+  filter = normalize_viewed_filter(filter)
+
+  if viewed_picker and viewed_picker.prompt_winid and vim.api.nvim_win_is_valid(viewed_picker.prompt_winid) then
+    viewed_picker.filter = filter
+    viewed_picker.selected = 1
+    if viewed_picker.prompt_winid and vim.api.nvim_win_is_valid(viewed_picker.prompt_winid) then
+      vim.api.nvim_win_set_config(viewed_picker.prompt_winid, {
+        title = string.format(" PR review files [%s] ", viewed_picker.filter),
+        title_pos = "left",
+      })
+    end
+    render_viewed_picker()
+    vim.api.nvim_set_current_win(viewed_picker.prompt_winid)
+    vim.cmd.startinsert({ bang = true })
+    return
+  end
+
+  ensure_viewed_picker_highlights()
+
+  local width = math.min(math.max(88, math.floor(vim.o.columns * 0.86)), math.max(44, vim.o.columns - 4))
+  local height = math.min(math.max(16, math.floor(vim.o.lines * 0.72)), math.max(10, vim.o.lines - 4))
   local row = math.max(0, math.floor((vim.o.lines - height) / 2) - 1)
   local col = math.max(0, math.floor((vim.o.columns - width) / 2))
-  local winid = vim.api.nvim_open_win(bufnr, true, {
+  local body_height = math.max(8, height - 3)
+  local list_width = math.max(36, math.floor(width * 0.48))
+  local preview_width = math.max(24, width - list_width - 2)
+
+  local prompt_bufnr = create_picker_buffer("pr-review-menu-prompt")
+  local list_bufnr = create_picker_buffer("pr-review-menu")
+  local preview_bufnr = create_picker_buffer("pr-review-preview")
+
+  local prompt_winid = vim.api.nvim_open_win(prompt_bufnr, true, {
     relative = "editor",
     row = row,
     col = col,
     width = width,
-    height = height,
+    height = 1,
     style = "minimal",
     border = "rounded",
+    title = string.format(" PR review files [%s] ", filter),
+    title_pos = "left",
+  })
+  local list_winid = vim.api.nvim_open_win(list_bufnr, false, {
+    relative = "editor",
+    row = row + 3,
+    col = col,
+    width = list_width,
+    height = body_height,
+    style = "minimal",
+    border = "rounded",
+    title = " Results ",
+    title_pos = "left",
+    footer = " <CR> open  <C-t>/Space toggle  <C-a>/<C-v>/<C-u> filter  <Esc> close ",
+    footer_pos = "left",
+  })
+  local preview_winid = vim.api.nvim_open_win(preview_bufnr, false, {
+    relative = "editor",
+    row = row + 3,
+    col = col + list_width + 2,
+    width = preview_width,
+    height = body_height,
+    style = "minimal",
+    border = "rounded",
+    title = " Preview ",
+    title_pos = "left",
   })
 
   viewed_picker = {
-    bufnr = bufnr,
-    winid = winid,
+    bufnr = list_bufnr,
+    winid = list_winid,
+    prompt_bufnr = prompt_bufnr,
+    prompt_winid = prompt_winid,
+    list_bufnr = list_bufnr,
+    list_winid = list_winid,
+    preview_bufnr = preview_bufnr,
+    preview_winid = preview_winid,
     filter = filter,
     query = "",
     items = {},
+    selected = 1,
+    preview_cache = {},
   }
 
-  vim.wo[winid].cursorline = true
-  vim.wo[winid].wrap = false
+  vim.wo[list_winid].cursorline = true
+  set_picker_window_options(prompt_winid)
+  set_picker_window_options(list_winid)
+  set_picker_window_options(preview_winid)
 
-  local function map(lhs, callback)
-    vim.keymap.set("n", lhs, callback, { buffer = bufnr, nowait = true, silent = true })
+  local function map(bufnr, mode, lhs, callback)
+    vim.keymap.set(mode, lhs, callback, { buffer = bufnr, nowait = true, silent = true })
+  end
+  local picker_group = vim.api.nvim_create_augroup("pr_review_viewed_picker", { clear = true })
+
+  for _, bufnr in ipairs({ prompt_bufnr, list_bufnr, preview_bufnr }) do
+    map(bufnr, "n", "q", close_viewed_picker)
+    map(bufnr, "n", "<Esc>", close_viewed_picker)
+    map(bufnr, "n", "<CR>", open_viewed_picker_item)
+    map(bufnr, "n", "o", open_viewed_picker_item)
+    map(bufnr, "n", "<Space>", toggle_viewed_picker_item)
+    map(bufnr, "n", "t", toggle_viewed_picker_item)
+    map(bufnr, "n", "/", prompt_viewed_picker_search)
+    map(bufnr, "n", "j", function()
+      move_viewed_picker_selection(1)
+    end)
+    map(bufnr, "n", "k", function()
+      move_viewed_picker_selection(-1)
+    end)
+    map(bufnr, "n", "<Down>", function()
+      move_viewed_picker_selection(1)
+    end)
+    map(bufnr, "n", "<Up>", function()
+      move_viewed_picker_selection(-1)
+    end)
   end
 
-  map("q", close_viewed_picker)
-  map("<Esc>", close_viewed_picker)
-  map("<CR>", open_viewed_picker_item)
-  map("o", open_viewed_picker_item)
-  map("<Space>", toggle_viewed_picker_item)
-  map("t", toggle_viewed_picker_item)
-  map("/", prompt_viewed_picker_search)
-  map("a", function()
+  map(prompt_bufnr, "i", "<Esc>", close_viewed_picker)
+  map(prompt_bufnr, "i", "<CR>", open_viewed_picker_item)
+  map(prompt_bufnr, "i", "<Down>", function()
+    move_viewed_picker_selection(1)
+  end)
+  map(prompt_bufnr, "i", "<Up>", function()
+    move_viewed_picker_selection(-1)
+  end)
+  map(prompt_bufnr, "i", "<C-n>", function()
+    move_viewed_picker_selection(1)
+  end)
+  map(prompt_bufnr, "i", "<C-p>", function()
+    move_viewed_picker_selection(-1)
+  end)
+  map(prompt_bufnr, "i", "<C-t>", toggle_viewed_picker_item)
+  map(prompt_bufnr, "i", "<C-a>", function()
     set_viewed_picker_filter("all")
   end)
-  map("v", function()
+  map(prompt_bufnr, "i", "<C-v>", function()
     set_viewed_picker_filter("viewed")
   end)
-  map("u", function()
+  map(prompt_bufnr, "i", "<C-u>", function()
     set_viewed_picker_filter("unviewed")
   end)
 
+  for _, bufnr in ipairs({ list_bufnr, preview_bufnr }) do
+    map(bufnr, "n", "a", function()
+      set_viewed_picker_filter("all")
+    end)
+    map(bufnr, "n", "v", function()
+      set_viewed_picker_filter("viewed")
+    end)
+    map(bufnr, "n", "u", function()
+      set_viewed_picker_filter("unviewed")
+    end)
+  end
+
+  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+    group = picker_group,
+    buffer = prompt_bufnr,
+    callback = update_viewed_picker_query,
+  })
+  vim.api.nvim_create_autocmd("WinClosed", {
+    group = picker_group,
+    callback = function(args)
+      if viewed_picker and tonumber(args.match) == viewed_picker.prompt_winid then
+        close_viewed_picker()
+      end
+    end,
+  })
+
+  render_viewed_picker_prompt()
   render_viewed_picker()
+  vim.api.nvim_set_current_win(prompt_winid)
+  vim.cmd.startinsert({ bang = true })
 end
 
 function M.list_viewed(filter)
