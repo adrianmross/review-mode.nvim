@@ -157,6 +157,7 @@ require("pr_review").setup({
     fast_diffopt = "internal,filler,closeoff,indent-heuristic,linematch:0",
     full_file = false,
     layout = "side_by_side",
+    partial_line_highlights = true,
     unified_context = 3,
     use_fast_diffopt = true,
   },
@@ -215,7 +216,9 @@ restores the original file buffer. Set `diff.full_file = true` or run
 `diff.unified_context` common lines around each hunk, and condensed side-by-side
 diffs fold unchanged regions in both diff windows. When `diff.use_fast_diffopt`
 is enabled, side-by-side diffs temporarily apply `diff.fast_diffopt`, then
-restore the previous `diffopt` when the split closes.
+restore the previous `diffopt` when the split closes. Unified diffs highlight
+changed spans inside modified lines with `DiffText`; set
+`diff.partial_line_highlights = false` to disable those inline spans.
 
 ## Notes
 
