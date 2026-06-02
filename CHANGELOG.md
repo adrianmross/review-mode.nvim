@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/adrianmross/pr-review.nvim/compare/v0.8.1...v0.8.2) (2026-06-02)
+
+
+### Bug Fixes
+
+* close stale side-by-side diffs ([55c8469](https://github.com/adrianmross/pr-review.nvim/commit/55c846920cc22bfefd245ea38cc595c71004f587))
+
 ## [0.8.1](https://github.com/adrianmross/pr-review.nvim/compare/v0.8.0...v0.8.1) (2026-06-02)
 
 
