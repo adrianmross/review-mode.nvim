@@ -141,7 +141,7 @@ SETUP                                                        *pr-review-setup*
     comments = {
       enabled = true,
       cache_ttl_seconds = 300,
-      sign_text = "◆",
+      sign_text = "",
       sign_hl_group = "DiagnosticInfo",
       virtual_text = true,
     },
@@ -195,7 +195,7 @@ performance.background_hunk_scan.max_files.
 The nvim-tree integration marks unviewed changed files and parent folders with
 `☐ N`, where `N` is the number of unviewed changed files under that node.
 Viewed files and folders use `✓`, and files and folders with unresolved
-comments also use `◆ N`. A folder switches to viewed after every changed file
+comments also use ` N`. A folder switches to viewed after every changed file
 under it is viewed.
 
 External launchers can provide GH_REVIEW_REPO, GH_REVIEW_PR, GH_REVIEW_BASE,

@@ -11,7 +11,7 @@ local pr = require("pr_review")
 pr.setup({
   gitsigns = { enabled = false },
   nvim_tree = { enabled = false },
-  comments = { enabled = true, sign_text = "◆" },
+  comments = { enabled = true },
   viewed = { enabled = false },
   auto_open_first_change = false,
 })

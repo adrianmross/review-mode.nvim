@@ -100,7 +100,7 @@ require("nvim-tree").setup({
 Unviewed changed files and parent folders are marked with `☐ N`, where `N` is
 the number of unviewed changed files under that node. Viewed files and folders
 are marked with `✓`; files and folders with unresolved comments are also marked
-with `◆ N`. A folder switches to viewed after every changed file under it is
+with ` N`. A folder switches to viewed after every changed file under it is
 viewed.
 
 ## Commands
@@ -149,7 +149,7 @@ require("pr_review").setup({
   comments = {
     enabled = true,
     cache_ttl_seconds = 300,
-    sign_text = "◆",
+    sign_text = "",
     sign_hl_group = "DiagnosticInfo",
     virtual_text = true,
   },

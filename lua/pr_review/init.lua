@@ -3,12 +3,13 @@ local M = {}
 local ns = vim.api.nvim_create_namespace("pr_review_normal")
 local diff_ns = vim.api.nvim_create_namespace("pr_review_diff")
 local cache_dir = vim.fs.joinpath(vim.fn.stdpath("cache"), "pr-review-comments")
+local default_comment_sign_text = ""
 local defaults = {
   auto_open_first_change = true,
   comments = {
     enabled = true,
     cache_ttl_seconds = 300,
-    sign_text = "◆",
+    sign_text = default_comment_sign_text,
     sign_hl_group = "DiagnosticInfo",
     virtual_text = true,
   },
@@ -102,6 +103,15 @@ local setup_done = false
 local diff_text_hl = "PrReviewDiffText"
 local diff_text_priority = 1000
 local close_old_view
+
+local function comment_sign_text()
+  local comments_config = state.config.comments or {}
+  return comments_config.sign_text or default_comment_sign_text
+end
+
+local function comment_count_label(count)
+  return string.format("%s %d", comment_sign_text(), count)
+end
 
 local function normalize_config(opts)
   opts = opts or {}
@@ -656,10 +666,11 @@ local function annotate_buffer(bufnr)
   for line, line_comments in pairs(grouped) do
     local sign_hl = state.config.comments.sign_hl_group or "DiagnosticInfo"
     vim.api.nvim_buf_set_extmark(bufnr, ns, line - 1, 0, {
-      sign_text = state.config.comments.sign_text or "◆",
+      sign_text = comment_sign_text(),
       sign_hl_group = sign_hl,
-      number_hl_group = sign_hl,
       virt_text = state.config.comments.virtual_text and {
+        { "\t", "NonText" },
+        { "■", sign_hl },
         { " " .. comment_summary(line_comments[#line_comments]), "DiagnosticVirtualTextInfo" },
       } or nil,
       virt_text_pos = "eol",
@@ -2770,7 +2781,7 @@ local function viewed_picker_item(path)
   local unviewed = M.unviewed_count(path)
   local comments = M.unresolved_comment_count(path)
   local review_icon = viewed and "✓" or string.format("☐ %d", unviewed)
-  local comment_icon = comments > 0 and string.format("◆ %d", comments) or "   "
+  local comment_icon = comments > 0 and comment_count_label(comments) or "   "
 
   return {
     path = path,
