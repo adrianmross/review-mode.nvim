@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/adrianmross/pr-review.nvim/compare/v0.8.4...v0.9.0) (2026-06-02)
+
+
+### Features
+
+* add previewing viewed file picker ([03b66a2](https://github.com/adrianmross/pr-review.nvim/commit/03b66a2de35efb3a98ed5407299b6e86d9cd87d6))
+
 ## [0.8.4](https://github.com/adrianmross/pr-review.nvim/compare/v0.8.3...v0.8.4) (2026-06-02)
 
 
