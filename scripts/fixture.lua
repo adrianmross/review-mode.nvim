@@ -3,6 +3,8 @@ local repo_root = assert(os.getenv("PR_REVIEW_PLUGIN_ROOT"), "PR_REVIEW_PLUGIN_R
 vim.opt.runtimepath:prepend(repo_root)
 package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
 
+local comment_sign = ""
+
 local function wait_for(predicate, message)
   assert(vim.wait(5000, predicate, 20), message)
 end
@@ -110,7 +112,7 @@ local pr = require("pr_review")
 pr.setup({
   gitsigns = { enabled = false },
   nvim_tree = { enabled = false, show_viewed = true },
-  comments = { enabled = true, sign_text = "◆" },
+  comments = { enabled = true },
   viewed = { enabled = true, sync = true },
   auto_open_first_change = false,
 })
@@ -118,6 +120,7 @@ pr.setup({
 assert(pr.config().viewed.enabled, "viewed config was not enabled")
 assert(pr.config().viewed.sync, "viewed sync config was not enabled")
 assert(pr.config().processing == nil, "old viewed config alias should not be exposed")
+assert(pr.config().comments.sign_text == comment_sign, "comment sign default was wrong")
 assert(pr.config().nvim_tree.show_viewed, "show_viewed config was not enabled")
 assert(pr.config().nvim_tree.show_processing == nil, "old nvim-tree viewed option alias should not be exposed")
 
@@ -164,7 +167,15 @@ assert(last_notification():find("Threads: 3 total, 2 unresolved", 1, true), "sum
 vim.cmd.edit("file.txt")
 wait_for(function()
   local marks = comment_marks()
-  return #marks == 2 and vim.trim(marks[1][4].sign_text or "") == "◆"
+  local details = marks[1] and marks[1][4] or {}
+  local virt_text = details.virt_text or {}
+  return #marks == 2
+    and vim.trim(details.sign_text or "") == comment_sign
+    and details.number_hl_group == nil
+    and virt_text[1]
+    and virt_text[1][1] == "\t"
+    and virt_text[2]
+    and virt_text[2][1] == "■"
 end, "comment sign was not placed")
 
 vim.api.nvim_win_set_cursor(0, { 1, 0 })
@@ -181,8 +192,11 @@ assert(not pr.is_viewed_file("file.txt"), "viewed toggle did not mark file unvie
 pr.list_viewed("unviewed")
 local unviewed_menu = vim.api.nvim_buf_get_lines(0, 0, -1, false)
 assert(has_line(unviewed_menu, "PR review files [unviewed]"), "unviewed picker title was wrong")
-assert(has_line(unviewed_menu, "☐ 1 ◆ 1 file.txt"), "unviewed picker file label was wrong")
-assert(has_line(unviewed_menu, "☐ 1 ◆ 1 nested/other.txt"), "unviewed picker nested file label was wrong")
+assert(has_line(unviewed_menu, "☐ 1 " .. comment_sign .. " 1 file.txt"), "unviewed picker file label was wrong")
+assert(
+  has_line(unviewed_menu, "☐ 1 " .. comment_sign .. " 1 nested/other.txt"),
+  "unviewed picker nested file label was wrong"
+)
 assert(has_line(unviewed_menu, "☐ 1      new.txt"), "unviewed picker added file label was wrong")
 vim.api.nvim_win_set_cursor(0, { 5, 0 })
 vim.api.nvim_feedkeys("t", "x", false)
@@ -242,7 +256,7 @@ decorator:new()
 local tree_node = { absolute_path = vim.fs.joinpath(pr.root(), "file.txt") }
 local icons = decorator:icons(tree_node)
 assert(pr.unresolved_comment_count("file.txt") == 1, "unresolved file comment count was wrong")
-assert(has_icon(icons, "◆ 1"), "nvim-tree comment marker missing")
+assert(has_icon(icons, comment_sign .. " 1"), "nvim-tree comment marker missing")
 assert(has_icon(icons, "✓"), "nvim-tree viewed marker missing")
 assert(has_icon_hl(icons, "✓", "PrReviewTreeViewed"), "nvim-tree viewed marker highlight was wrong")
 assert(not has_icon(icons, "☐"), "nvim-tree changed marker shown for viewed file")
@@ -251,7 +265,7 @@ assert(decorator:highlight_group(tree_node) == "PrReviewTreeViewed", "nvim-tree 
 local unviewed_tree_node = { absolute_path = vim.fs.joinpath(pr.root(), "nested/other.txt") }
 icons = decorator:icons(unviewed_tree_node)
 assert(pr.unresolved_comment_count("nested/other.txt") == 1, "unresolved nested file comment count was wrong")
-assert(has_icon(icons, "◆ 1"), "nvim-tree nested comment marker missing")
+assert(has_icon(icons, comment_sign .. " 1"), "nvim-tree nested comment marker missing")
 assert(pr.unviewed_count("nested/other.txt") == 1, "unviewed file count was wrong")
 assert(has_icon(icons, "☐ 1"), "nvim-tree changed marker missing for unviewed file")
 assert(has_icon_hl(icons, "☐ 1", "PrReviewTreeChanged"), "nvim-tree changed marker highlight was wrong")
@@ -264,7 +278,7 @@ assert(
 local dir_node = { absolute_path = vim.fs.joinpath(pr.root(), "nested") }
 local dir_icons = decorator:icons(dir_node)
 assert(pr.unresolved_comment_count("nested") == 1, "unresolved folder comment count was wrong")
-assert(has_icon(dir_icons, "◆ 1"), "nvim-tree folder comment marker missing")
+assert(has_icon(dir_icons, comment_sign .. " 1"), "nvim-tree folder comment marker missing")
 assert(pr.unviewed_count("nested") == 1, "unviewed folder count was wrong")
 assert(has_icon(dir_icons, "☐ 1"), "nvim-tree changed folder marker missing")
 assert(has_icon_hl(dir_icons, "☐ 1", "PrReviewTreeChanged"), "nvim-tree changed folder marker highlight was wrong")
@@ -277,25 +291,25 @@ wait_for(function()
 end, "viewed dir state did not cascade after all children were viewed")
 assert(pr.unviewed_count("nested") == 0, "unviewed folder count did not clear after children were viewed")
 dir_icons = decorator:icons(dir_node)
-assert(has_icon(dir_icons, "◆ 1"), "nvim-tree viewed folder comment marker missing")
+assert(has_icon(dir_icons, comment_sign .. " 1"), "nvim-tree viewed folder comment marker missing")
 assert(has_icon(dir_icons, "✓"), "nvim-tree viewed folder marker missing")
 assert(has_icon_hl(dir_icons, "✓", "PrReviewTreeViewed"), "nvim-tree viewed folder marker highlight was wrong")
 assert(decorator:highlight_group(dir_node) == "PrReviewTreeViewed", "nvim-tree viewed folder highlight was wrong")
 
 pr.config().nvim_tree.show_viewed = false
 icons = decorator:icons(tree_node)
-assert(has_icon(icons, "◆ 1"), "nvim-tree comment marker missing when viewed marker disabled")
+assert(has_icon(icons, comment_sign .. " 1"), "nvim-tree comment marker missing when viewed marker disabled")
 assert(has_icon(icons, "☐"), "nvim-tree changed marker missing when viewed marker disabled")
 assert(not has_icon(icons, "✓"), "nvim-tree viewed marker shown when disabled")
 dir_icons = decorator:icons(dir_node)
-assert(has_icon(dir_icons, "◆ 1"), "nvim-tree folder comment marker missing when viewed marker disabled")
+assert(has_icon(dir_icons, comment_sign .. " 1"), "nvim-tree folder comment marker missing when viewed marker disabled")
 assert(has_icon(dir_icons, "☐"), "nvim-tree changed folder marker missing when viewed marker disabled")
 assert(not has_icon(dir_icons, "✓"), "nvim-tree viewed folder marker shown when disabled")
 pr.config().nvim_tree.show_viewed = true
 
 pr.config().nvim_tree.show_comments = false
 icons = decorator:icons(tree_node)
-assert(not has_icon(icons, "◆ 1"), "nvim-tree comment marker shown when comments disabled")
+assert(not has_icon(icons, comment_sign .. " 1"), "nvim-tree comment marker shown when comments disabled")
 assert(has_icon(icons, "✓"), "nvim-tree viewed marker missing when comments disabled")
 pr.config().nvim_tree.show_comments = true
 

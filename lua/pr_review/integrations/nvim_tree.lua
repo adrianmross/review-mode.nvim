@@ -10,6 +10,11 @@ local function ensure_highlights()
   pcall(vim.api.nvim_set_hl, 0, viewed_hl, { default = true, fg = "#22C55E" })
 end
 
+local function comment_config()
+  local config = state.config()
+  return config.comments or {}
+end
+
 function Decorator:new()
   ensure_highlights()
   self.enabled = true
@@ -53,7 +58,11 @@ end
 
 function Decorator:comment_icon(rel)
   local count = state.unresolved_comment_count(rel)
-  return { str = string.format("◆ %d", count), hl = { "DiagnosticInfo" } }
+  local comments = comment_config()
+  return {
+    str = string.format("%s %d", comments.sign_text or "", count),
+    hl = { comments.sign_hl_group or "DiagnosticInfo" },
+  }
 end
 
 function Decorator:icons(node)
