@@ -347,6 +347,29 @@ for _, mark in ipairs(diff_marks(vim.api.nvim_get_current_buf())) do
 end
 assert(side_by_side_span_found, "side-by-side partial changed span missing")
 
+vim.cmd.edit("nested/other.txt")
+wait_for(function()
+  return #vim.api.nvim_list_wins() == 1 and buffer_lines_matching("pr%-base://") == nil
+end, "manual target buffer switch did not close side-by-side pair")
+
+vim.cmd.edit("file.txt")
+pr.old_toggle()
+wait_for(function()
+  return #vim.api.nvim_list_wins() == 2 and buffer_lines_matching("pr%-base://") ~= nil
+end, "side-by-side diff did not reopen after manual target switch")
+pr.next_file()
+wait_for(function()
+  return #vim.api.nvim_list_wins() == 1
+    and buffer_lines_matching("pr%-base://") == nil
+    and vim.api.nvim_buf_get_name(0):find("nested/other%.txt$", 1) ~= nil
+end, "next file navigation did not close side-by-side pair")
+
+vim.cmd.edit("file.txt")
+pr.old_toggle()
+wait_for(function()
+  return #vim.api.nvim_list_wins() == 2 and buffer_lines_matching("pr%-base://") ~= nil
+end, "side-by-side diff did not reopen after next-file navigation")
+
 pr.toggle_diff_full_file()
 wait_for(function()
   local windows = vim.api.nvim_list_wins()

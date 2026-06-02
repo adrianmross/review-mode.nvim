@@ -100,6 +100,7 @@ local state = {
 
 local setup_done = false
 local diff_text_hl = "PrReviewDiffText"
+local close_old_view
 
 local function normalize_config(opts)
   opts = opts or {}
@@ -542,6 +543,14 @@ end
 local function jump_to_path(path, line)
   if not path then
     return false
+  end
+
+  if state.old_layout == "side_by_side" then
+    local target_win = state.old_target_win
+    if target_win and vim.api.nvim_win_is_valid(target_win) then
+      vim.api.nvim_set_current_win(target_win)
+    end
+    close_old_view()
   end
 
   local full_path = vim.fs.joinpath(state.root, path)
@@ -1854,7 +1863,7 @@ local function apply_side_by_side_context()
   end
 end
 
-local function close_old_view()
+close_old_view = function()
   if state.old_closing then
     return
   end
@@ -2457,6 +2466,52 @@ local function close_side_by_side_pair_for_buffer(bufnr)
       return
     end
     if bufnr == state.old_buf or bufnr == state.old_target_buf then
+      close_old_view()
+    end
+  end)
+end
+
+local function close_side_by_side_pair_for_window(winid)
+  if state.old_closing or state.old_layout ~= "side_by_side" then
+    return
+  end
+
+  if winid ~= state.old_win and winid ~= state.old_target_win then
+    return
+  end
+
+  vim.schedule(function()
+    if state.old_closing or state.old_layout ~= "side_by_side" then
+      return
+    end
+    close_old_view()
+  end)
+end
+
+local function close_stale_side_by_side_pair()
+  if state.old_closing or state.old_layout ~= "side_by_side" then
+    return
+  end
+
+  if not state.old_target_win or not vim.api.nvim_win_is_valid(state.old_target_win) then
+    close_old_view()
+    return
+  end
+
+  local target_buf = vim.api.nvim_win_get_buf(state.old_target_win)
+  if target_buf == state.old_target_buf then
+    return
+  end
+
+  vim.schedule(function()
+    if state.old_closing or state.old_layout ~= "side_by_side" then
+      return
+    end
+    if
+      state.old_target_win
+      and vim.api.nvim_win_is_valid(state.old_target_win)
+      and vim.api.nvim_win_get_buf(state.old_target_win) ~= state.old_target_buf
+    then
       close_old_view()
     end
   end)
@@ -3345,6 +3400,7 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd({ "BufReadPost", "BufEnter" }, {
     group = vim.api.nvim_create_augroup("normal_pr_review", { clear = true }),
     callback = function(args)
+      close_stale_side_by_side_pair()
       annotate_buffer(args.buf)
       local delay = tonumber(state.config.performance.hunk_prefetch.focused_delay_ms or 0) or 0
       if delay > 0 then
@@ -3361,6 +3417,13 @@ function M.setup(opts)
     group = vim.api.nvim_create_augroup("normal_pr_review_old_view", { clear = true }),
     callback = function(args)
       close_side_by_side_pair_for_buffer(args.buf)
+    end,
+  })
+
+  vim.api.nvim_create_autocmd("WinClosed", {
+    group = vim.api.nvim_create_augroup("normal_pr_review_old_view_window", { clear = true }),
+    callback = function(args)
+      close_side_by_side_pair_for_window(tonumber(args.match))
     end,
   })
 
