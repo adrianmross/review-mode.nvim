@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/adrianmross/pr-review.nvim/compare/v0.7.2...v0.8.0) (2026-06-02)
+
+
+### Features
+
+* highlight partial unified diff changes ([813c053](https://github.com/adrianmross/pr-review.nvim/commit/813c053c5d5c5373546d2ab8246f15b01b39e284))
+
 ## [0.7.2](https://github.com/adrianmross/pr-review.nvim/compare/v0.7.1...v0.7.2) (2026-06-02)
 
 
