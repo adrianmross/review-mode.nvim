@@ -114,7 +114,7 @@ viewed.
 - `:PrReviewPrevComment` jumps to the previous PR comment
 - `:PrReviewNextFile` jumps to the next changed file
 - `:PrReviewPrevFile` jumps to the previous changed file
-- `:PrReviewOldToggle` toggles the base version of the current file in a diff split
+- `:PrReviewOldToggle` toggles the base version or unified diff for the current file
 - `:PrReviewDiffLayoutToggle` toggles the open diff between side-by-side and unified layout
 - `:PrReviewDiffFullToggle` toggles the open diff between condensed context and full-file context
 - `:PrReviewThread` shows comments on the current line
@@ -209,12 +209,13 @@ back to GitHub.
 
 The built-in side-by-side old-version split remains the default diff backend.
 Set `diff.layout = "unified"` or run `:PrReviewDiffLayoutToggle` to use an
-inline unified diff buffer instead. Set `diff.full_file = true` or run
-`:PrReviewDiffFullToggle` to show full-file context; condensed unified diffs
-use `diff.unified_context` common lines around each hunk, and condensed
-side-by-side diffs fold unchanged regions. When `diff.use_fast_diffopt` is
-enabled, side-by-side diffs temporarily apply `diff.fast_diffopt`, then restore
-the previous `diffopt` when the split closes.
+inline unified diff buffer in the current window instead. Closing unified mode
+restores the original file buffer. Set `diff.full_file = true` or run
+`:PrReviewDiffFullToggle` to show full-file context; condensed unified diffs use
+`diff.unified_context` common lines around each hunk, and condensed side-by-side
+diffs fold unchanged regions in both diff windows. When `diff.use_fast_diffopt`
+is enabled, side-by-side diffs temporarily apply `diff.fast_diffopt`, then
+restore the previous `diffopt` when the split closes.
 
 ## Notes
 

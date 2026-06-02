@@ -87,6 +87,7 @@ local state = {
   old_win = nil,
   old_buf = nil,
   old_target_win = nil,
+  old_target_buf = nil,
   old_loading = false,
   old_diffopt = nil,
   old_fold_options = nil,
@@ -1846,15 +1847,26 @@ local function close_old_view()
   disable_diff_for_window(state.old_win)
   restore_fold_options()
 
-  if state.old_win and vim.api.nvim_win_is_valid(state.old_win) then
+  if
+    state.old_layout == "unified"
+    and state.old_target_win
+    and vim.api.nvim_win_is_valid(state.old_target_win)
+    and state.old_target_buf
+    and vim.api.nvim_buf_is_valid(state.old_target_buf)
+  then
+    pcall(vim.api.nvim_win_set_buf, state.old_target_win, state.old_target_buf)
+  elseif state.old_win and vim.api.nvim_win_is_valid(state.old_win) then
     vim.api.nvim_win_close(state.old_win, true)
-  elseif state.old_buf and vim.api.nvim_buf_is_valid(state.old_buf) then
+  end
+
+  if state.old_buf and vim.api.nvim_buf_is_valid(state.old_buf) then
     pcall(vim.api.nvim_buf_delete, state.old_buf, { force = true })
   end
 
   state.old_win = nil
   state.old_buf = nil
   state.old_target_win = nil
+  state.old_target_buf = nil
   state.old_loading = false
   state.old_layout = nil
   state.old_path = nil
@@ -2077,6 +2089,7 @@ local function open_old_side_by_side(path, current_win, current_buf, current_fil
   vim.cmd("vsplit")
   state.old_win = vim.api.nvim_get_current_win()
   state.old_target_win = current_win
+  state.old_target_buf = current_buf
   state.old_buf = vim.api.nvim_create_buf(false, true)
   state.old_layout = "side_by_side"
   state.old_path = path
@@ -2131,13 +2144,12 @@ local function open_old_unified(path, current_win, current_buf, base_content, ge
         close_old_view()
 
         vim.api.nvim_set_current_win(current_win)
-        vim.cmd("vsplit")
-        state.old_win = vim.api.nvim_get_current_win()
         state.old_target_win = current_win
+        state.old_target_buf = current_buf
         state.old_buf = vim.api.nvim_create_buf(false, true)
         state.old_layout = "unified"
         state.old_path = path
-        vim.api.nvim_win_set_buf(state.old_win, state.old_buf)
+        vim.api.nvim_win_set_buf(current_win, state.old_buf)
         vim.api.nvim_buf_set_name(state.old_buf, "pr-diff://" .. base_ref() .. "/" .. path)
         vim.api.nvim_buf_set_lines(state.old_buf, 0, -1, false, unified_diff_lines(result.stdout or "", path))
         vim.bo[state.old_buf].buftype = "nofile"
@@ -2184,7 +2196,12 @@ local function open_old_view(path, current_win, current_buf)
 end
 
 local function refresh_old_view()
-  if not (state.old_win and vim.api.nvim_win_is_valid(state.old_win)) then
+  if state.old_layout == "side_by_side" and not (state.old_win and vim.api.nvim_win_is_valid(state.old_win)) then
+    return false
+  end
+  if
+    state.old_layout == "unified" and not (state.old_target_win and vim.api.nvim_win_is_valid(state.old_target_win))
+  then
     return false
   end
 
@@ -2194,10 +2211,23 @@ local function refresh_old_view()
     return false
   end
 
-  local target_buf = vim.api.nvim_win_get_buf(target_win)
+  local target_buf = state.old_target_buf
+  if not target_buf or not vim.api.nvim_buf_is_valid(target_buf) then
+    target_buf = vim.api.nvim_win_get_buf(target_win)
+  end
   close_old_view()
   open_old_view(path, target_win, target_buf)
   return true
+end
+
+local function old_view_is_open()
+  if state.old_layout == "side_by_side" then
+    return state.old_win and vim.api.nvim_win_is_valid(state.old_win)
+  end
+  if state.old_layout == "unified" then
+    return state.old_target_win and vim.api.nvim_win_is_valid(state.old_target_win)
+  end
+  return false
 end
 
 function M.old_toggle()
@@ -2205,7 +2235,7 @@ function M.old_toggle()
     return
   end
 
-  if state.old_win and vim.api.nvim_win_is_valid(state.old_win) then
+  if old_view_is_open() then
     close_old_view()
     return
   end
@@ -2235,6 +2265,10 @@ end
 function M.toggle_diff_full_file()
   state.config.diff.full_file = not state.config.diff.full_file
   vim.notify("PR review diff context: " .. (state.config.diff.full_file and "full file" or "condensed"))
+  if state.old_layout == "side_by_side" and old_view_is_open() then
+    apply_side_by_side_context()
+    return
+  end
   refresh_old_view()
 end
 
