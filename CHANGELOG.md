@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.4](https://github.com/adrianmross/pr-review.nvim/compare/v0.8.3...v0.8.4) (2026-06-02)
+
+
+### Bug Fixes
+
+* use diagnostic-style comment markers ([91acda4](https://github.com/adrianmross/pr-review.nvim/commit/91acda402c140501f2d88f952e92b8f919a42f28))
+
 ## [0.8.3](https://github.com/adrianmross/pr-review.nvim/compare/v0.8.2...v0.8.3) (2026-06-02)
 
 
