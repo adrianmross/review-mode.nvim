@@ -95,6 +95,7 @@ local state = {
   old_fold_options = nil,
   old_layout = nil,
   old_path = nil,
+  old_closing = false,
 }
 
 local setup_done = false
@@ -1820,6 +1821,14 @@ local function restore_fold_options()
   state.old_fold_options = nil
 end
 
+local function clear_old_diff_highlights()
+  for _, bufnr in ipairs({ state.old_buf, state.old_target_buf }) do
+    if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+      vim.api.nvim_buf_clear_namespace(bufnr, diff_ns, 0, -1)
+    end
+  end
+end
+
 local function apply_side_by_side_context()
   local condensed = not state.config.diff.full_file
   local previous_win = vim.api.nvim_get_current_win()
@@ -1846,9 +1855,15 @@ local function apply_side_by_side_context()
 end
 
 local function close_old_view()
+  if state.old_closing then
+    return
+  end
+
+  state.old_closing = true
   disable_diff_for_window(state.old_target_win)
   disable_diff_for_window(state.old_win)
   restore_fold_options()
+  clear_old_diff_highlights()
 
   if
     state.old_layout == "unified"
@@ -1873,6 +1888,7 @@ local function close_old_view()
   state.old_loading = false
   state.old_layout = nil
   state.old_path = nil
+  state.old_closing = false
   restore_old_diffopt()
 end
 
@@ -2075,9 +2091,9 @@ local function unified_diff_lines(diff, path)
   for index, line in ipairs(lines) do
     if line:find("^diff %-%-git ") then
       lines[index] = "diff --git base/" .. path .. " head/" .. path
-    elseif line:find("^%-%-%- ") then
+    elseif line:find("^%-%-%- ") and line ~= "--- /dev/null" then
       lines[index] = "--- base/" .. path
-    elseif line:find("^%+%+%+ ") then
+    elseif line:find("^%+%+%+ ") and line ~= "+++ /dev/null" then
       lines[index] = "+++ head/" .. path
     end
   end
@@ -2127,10 +2143,14 @@ local function highlight_changed_range(bufnr, row, start_col, end_col)
   })
 end
 
+local function highlight_partial_line_pair(old_buf, old_row, old_line, new_buf, new_row, new_line, col_offset)
+  local prefix, old_end, new_end = changed_line_ranges(old_line, new_line)
+  highlight_changed_range(old_buf, old_row, prefix + col_offset, old_end + col_offset)
+  highlight_changed_range(new_buf, new_row, prefix + col_offset, new_end + col_offset)
+end
+
 local function highlight_partial_diff_pair(bufnr, old_row, old_line, new_row, new_line)
-  local prefix, old_end, new_end = changed_line_ranges(old_line:sub(2), new_line:sub(2))
-  highlight_changed_range(bufnr, old_row, prefix + 1, old_end + 1)
-  highlight_changed_range(bufnr, new_row, prefix + 1, new_end + 1)
+  highlight_partial_line_pair(bufnr, old_row, old_line:sub(2), bufnr, new_row, new_line:sub(2), 1)
 end
 
 local function apply_partial_diff_highlights(bufnr)
@@ -2172,7 +2192,92 @@ local function apply_partial_diff_highlights(bufnr)
   end
 end
 
-local function open_old_side_by_side(path, current_win, current_buf, current_filetype, base_content)
+local function parse_diff_hunk_header(line)
+  local old_start, old_count, new_start, new_count = line:match("^@@ %-(%d+),?(%d*) %+(%d+),?(%d*) @@")
+  if not old_start then
+    return nil
+  end
+
+  return tonumber(old_start),
+    tonumber(old_count ~= "" and old_count or "1"),
+    tonumber(new_start),
+    tonumber(new_count ~= "" and new_count or "1")
+end
+
+local function apply_side_by_side_partial_diff_highlights(old_buf, new_buf, diff)
+  if not state.config.diff.partial_line_highlights then
+    return
+  end
+
+  ensure_diff_highlights()
+  vim.api.nvim_buf_clear_namespace(old_buf, diff_ns, 0, -1)
+  vim.api.nvim_buf_clear_namespace(new_buf, diff_ns, 0, -1)
+
+  local old_line = nil
+  local new_line = nil
+  local deleted = {}
+  local added = {}
+
+  local function flush_pairs()
+    for index = 1, math.min(#deleted, #added) do
+      highlight_partial_line_pair(
+        old_buf,
+        deleted[index].row,
+        deleted[index].line,
+        new_buf,
+        added[index].row,
+        added[index].line,
+        0
+      )
+    end
+    deleted = {}
+    added = {}
+  end
+
+  for _, line in ipairs(split_blob_lines(diff)) do
+    local hunk_old_start, _, hunk_new_start = parse_diff_hunk_header(line)
+    if hunk_old_start then
+      flush_pairs()
+      old_line = hunk_old_start
+      new_line = hunk_new_start
+    elseif old_line and is_deleted_diff_line(line) then
+      deleted[#deleted + 1] = { row = old_line - 1, line = line:sub(2) }
+      old_line = old_line + 1
+    elseif old_line and is_added_diff_line(line) then
+      added[#added + 1] = { row = new_line - 1, line = line:sub(2) }
+      new_line = new_line + 1
+    elseif old_line then
+      flush_pairs()
+      if line:sub(1, 1) == " " then
+        old_line = old_line + 1
+        new_line = new_line + 1
+      end
+    end
+  end
+
+  flush_pairs()
+end
+
+local function diff_for_partial_highlights(path, base_content, head_lines, base_missing)
+  local tmpdir = vim.fn.tempname()
+  local head_rel = write_temp_diff_file(tmpdir, "head", path, head_lines)
+  local base_rel = base_missing and "/dev/null"
+    or write_temp_diff_file(tmpdir, "base", path, split_blob_lines(base_content))
+  local result = vim
+    .system(
+      { "git", "diff", "--no-index", "--no-color", "--unified=0", "--", base_rel, head_rel },
+      { text = true, cwd = tmpdir }
+    )
+    :wait()
+  pcall(vim.fn.delete, tmpdir, "rf")
+
+  if result.code ~= 0 and result.code ~= 1 then
+    return nil
+  end
+  return result.stdout or ""
+end
+
+local function open_old_side_by_side(path, current_win, current_buf, current_filetype, base_content, base_missing)
   close_old_view()
 
   vim.api.nvim_set_current_win(current_win)
@@ -2192,6 +2297,12 @@ local function open_old_side_by_side(path, current_win, current_buf, current_fil
   vim.bo[state.old_buf].readonly = true
   vim.bo[state.old_buf].filetype = current_filetype
 
+  local side_by_side_diff =
+    diff_for_partial_highlights(path, base_content, vim.api.nvim_buf_get_lines(current_buf, 0, -1, false), base_missing)
+  if side_by_side_diff then
+    apply_side_by_side_partial_diff_highlights(state.old_buf, current_buf, side_by_side_diff)
+  end
+
   apply_old_diffopt()
 
   vim.cmd("diffthis")
@@ -2201,10 +2312,15 @@ local function open_old_side_by_side(path, current_win, current_buf, current_fil
   vim.api.nvim_set_current_win(current_win)
 end
 
-local function open_old_unified(path, current_win, current_buf, base_content, generation)
+local function is_added_file(path)
+  return (state.files[path] or ""):match("^A") ~= nil
+end
+
+local function open_old_unified(path, current_win, current_buf, base_content, generation, base_missing)
   local tmpdir = vim.fn.tempname()
-  local base_rel = write_temp_diff_file(tmpdir, "base", path, split_blob_lines(base_content))
   local head_rel = write_temp_diff_file(tmpdir, "head", path, vim.api.nvim_buf_get_lines(current_buf, 0, -1, false))
+  local base_rel = base_missing and "/dev/null"
+    or write_temp_diff_file(tmpdir, "base", path, split_blob_lines(base_content))
   local context = diff_context_lines()
 
   vim.system(
@@ -2264,10 +2380,16 @@ local function open_old_view(path, current_win, current_buf)
       return
     end
 
+    local base_missing = false
     if content == nil then
-      state.old_loading = false
-      vim.notify("PR review old version: " .. tostring(err or "file not present at base"), vim.log.levels.WARN)
-      return
+      if is_added_file(path) then
+        content = ""
+        base_missing = true
+      else
+        state.old_loading = false
+        vim.notify("PR review old version: " .. tostring(err or "file not present at base"), vim.log.levels.WARN)
+        return
+      end
     end
 
     if not vim.api.nvim_win_is_valid(current_win) or not vim.api.nvim_buf_is_valid(current_buf) then
@@ -2277,12 +2399,12 @@ local function open_old_view(path, current_win, current_buf)
     end
 
     if state.config.diff.layout == "unified" then
-      open_old_unified(path, current_win, current_buf, content, generation)
+      open_old_unified(path, current_win, current_buf, content, generation, base_missing)
       return
     end
 
     state.old_loading = false
-    open_old_side_by_side(path, current_win, current_buf, current_filetype, content)
+    open_old_side_by_side(path, current_win, current_buf, current_filetype, content, base_missing)
   end)
 end
 
@@ -2319,6 +2441,25 @@ local function old_view_is_open()
     return state.old_target_win and vim.api.nvim_win_is_valid(state.old_target_win)
   end
   return false
+end
+
+local function close_side_by_side_pair_for_buffer(bufnr)
+  if state.old_closing or state.old_layout ~= "side_by_side" then
+    return
+  end
+
+  if bufnr ~= state.old_buf and bufnr ~= state.old_target_buf then
+    return
+  end
+
+  vim.schedule(function()
+    if state.old_closing or state.old_layout ~= "side_by_side" then
+      return
+    end
+    if bufnr == state.old_buf or bufnr == state.old_target_buf then
+      close_old_view()
+    end
+  end)
 end
 
 function M.old_toggle()
@@ -3213,6 +3354,13 @@ function M.setup(opts)
       else
         prefetch_current_buffer(args.buf)
       end
+    end,
+  })
+
+  vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
+    group = vim.api.nvim_create_augroup("normal_pr_review_old_view", { clear = true }),
+    callback = function(args)
+      close_side_by_side_pair_for_buffer(args.buf)
     end,
   })
 

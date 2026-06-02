@@ -147,6 +147,9 @@ wait_for(function()
   return pr.is_changed_file("nested/other.txt")
 end, "second changed file did not load")
 wait_for(function()
+  return pr.is_changed_file("new.txt")
+end, "added file did not load")
+wait_for(function()
   return pr.is_viewed_file("file.txt")
 end, "GitHub viewed state did not load")
 wait_for(function()
@@ -154,7 +157,7 @@ wait_for(function()
 end, "PR comments did not load")
 
 pr.summary()
-assert(last_notification():find("Files: 1 viewed, 1 unviewed, 2 total", 1, true), "summary file counts were wrong")
+assert(last_notification():find("Files: 1 viewed, 2 unviewed, 3 total", 1, true), "summary file counts were wrong")
 assert(last_notification():find("Comments: 3", 1, true), "summary comment count was wrong")
 assert(last_notification():find("Threads: 3 total, 2 unresolved", 1, true), "summary thread counts were wrong")
 
@@ -180,6 +183,7 @@ local unviewed_menu = vim.api.nvim_buf_get_lines(0, 0, -1, false)
 assert(has_line(unviewed_menu, "PR review files [unviewed]"), "unviewed picker title was wrong")
 assert(has_line(unviewed_menu, "☐ 1 ◆ 1 file.txt"), "unviewed picker file label was wrong")
 assert(has_line(unviewed_menu, "☐ 1 ◆ 1 nested/other.txt"), "unviewed picker nested file label was wrong")
+assert(has_line(unviewed_menu, "☐ 1      new.txt"), "unviewed picker added file label was wrong")
 vim.api.nvim_win_set_cursor(0, { 5, 0 })
 vim.api.nvim_feedkeys("t", "x", false)
 wait_for(function()
@@ -328,12 +332,20 @@ end, "old split did not open")
 assert(vim.o.diffopt:find("linematch:0", 1, true), "fast diffopt not applied")
 
 local found = false
-local base_lines = buffer_lines_matching("pr%-base://")
+local base_lines, base_buf = buffer_lines_matching("pr%-base://")
 if base_lines then
   assert(base_lines[1] == "one" and base_lines[2] == "" and base_lines[3] == "base", "base content not preserved")
   found = true
 end
 assert(found, "base buffer not found")
+local side_by_side_span_found = false
+for _, mark in ipairs(diff_marks(vim.api.nvim_get_current_buf())) do
+  local _, row, col, details = unpack(mark)
+  if row == 3 and col == 4 and details.end_col == #"base changed" then
+    side_by_side_span_found = true
+  end
+end
+assert(side_by_side_span_found, "side-by-side partial changed span missing")
 
 pr.toggle_diff_full_file()
 wait_for(function()
@@ -380,5 +392,39 @@ wait_for(function()
   return #vim.api.nvim_list_wins() == 1 and vim.api.nvim_buf_get_name(0):find("file%.txt$", 1) ~= nil
 end, "old split did not close")
 assert(vim.o.diffopt == before, "diffopt was not restored")
+
+vim.cmd.edit("new.txt")
+pr.old_toggle()
+wait_for(function()
+  return buffer_lines_matching("pr%-diff://") ~= nil
+end, "unified diff did not open for added file")
+local added_lines = buffer_lines_matching("pr%-diff://")
+assert(has_line(added_lines, "diff --git base/new.txt head/new.txt"), "added unified diff header was wrong")
+assert(has_line(added_lines, "new file mode"), "added unified diff did not show new-file mode")
+assert(has_line(added_lines, "--- /dev/null"), "added unified diff did not show missing base file")
+assert(has_line(added_lines, "+++ head/new.txt"), "added unified diff head header was wrong")
+assert(has_line(added_lines, "+new one"), "added unified diff first line missing")
+assert(has_line(added_lines, "+new two"), "added unified diff second line missing")
+pr.old_toggle()
+wait_for(function()
+  return vim.api.nvim_buf_get_name(0):find("new%.txt$", 1) ~= nil
+end, "added unified diff did not close")
+
+pr.toggle_diff_layout()
+pr.old_toggle()
+wait_for(function()
+  return #vim.api.nvim_list_wins() == 2
+end, "added file side-by-side diff did not open")
+local added_base_lines = buffer_lines_matching("pr%-base://")
+assert(
+  added_base_lines and #added_base_lines == 1 and added_base_lines[1] == "",
+  "added file base buffer was not empty"
+)
+local _, added_base_buf = buffer_lines_matching("pr%-base://")
+assert(added_base_buf, "added file base buffer handle missing")
+vim.api.nvim_buf_delete(added_base_buf, { force = true })
+wait_for(function()
+  return #vim.api.nvim_list_wins() == 1 and buffer_lines_matching("pr%-base://") == nil
+end, "closing added file base buffer did not close side-by-side pair")
 
 pr.stop()
