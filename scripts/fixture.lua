@@ -318,10 +318,22 @@ if base_lines then
 end
 assert(found, "base buffer not found")
 
+pr.toggle_diff_full_file()
+wait_for(function()
+  local windows = vim.api.nvim_list_wins()
+  return #windows == 2 and not vim.wo[windows[1]].foldenable and not vim.wo[windows[2]].foldenable
+end, "full side-by-side diff did not open folds in both windows")
+pr.toggle_diff_full_file()
+wait_for(function()
+  local windows = vim.api.nvim_list_wins()
+  return #windows == 2 and vim.wo[windows[1]].foldenable and vim.wo[windows[2]].foldenable
+end, "condensed side-by-side diff did not fold both windows")
+
 pr.toggle_diff_layout()
 wait_for(function()
-  return buffer_lines_matching("pr%-diff://") ~= nil
+  return #vim.api.nvim_list_wins() == 1 and buffer_lines_matching("pr%-diff://") ~= nil
 end, "unified diff did not open")
+assert(buffer_lines_matching("pr%-base://") == nil, "base split buffer stayed open after switching to unified diff")
 local condensed_lines, diff_buf = buffer_lines_matching("pr%-diff://")
 assert(diff_buf and vim.bo[diff_buf].filetype == "diff", "unified diff buffer filetype was wrong")
 assert(has_line(condensed_lines, "diff --git base/file.txt head/file.txt"), "unified diff header was wrong")
@@ -338,7 +350,7 @@ assert(pr.config().diff.full_file, "diff full-file toggle did not update config"
 
 pr.old_toggle()
 wait_for(function()
-  return #vim.api.nvim_list_wins() == 1
+  return #vim.api.nvim_list_wins() == 1 and vim.api.nvim_buf_get_name(0):find("file%.txt$", 1) ~= nil
 end, "old split did not close")
 assert(vim.o.diffopt == before, "diffopt was not restored")
 
