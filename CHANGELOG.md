@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/adrianmross/pr-review.nvim/compare/v0.7.0...v0.7.1) (2026-06-02)
+
+
+### Bug Fixes
+
+* make unified diff single-buffer ([8a475b3](https://github.com/adrianmross/pr-review.nvim/commit/8a475b370dd7a0da13617d92df2e0f5259c011b6))
+
 ## [0.7.0](https://github.com/adrianmross/pr-review.nvim/compare/v0.6.0...v0.7.0) (2026-06-01)
 
 
