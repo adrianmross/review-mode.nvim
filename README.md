@@ -124,7 +124,7 @@ viewed.
 - `:PrReviewViewedNext` marks the current PR file viewed and jumps to the next unviewed file
 - `:PrReviewViewedFeatureToggle` toggles viewed-state tracking on or off
 - `:PrReviewCommentsToggle` toggles PR comments on or off
-- `:PrReviewViewedList [all|viewed|unviewed]` opens a fuzzy PR file menu; press `Space` or `t` to toggle viewed state
+- `:PrReviewViewedList [all|viewed|unviewed]` opens a fuzzy PR file menu with diff stats and preview; press `Space` or `t` to toggle viewed state
 - `:PrReviewViewedClear` clears local viewed state for the current PR
 - `:PrReviewViewedSync` pulls viewed state from GitHub
 - `:PrReviewViewedSyncToggle` toggles GitHub viewed-state sync

@@ -99,8 +99,9 @@ COMMANDS                                                  *pr-review-commands*
 
                                                         *:PrReviewViewedList*
 :PrReviewViewedList [all|viewed|unviewed]
-        Open a fuzzy PR file menu by viewed state. Press Space or t to toggle
-        viewed state for the selected file.
+        Open a fuzzy PR file menu by viewed state, with additions/deletions and
+        a diff preview. Press Space or t to toggle viewed state for the
+        selected file.
 
                                                         *:PrReviewViewedClear*
 :PrReviewViewedClear

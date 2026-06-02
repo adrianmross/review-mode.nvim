@@ -61,6 +61,38 @@ local function has_line(lines, needle)
   return false
 end
 
+local function has_line_parts(lines, parts)
+  for _, line in ipairs(lines or {}) do
+    local matched = true
+    for _, part in ipairs(parts or {}) do
+      if not line:find(part, 1, true) then
+        matched = false
+        break
+      end
+    end
+    if matched then
+      return true
+    end
+  end
+  return false
+end
+
+local function win_by_filetype(filetype)
+  for _, winid in ipairs(vim.api.nvim_list_wins()) do
+    local bufnr = vim.api.nvim_win_get_buf(winid)
+    if vim.bo[bufnr].filetype == filetype then
+      return winid
+    end
+  end
+  return nil
+end
+
+local function lines_by_filetype(filetype)
+  local winid = assert(win_by_filetype(filetype), filetype .. " window missing")
+  local bufnr = vim.api.nvim_win_get_buf(winid)
+  return vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), winid
+end
+
 local function line_number(lines, needle)
   for index, line in ipairs(lines or {}) do
     if line == needle then
@@ -190,15 +222,22 @@ pr.toggle_viewed()
 assert(not pr.is_viewed_file("file.txt"), "viewed toggle did not mark file unviewed")
 
 pr.list_viewed("unviewed")
-local unviewed_menu = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-assert(has_line(unviewed_menu, "PR review files [unviewed]"), "unviewed picker title was wrong")
-assert(has_line(unviewed_menu, "☐ 1 " .. comment_sign .. " 1 file.txt"), "unviewed picker file label was wrong")
+local unviewed_menu, unviewed_winid = lines_by_filetype("pr-review-menu")
+local preview_lines = lines_by_filetype("pr-review-preview")
 assert(
-  has_line(unviewed_menu, "☐ 1 " .. comment_sign .. " 1 nested/other.txt"),
+  has_line_parts(unviewed_menu, { "☐ 1", "+2", "-1", comment_sign .. " 1", "file.txt" }),
+  "unviewed picker file label was wrong"
+)
+assert(
+  has_line_parts(unviewed_menu, { "☐ 1", "+1", "-1", comment_sign .. " 1", "nested/other.txt" }),
   "unviewed picker nested file label was wrong"
 )
-assert(has_line(unviewed_menu, "☐ 1      new.txt"), "unviewed picker added file label was wrong")
-vim.api.nvim_win_set_cursor(0, { 5, 0 })
+assert(has_line_parts(unviewed_menu, { "☐ 1", "+2", "-0", "new.txt" }), "unviewed picker added file label was wrong")
+assert(has_line(preview_lines, "file.txt"), "viewed picker preview title missing")
+assert(has_line(preview_lines, "+two"), "viewed picker preview added line missing")
+assert(has_line(preview_lines, "-base"), "viewed picker preview deleted line missing")
+vim.api.nvim_set_current_win(unviewed_winid)
+vim.api.nvim_win_set_cursor(unviewed_winid, { 1, 0 })
 vim.api.nvim_feedkeys("t", "x", false)
 wait_for(function()
   return pr.is_viewed_file("file.txt")
@@ -206,10 +245,10 @@ end, "viewed picker toggle did not mark selected file viewed")
 pr.toggle_viewed("file.txt")
 assert(not pr.is_viewed_file("file.txt"), "viewed picker toggle restore failed")
 pr.list_viewed("viewed")
-local viewed_menu = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-assert(has_line(viewed_menu, "PR review files [viewed]"), "viewed picker title was wrong")
+local viewed_menu, viewed_winid = lines_by_filetype("pr-review-menu")
 assert(has_line(viewed_menu, "No matching PR files"), "viewed picker should be empty")
-vim.api.nvim_win_close(0, true)
+vim.api.nvim_set_current_win(viewed_winid)
+vim.api.nvim_feedkeys("q", "x", false)
 
 pr.config().viewed.sync = false
 pr.stop()
