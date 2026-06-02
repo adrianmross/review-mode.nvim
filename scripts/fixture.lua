@@ -15,6 +15,14 @@ local function comment_marks()
   return vim.api.nvim_buf_get_extmarks(0, ns, 0, -1, { details = true })
 end
 
+local function diff_marks(bufnr)
+  local ns = vim.api.nvim_get_namespaces().pr_review_diff
+  if not ns then
+    return {}
+  end
+  return vim.api.nvim_buf_get_extmarks(bufnr, ns, 0, -1, { details = true })
+end
+
 local function has_icon(icons, icon)
   for _, item in ipairs(icons or {}) do
     if item.str == icon then
@@ -49,6 +57,15 @@ local function has_line(lines, needle)
     end
   end
   return false
+end
+
+local function line_number(lines, needle)
+  for index, line in ipairs(lines or {}) do
+    if line == needle then
+      return index
+    end
+  end
+  return nil
 end
 
 local function buffer_lines_matching(pattern)
@@ -340,6 +357,16 @@ assert(has_line(condensed_lines, "diff --git base/file.txt head/file.txt"), "uni
 assert(has_line(condensed_lines, "-base"), "unified diff old line missing")
 assert(has_line(condensed_lines, "+base changed"), "unified diff new line missing")
 assert(not has_line(condensed_lines, "same5"), "condensed unified diff included distant common line")
+local changed_row = line_number(condensed_lines, "+base changed")
+assert(changed_row, "unified diff changed line row missing")
+local changed_span_found = false
+for _, mark in ipairs(diff_marks(diff_buf)) do
+  local _, row, col, details = unpack(mark)
+  if row == changed_row - 1 and col == 5 and details.end_col == #"+base changed" then
+    changed_span_found = true
+  end
+end
+assert(changed_span_found, "unified diff partial changed span missing")
 
 pr.toggle_diff_full_file()
 wait_for(function()

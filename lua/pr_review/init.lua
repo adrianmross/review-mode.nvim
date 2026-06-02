@@ -1,6 +1,7 @@
 local M = {}
 
 local ns = vim.api.nvim_create_namespace("pr_review_normal")
+local diff_ns = vim.api.nvim_create_namespace("pr_review_diff")
 local cache_dir = vim.fs.joinpath(vim.fn.stdpath("cache"), "pr-review-comments")
 local defaults = {
   auto_open_first_change = true,
@@ -15,6 +16,7 @@ local defaults = {
     fast_diffopt = "internal,filler,closeoff,indent-heuristic,linematch:0",
     full_file = false,
     layout = "side_by_side",
+    partial_line_highlights = true,
     unified_context = 3,
     use_fast_diffopt = true,
   },
@@ -96,6 +98,7 @@ local state = {
 }
 
 local setup_done = false
+local diff_text_hl = "PrReviewDiffText"
 
 local function normalize_config(opts)
   opts = opts or {}
@@ -2082,6 +2085,93 @@ local function unified_diff_lines(diff, path)
   return lines
 end
 
+local function ensure_diff_highlights()
+  pcall(vim.api.nvim_set_hl, 0, diff_text_hl, { default = true, link = "DiffText" })
+end
+
+local function is_deleted_diff_line(line)
+  return line:sub(1, 1) == "-" and line:sub(1, 3) ~= "---"
+end
+
+local function is_added_diff_line(line)
+  return line:sub(1, 1) == "+" and line:sub(1, 3) ~= "+++"
+end
+
+local function changed_line_ranges(old_text, new_text)
+  local old_len = #old_text
+  local new_len = #new_text
+  local prefix = 0
+  local min_len = math.min(old_len, new_len)
+
+  while prefix < min_len and old_text:byte(prefix + 1) == new_text:byte(prefix + 1) do
+    prefix = prefix + 1
+  end
+
+  local suffix = 0
+  while suffix < min_len - prefix and old_text:byte(old_len - suffix) == new_text:byte(new_len - suffix) do
+    suffix = suffix + 1
+  end
+
+  return prefix, old_len - suffix, new_len - suffix
+end
+
+local function highlight_changed_range(bufnr, row, start_col, end_col)
+  if start_col >= end_col then
+    return
+  end
+
+  vim.api.nvim_buf_set_extmark(bufnr, diff_ns, row, start_col, {
+    end_col = end_col,
+    hl_group = diff_text_hl,
+    hl_mode = "replace",
+  })
+end
+
+local function highlight_partial_diff_pair(bufnr, old_row, old_line, new_row, new_line)
+  local prefix, old_end, new_end = changed_line_ranges(old_line:sub(2), new_line:sub(2))
+  highlight_changed_range(bufnr, old_row, prefix + 1, old_end + 1)
+  highlight_changed_range(bufnr, new_row, prefix + 1, new_end + 1)
+end
+
+local function apply_partial_diff_highlights(bufnr)
+  if not state.config.diff.partial_line_highlights then
+    return
+  end
+
+  ensure_diff_highlights()
+  vim.api.nvim_buf_clear_namespace(bufnr, diff_ns, 0, -1)
+
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local index = 1
+  while index <= #lines do
+    if is_deleted_diff_line(lines[index]) then
+      local deleted = {}
+      while index <= #lines and is_deleted_diff_line(lines[index]) do
+        deleted[#deleted + 1] = { row = index - 1, line = lines[index] }
+        index = index + 1
+      end
+
+      local added = {}
+      while index <= #lines and is_added_diff_line(lines[index]) do
+        added[#added + 1] = { row = index - 1, line = lines[index] }
+        index = index + 1
+      end
+
+      for pair_index = 1, math.min(#deleted, #added) do
+        highlight_partial_diff_pair(
+          bufnr,
+          deleted[pair_index].row,
+          deleted[pair_index].line,
+          added[pair_index].row,
+          added[pair_index].line
+        )
+      end
+    else
+      index = index + 1
+    end
+  end
+end
+
 local function open_old_side_by_side(path, current_win, current_buf, current_filetype, base_content)
   close_old_view()
 
@@ -2152,6 +2242,7 @@ local function open_old_unified(path, current_win, current_buf, base_content, ge
         vim.api.nvim_win_set_buf(current_win, state.old_buf)
         vim.api.nvim_buf_set_name(state.old_buf, "pr-diff://" .. base_ref() .. "/" .. path)
         vim.api.nvim_buf_set_lines(state.old_buf, 0, -1, false, unified_diff_lines(result.stdout or "", path))
+        apply_partial_diff_highlights(state.old_buf)
         vim.bo[state.old_buf].buftype = "nofile"
         vim.bo[state.old_buf].bufhidden = "wipe"
         vim.bo[state.old_buf].modifiable = false
