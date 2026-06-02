@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/adrianmross/pr-review.nvim/compare/v0.8.0...v0.8.1) (2026-06-02)
+
+
+### Bug Fixes
+
+* show added files in old view ([2f5405f](https://github.com/adrianmross/pr-review.nvim/commit/2f5405f65bd591f1ac7e602fdd82ee6bf7f798c6))
+
 ## [0.8.0](https://github.com/adrianmross/pr-review.nvim/compare/v0.7.2...v0.8.0) (2026-06-02)
 
 
