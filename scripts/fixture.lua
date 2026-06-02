@@ -341,7 +341,7 @@ assert(found, "base buffer not found")
 local side_by_side_span_found = false
 for _, mark in ipairs(diff_marks(vim.api.nvim_get_current_buf())) do
   local _, row, col, details = unpack(mark)
-  if row == 3 and col == 4 and details.end_col == #"base changed" then
+  if row == 3 and col == 4 and details.end_col == #"base changed" and details.priority >= 1000 then
     side_by_side_span_found = true
   end
 end

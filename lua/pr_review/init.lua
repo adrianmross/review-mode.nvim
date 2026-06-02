@@ -100,6 +100,7 @@ local state = {
 
 local setup_done = false
 local diff_text_hl = "PrReviewDiffText"
+local diff_text_priority = 1000
 local close_old_view
 
 local function normalize_config(opts)
@@ -2149,6 +2150,7 @@ local function highlight_changed_range(bufnr, row, start_col, end_col)
     end_col = end_col,
     hl_group = diff_text_hl,
     hl_mode = "replace",
+    priority = diff_text_priority,
   })
 end
 
@@ -2308,15 +2310,15 @@ local function open_old_side_by_side(path, current_win, current_buf, current_fil
 
   local side_by_side_diff =
     diff_for_partial_highlights(path, base_content, vim.api.nvim_buf_get_lines(current_buf, 0, -1, false), base_missing)
-  if side_by_side_diff then
-    apply_side_by_side_partial_diff_highlights(state.old_buf, current_buf, side_by_side_diff)
-  end
 
   apply_old_diffopt()
 
   vim.cmd("diffthis")
   vim.api.nvim_set_current_win(current_win)
   vim.cmd("diffthis")
+  if side_by_side_diff then
+    apply_side_by_side_partial_diff_highlights(state.old_buf, current_buf, side_by_side_diff)
+  end
   apply_side_by_side_context()
   vim.api.nvim_set_current_win(current_win)
 end
