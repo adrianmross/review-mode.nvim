@@ -88,6 +88,10 @@ function Decorator:icons(node)
   end
 
   if state.is_changed_dir(rel) then
+    if node.open then
+      return nil
+    end
+
     local config = state.config()
     local icons = {}
     if config.nvim_tree.show_comments and state.unresolved_comment_count(rel) > 0 then

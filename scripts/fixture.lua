@@ -182,6 +182,9 @@ wait_for(function()
   return pr.is_changed_file("nested/other.txt")
 end, "second changed file did not load")
 wait_for(function()
+  return pr.is_changed_file("nested/deeper/more.txt")
+end, "deep changed file did not load")
+wait_for(function()
   return pr.is_changed_file("new.txt")
 end, "added file did not load")
 wait_for(function()
@@ -192,7 +195,7 @@ wait_for(function()
 end, "PR comments did not load")
 
 pr.summary()
-assert(last_notification():find("Files: 1 viewed, 2 unviewed, 3 total", 1, true), "summary file counts were wrong")
+assert(last_notification():find("Files: 1 viewed, 3 unviewed, 4 total", 1, true), "summary file counts were wrong")
 assert(last_notification():find("Comments: 3", 1, true), "summary comment count was wrong")
 assert(last_notification():find("Threads: 3 total, 2 unresolved", 1, true), "summary thread counts were wrong")
 
@@ -231,6 +234,10 @@ assert(
 assert(
   has_line_parts(unviewed_menu, { "☐ 1", "+1", "-1", comment_sign .. " 1", "nested/other.txt" }),
   "unviewed picker nested file label was wrong"
+)
+assert(
+  has_line_parts(unviewed_menu, { "☐ 1", "+1", "-1", "nested/deeper/more.txt" }),
+  "unviewed picker deep file label was wrong"
 )
 assert(has_line_parts(unviewed_menu, { "☐ 1", "+2", "-0", "new.txt" }), "unviewed picker added file label was wrong")
 assert(has_line(preview_lines, "file.txt"), "viewed picker preview title missing")
@@ -278,7 +285,7 @@ end, "queued viewed sync mutation was not flushed")
 vim.cmd.edit("file.txt")
 pr.mark_viewed_next()
 wait_for(function()
-  return vim.api.nvim_buf_get_name(0):find("nested/other%.txt$", 1) ~= nil
+  return vim.api.nvim_buf_get_name(0):find("nested/deeper/more%.txt$", 1) ~= nil
 end, "mark viewed next did not jump to next unviewed file")
 
 package.preload["nvim-tree.renderer.decorator"] = function()
@@ -318,11 +325,33 @@ local dir_node = { absolute_path = vim.fs.joinpath(pr.root(), "nested") }
 local dir_icons = decorator:icons(dir_node)
 assert(pr.unresolved_comment_count("nested") == 1, "unresolved folder comment count was wrong")
 assert(has_icon(dir_icons, comment_sign .. " 1"), "nvim-tree folder comment marker missing")
-assert(pr.unviewed_count("nested") == 1, "unviewed folder count was wrong")
-assert(has_icon(dir_icons, "☐ 1"), "nvim-tree changed folder marker missing")
-assert(has_icon_hl(dir_icons, "☐ 1", "PrReviewTreeChanged"), "nvim-tree changed folder marker highlight was wrong")
+assert(pr.unviewed_count("nested") == 2, "unviewed folder count was wrong")
+assert(has_icon(dir_icons, "☐ 2"), "nvim-tree changed folder marker missing")
+assert(has_icon_hl(dir_icons, "☐ 2", "PrReviewTreeChanged"), "nvim-tree changed folder marker highlight was wrong")
 assert(not pr.is_viewed_dir("nested"), "viewed dir state was true before all children were viewed")
 assert(decorator:highlight_group(dir_node) == "PrReviewTreeChanged", "nvim-tree changed folder highlight was wrong")
+
+dir_node.open = true
+assert(decorator:icons(dir_node) == nil, "nvim-tree open folder markers should be hidden")
+dir_node.open = false
+
+local deep_dir_node = { absolute_path = vim.fs.joinpath(pr.root(), "nested/deeper") }
+local deep_dir_icons = decorator:icons(deep_dir_node)
+assert(pr.unviewed_count("nested/deeper") == 1, "unviewed deep folder count was wrong")
+assert(has_icon(deep_dir_icons, "☐ 1"), "nvim-tree deep folder marker missing")
+
+pr.mark_viewed("nested/deeper/more.txt", { silent = true })
+wait_for(function()
+  return pr.is_viewed_dir("nested/deeper")
+end, "viewed deep dir state did not cascade after child was viewed")
+assert(pr.unviewed_count("nested/deeper") == 0, "unviewed deep folder count did not clear after child was viewed")
+assert(pr.unviewed_count("nested") == 1, "unviewed parent folder count did not update after deep child was viewed")
+deep_dir_icons = decorator:icons(deep_dir_node)
+assert(has_icon(deep_dir_icons, "✓"), "nvim-tree viewed deep folder marker missing")
+assert(
+  has_icon_hl(deep_dir_icons, "✓", "PrReviewTreeViewed"),
+  "nvim-tree viewed deep folder marker highlight was wrong"
+)
 
 pr.mark_viewed("nested/other.txt", { silent = true })
 wait_for(function()
@@ -414,7 +443,7 @@ pr.next_file()
 wait_for(function()
   return #vim.api.nvim_list_wins() == 1
     and buffer_lines_matching("pr%-base://") == nil
-    and vim.api.nvim_buf_get_name(0):find("nested/other%.txt$", 1) ~= nil
+    and vim.api.nvim_buf_get_name(0):find("nested/deeper/more%.txt$", 1) ~= nil
 end, "next file navigation did not close side-by-side pair")
 
 vim.cmd.edit("file.txt")
