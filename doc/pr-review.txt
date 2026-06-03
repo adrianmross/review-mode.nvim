@@ -193,11 +193,12 @@ with immediate focused-file prefetch, opportunistic gitsigns.nvim hunk-cache
 reuse, and an optional delayed background scan for PRs under
 performance.background_hunk_scan.max_files.
 
-The nvim-tree integration marks unviewed changed files and parent folders with
-`☐ N`, where `N` is the number of unviewed changed files under that node.
-Viewed files and folders use `✓`, and files and folders with unresolved
-comments also use ` N`. A folder switches to viewed after every changed file
-under it is viewed.
+The nvim-tree integration marks unviewed changed files and closed parent
+folders with `☐ N`, where `N` is the number of unviewed changed files under
+that node. Viewed files and closed folders use `✓`, and files and closed
+folders with unresolved comments also use ` N`. An open folder hides these
+folder markers because its children show the same state inline. A folder
+switches to viewed after every changed file under it is viewed.
 
 External launchers can provide GH_REVIEW_REPO, GH_REVIEW_PR, GH_REVIEW_BASE,
 and GH_REVIEW_HEAD to avoid startup discovery calls.

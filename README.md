@@ -97,11 +97,12 @@ require("nvim-tree").setup({
 })
 ```
 
-Unviewed changed files and parent folders are marked with `☐ N`, where `N` is
-the number of unviewed changed files under that node. Viewed files and folders
-are marked with `✓`; files and folders with unresolved comments are also marked
-with ` N`. A folder switches to viewed after every changed file under it is
-viewed.
+Unviewed changed files and closed parent folders are marked with `☐ N`, where
+`N` is the number of unviewed changed files under that node. Viewed files and
+closed folders are marked with `✓`; files and closed folders with unresolved
+comments are also marked with ` N`. An open folder hides these folder markers
+because its children show the same state inline. A folder switches to viewed
+after every changed file under it is viewed.
 
 ## Commands
 
