@@ -9,12 +9,12 @@ export XDG_STATE_HOME="${XDG_STATE_HOME:-$repo_root/.local/state}"
 mkdir -p "$XDG_CACHE_HOME" "$XDG_STATE_HOME"
 
 nvim --headless -u NONE -i NONE \
-  -c "lua assert(loadfile('lua/pr_review/init.lua'))" \
-  -c "lua assert(loadfile('lua/pr_review/integrations/nvim_tree.lua'))" \
+  -c "lua assert(loadfile('lua/review_mode/init.lua'))" \
+  -c "lua assert(loadfile('lua/review_mode/integrations/nvim_tree.lua'))" \
   -c qa
 
-help_dir="$(mktemp -d "${TMPDIR:-/tmp}/pr-review-help.XXXXXX")"
-cp doc/pr-review.txt "$help_dir/pr-review.txt"
+help_dir="$(mktemp -d "${TMPDIR:-/tmp}/review-mode-help.XXXXXX")"
+cp doc/review-mode.txt "$help_dir/review-mode.txt"
 nvim --headless -u NONE -i NONE \
   -c "helptags $help_dir" \
   -c qa
@@ -23,7 +23,7 @@ stylua --check lua plugin scripts/fixture.lua scripts/rest_fallback_fixture.lua
 git diff --check
 bash scripts/release-check.sh
 
-tmp="$(mktemp -d "${TMPDIR:-/tmp}/pr-review-nvim-test.XXXXXX")"
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/review-mode-nvim-test.XXXXXX")"
 mkdir -p "$tmp/bin" "$tmp/repo" "$tmp/cache" "$tmp/state"
 
 cat > "$tmp/bin/gh" <<'GH'
@@ -45,7 +45,7 @@ case "$1 $2" in
     if [[ "$args" == *"viewerViewedState"* ]]; then
       printf '{"data":{"repository":{"pullRequest":{"id":"PR_node","files":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"path":"file.txt","viewerViewedState":"VIEWED"}]}}}}}\n'
     elif [[ "$args" == *"reviewThreads"* ]]; then
-      if [[ "${PR_REVIEW_FORCE_REST_COMMENTS:-}" == "1" ]]; then
+      if [[ "${REVIEW_MODE_FORCE_REST_COMMENTS:-}" == "1" ]]; then
         echo "forced reviewThreads failure" >&2
         exit 1
       fi
@@ -53,13 +53,13 @@ case "$1 $2" in
     elif [[ "$args" == *"pullRequest(number"* ]]; then
       printf '{"data":{"repository":{"pullRequest":{"id":"PR_node"}}}}\n'
     elif [[ "$args" == *"markFileAsViewed"* ]]; then
-      if [[ "${PR_REVIEW_FAIL_MUTATION:-}" == "1" ]]; then
+      if [[ "${REVIEW_MODE_FAIL_MUTATION:-}" == "1" ]]; then
         echo "forced viewed mutation failure" >&2
         exit 1
       fi
       printf '{"data":{"markFileAsViewed":{"clientMutationId":null}}}\n'
     elif [[ "$args" == *"unmarkFileAsViewed"* ]]; then
-      if [[ "${PR_REVIEW_FAIL_MUTATION:-}" == "1" ]]; then
+      if [[ "${REVIEW_MODE_FAIL_MUTATION:-}" == "1" ]]; then
         echo "forced viewed mutation failure" >&2
         exit 1
       fi
@@ -106,7 +106,7 @@ GH_REVIEW_REPO=owner/repo \
 GH_REVIEW_PR=123 \
 GH_REVIEW_BASE=main \
 GH_REVIEW_HEAD=abc123 \
-PR_REVIEW_PLUGIN_ROOT="$repo_root" \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/fixture.lua"
@@ -118,8 +118,8 @@ GH_REVIEW_REPO=owner/repo \
 GH_REVIEW_PR=123 \
 GH_REVIEW_BASE=main \
 GH_REVIEW_HEAD=abc123 \
-PR_REVIEW_PLUGIN_ROOT="$repo_root" \
-PR_REVIEW_FORCE_REST_COMMENTS=1 \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+REVIEW_MODE_FORCE_REST_COMMENTS=1 \
 nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/rest_fallback_fixture.lua"

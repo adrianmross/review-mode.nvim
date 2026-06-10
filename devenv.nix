@@ -12,10 +12,10 @@
   enterShell = ''
     export XDG_CACHE_HOME="''${XDG_CACHE_HOME:-$PWD/.cache}"
     export XDG_STATE_HOME="''${XDG_STATE_HOME:-$PWD/.local/state}"
-    export PR_REVIEW_GITSIGNS_ROOT="${pkgs.vimPlugins.gitsigns-nvim}"
+    export REVIEW_MODE_GITSIGNS_ROOT="${pkgs.vimPlugins.gitsigns-nvim}"
     mkdir -p "$XDG_CACHE_HOME" "$XDG_STATE_HOME"
 
-    echo "pr-review.nvim dev shell ready: $(nvim --version | head -n 1)"
+    echo "review-mode.nvim dev shell ready: $(nvim --version | head -n 1)"
   '';
 
   scripts.validate.exec = ''
