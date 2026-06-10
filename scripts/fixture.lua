@@ -162,6 +162,7 @@ assert(pr.config().processing == nil, "old viewed config alias should not be exp
 assert(pr.config().comments.sign_text == comment_sign, "comment sign default was wrong")
 assert(pr.config().nvim_tree.show_viewed, "show_viewed config was not enabled")
 assert(pr.config().nvim_tree.show_processing == nil, "old nvim-tree viewed option alias should not be exposed")
+assert(pr.config().picker.provider == "auto", "picker provider default was wrong")
 
 local commands = vim.api.nvim_get_commands({})
 assert(commands.ReviewMode, "ReviewMode command missing")
@@ -210,6 +211,129 @@ end, "GitHub viewed state did not load")
 wait_for(function()
   return pr.comment_count("file.txt") == 2
 end, "PR comments did not load")
+
+local original_snacks = rawget(_G, "Snacks")
+local snacks_actions_opts = nil
+local snacks_files_opts = nil
+_G.Snacks = {
+  picker = {
+    pick = function(opts)
+      if opts.source == "review_mode_actions" then
+        snacks_actions_opts = opts
+        assert(opts.items[1].text:find("PR", 1, true), "snacks action category missing")
+        assert(opts.items[1].preview.text:find("Open in browser", 1, true), "snacks action preview missing")
+      elseif opts.source == "review_mode_files" then
+        snacks_files_opts = opts
+        assert(opts.title:find("unviewed", 1, true), "snacks file title filter missing")
+        assert(opts.items[1].preview.text:find(opts.items[1].item.path, 1, true), "snacks file preview path missing")
+        assert(
+          opts.items[1].preview.text:find("+feature", 1, true) or opts.items[1].preview.text:find("+new", 1, true),
+          "snacks file preview diff missing"
+        )
+      else
+        error("unexpected snacks picker source: " .. tostring(opts.source))
+      end
+    end,
+  },
+}
+pr.config().picker.provider = "snacks"
+pr.actions()
+assert(snacks_actions_opts, "snacks action picker was not used")
+pr.list_viewed("unviewed")
+assert(snacks_files_opts, "snacks viewed picker was not used")
+_G.Snacks = original_snacks
+
+local telescope_state = { maps = {} }
+package.preload["telescope.finders"] = function()
+  return {
+    new_table = function(opts)
+      local entries = {}
+      for _, item in ipairs(opts.results or {}) do
+        entries[#entries + 1] = opts.entry_maker(item)
+      end
+      return { entries = entries }
+    end,
+  }
+end
+package.preload["telescope.config"] = function()
+  return { values = {
+    generic_sorter = function()
+      return function() end
+    end,
+  } }
+end
+package.preload["telescope.actions.state"] = function()
+  return {
+    get_selected_entry = function()
+      return telescope_state.selected
+    end,
+  }
+end
+package.preload["telescope.actions"] = function()
+  return {
+    close = function()
+      telescope_state.closed = true
+    end,
+    select_default = {
+      replace = function(_, fn)
+        telescope_state.select_default = fn
+      end,
+    },
+  }
+end
+package.preload["telescope.previewers"] = function()
+  return {
+    new_buffer_previewer = function(opts)
+      telescope_state.previewer = opts
+      return opts
+    end,
+  }
+end
+package.preload["telescope.pickers"] = function()
+  return {
+    new = function(_, opts)
+      telescope_state.opts = opts
+      return {
+        find = function()
+          if opts.prompt_title == "Review Mode actions" then
+            telescope_state.selected = opts.finder.entries[#opts.finder.entries]
+            opts.attach_mappings(17, function() end)
+            telescope_state.select_default(17)
+          else
+            telescope_state.selected = opts.finder.entries[1]
+            if opts.previewer and opts.previewer.define_preview then
+              local preview_buf = vim.api.nvim_create_buf(false, true)
+              opts.previewer.define_preview({ state = { bufnr = preview_buf } }, telescope_state.selected)
+              local preview_lines = vim.api.nvim_buf_get_lines(preview_buf, 0, -1, false)
+              assert(
+                has_line(preview_lines, "+feature") or has_line(preview_lines, "+new"),
+                "telescope file preview diff missing"
+              )
+              vim.api.nvim_buf_delete(preview_buf, { force = true })
+            end
+          end
+        end,
+      }
+    end,
+  }
+end
+pr.config().picker.provider = "telescope"
+pr.actions()
+assert(last_notification():find("Files:", 1, true), "telescope action picker did not run selected action")
+pr.list_viewed("unviewed")
+assert(telescope_state.opts.prompt_title:find("unviewed", 1, true), "telescope viewed picker title missing")
+for _, module in ipairs({
+  "telescope.finders",
+  "telescope.config",
+  "telescope.actions.state",
+  "telescope.actions",
+  "telescope.previewers",
+  "telescope.pickers",
+}) do
+  package.loaded[module] = nil
+  package.preload[module] = nil
+end
+pr.config().picker.provider = "native"
 
 pr.copy_url()
 wait_for(function()
