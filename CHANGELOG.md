@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.0.0](https://github.com/adrianmross/review-mode.nvim/compare/v0.9.0...v1.0.0) (2026-06-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* rename pr-review.nvim to review-mode.nvim, including the module, commands, help tags, plugin loader, cache/state names, and documented setup.
+
+### Features
+
+* rename plugin to review-mode.nvim ([6910454](https://github.com/adrianmross/review-mode.nvim/commit/6910454ba33b7c5e9c0aab606b6044b738d88a61))
+
+
+### Bug Fixes
+
+* update viewed folder markers ([4e13a04](https://github.com/adrianmross/review-mode.nvim/commit/4e13a0479e817dcc77a028907a3b1278b9fe990d))
+* update viewed folder markers ([e86e58e](https://github.com/adrianmross/review-mode.nvim/commit/e86e58ee01d9645bf51d1aa0a97a0e4e1f52348b))
+
 ## [0.9.0](https://github.com/adrianmross/pr-review.nvim/compare/v0.8.4...v0.9.0) (2026-06-02)
 
 
