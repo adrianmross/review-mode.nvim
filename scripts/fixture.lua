@@ -93,6 +93,13 @@ local function lines_by_filetype(filetype)
   return vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), winid
 end
 
+local function close_win_by_filetype(filetype)
+  local winid = win_by_filetype(filetype)
+  if winid and vim.api.nvim_win_is_valid(winid) then
+    vim.api.nvim_win_close(winid, true)
+  end
+end
+
 local function line_number(lines, needle)
   for index, line in ipairs(lines or {}) do
     if line == needle then
@@ -159,6 +166,14 @@ assert(pr.config().nvim_tree.show_processing == nil, "old nvim-tree viewed optio
 local commands = vim.api.nvim_get_commands({})
 assert(commands.ReviewMode, "ReviewMode command missing")
 assert(not commands.ReviewModeStart, "old start command alias should be removed")
+assert(commands.ReviewModeActions, "ReviewModeActions command missing")
+assert(commands.ReviewModeBrowser, "ReviewModeBrowser command missing")
+assert(commands.ReviewModeCopyUrl, "ReviewModeCopyUrl command missing")
+assert(commands.ReviewModeChecks, "ReviewModeChecks command missing")
+assert(commands.ReviewModeStatus, "ReviewModeStatus command missing")
+assert(commands.ReviewModeResolveThread, "ReviewModeResolveThread command missing")
+assert(commands.ReviewModeUnresolveThread, "ReviewModeUnresolveThread command missing")
+assert(commands.ReviewModeSuggest, "ReviewModeSuggest command missing")
 assert(commands.ReviewModeViewedToggle, "ReviewModeViewedToggle command missing")
 assert(commands.ReviewModeViewedList, "ReviewModeViewedList command missing")
 assert(commands.ReviewModeViewedFeatureToggle, "ReviewModeViewedFeatureToggle command missing")
@@ -195,6 +210,52 @@ end, "GitHub viewed state did not load")
 wait_for(function()
   return pr.comment_count("file.txt") == 2
 end, "PR comments did not load")
+
+pr.copy_url()
+wait_for(function()
+  return last_notification():find("Copied PR URL: https://github.com/owner/repo/pull/123", 1, true) ~= nil
+end, "copy URL command did not copy PR URL")
+assert(vim.fn.getreg('"') == "https://github.com/owner/repo/pull/123", "copy URL register was wrong")
+
+pr.status()
+wait_for(function()
+  return win_by_filetype("markdown") ~= nil
+end, "status preview did not open")
+local status_lines = lines_by_filetype("markdown")
+assert(has_line(status_lines, "# Improve review tools"), "status title missing")
+assert(has_line(status_lines, "Review: REVIEW_REQUIRED"), "status review decision missing")
+close_win_by_filetype("markdown")
+
+pr.checks()
+wait_for(function()
+  return win_by_filetype("text") ~= nil
+end, "checks preview did not open")
+local check_lines = lines_by_filetype("text")
+assert(has_line(check_lines, "validate"), "checks output missing")
+close_win_by_filetype("text")
+
+vim.cmd.edit("file.txt")
+vim.api.nvim_win_set_cursor(0, { 2, 0 })
+pr.resolve_thread()
+wait_for(function()
+  return last_notification():find("Resolved PR review thread", 1, true) ~= nil
+end, "resolve thread command did not report success")
+pr.unresolve_thread()
+wait_for(function()
+  return last_notification():find("Unresolved PR review thread", 1, true) ~= nil
+end, "unresolve thread command did not report success")
+
+local original_input = vim.ui.input
+vim.ui.input = function(opts, callback)
+  assert(opts.default and opts.default:find("two", 1, true), "suggestion default text missing")
+  callback("two improved")
+end
+vim.api.nvim_win_set_cursor(0, { 2, 0 })
+pr.suggest()
+vim.ui.input = original_input
+wait_for(function()
+  return last_notification():find("Submitted PR comment on file.txt:2", 1, true) ~= nil
+end, "suggest command did not create a PR comment")
 
 pr.summary()
 assert(last_notification():find("Files: 1 viewed, 3 unviewed, 4 total", 1, true), "summary file counts were wrong")

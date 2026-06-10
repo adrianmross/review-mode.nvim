@@ -16,7 +16,8 @@ current branch to the PR base, sets Gitsigns to that base when available, loads
 review comments asynchronously, and provides commands for jumping through PR
 hunks, PR comments, and changed files.
 
-The plugin uses `gh` for PR metadata, comments, and replies.
+The plugin uses `gh` for PR metadata, comments, replies, thread state, checks,
+and browser handoff metadata.
 
 ==============================================================================
 COMMANDS                                                  *review-mode-commands*
@@ -24,6 +25,26 @@ COMMANDS                                                  *review-mode-commands*
                                                         *:ReviewMode*
 :ReviewMode
         Start normal-buffer Review Mode.
+
+                                                        *:ReviewModeActions*
+:ReviewModeActions
+        Open an action picker for common PR actions.
+
+                                                        *:ReviewModeBrowser*
+:ReviewModeBrowser
+        Open the current PR in your browser.
+
+                                                        *:ReviewModeCopyUrl*
+:ReviewModeCopyUrl
+        Copy the current PR URL to registers.
+
+                                                        *:ReviewModeChecks*
+:ReviewModeChecks
+        Show `gh pr checks` output in a floating preview.
+
+                                                        *:ReviewModeStatus*
+:ReviewModeStatus
+        Show current PR status in a floating preview.
 
                                                         *:ReviewModeStop*
 :ReviewModeStop
@@ -77,9 +98,21 @@ COMMANDS                                                  *review-mode-commands*
 :ReviewModeReply
         Reply to the latest PR comment on the current line.
 
+                                                        *:ReviewModeResolveThread*
+:ReviewModeResolveThread
+        Resolve the PR review thread on the current line.
+
+                                                        *:ReviewModeUnresolveThread*
+:ReviewModeUnresolveThread
+        Unresolve the PR review thread on the current line.
+
                                                         *:ReviewModeComment*
 :ReviewModeComment
         Create a PR comment on the current line or visual range.
+
+                                                        *:ReviewModeSuggest*
+:ReviewModeSuggest
+        Create a GitHub suggestion comment on the current line or visual range.
 
                                                         *:ReviewModeViewedToggle*
 :ReviewModeViewedToggle

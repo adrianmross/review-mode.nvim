@@ -11,6 +11,7 @@ mkdir -p "$XDG_CACHE_HOME" "$XDG_STATE_HOME"
 nvim --headless -u NONE -i NONE \
   -c "lua assert(loadfile('lua/review_mode/init.lua'))" \
   -c "lua assert(loadfile('lua/review_mode/integrations/nvim_tree.lua'))" \
+  -c "lua assert(loadfile('lua/review_mode/health.lua'))" \
   -c qa
 
 help_dir="$(mktemp -d "${TMPDIR:-/tmp}/review-mode-help.XXXXXX")"
@@ -32,7 +33,17 @@ set -euo pipefail
 
 case "$1 $2" in
   "pr view")
-    printf '{"baseRefName":"main","headRefOid":"abc123","number":123}\n'
+    args="$*"
+    if [[ "$args" == *"--json url"* && "$args" == *"-q .url"* ]]; then
+      printf 'https://github.com/owner/repo/pull/123\n'
+    elif [[ "$args" == *"title,state,isDraft,mergeable,reviewDecision,headRefName,baseRefName,url"* ]]; then
+      printf '{"title":"Improve review tools","state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","reviewDecision":"REVIEW_REQUIRED","headRefName":"feature","baseRefName":"main","url":"https://github.com/owner/repo/pull/123"}\n'
+    else
+      printf '{"baseRefName":"main","headRefOid":"abc123","number":123}\n'
+    fi
+    ;;
+  "pr checks")
+    printf 'validate\tpass\t0\thttps://example.test/checks/validate\n'
     ;;
   "repo view")
     printf 'owner/repo\n'
@@ -40,10 +51,23 @@ case "$1 $2" in
   "api repos/owner/repo/pulls/123/comments?per_page=100"|"api repos/owner/repo/pulls/123/comments?per_page=100&page=1")
     printf '[{"id":1,"path":"file.txt","line":2,"body":"Needs review","user":{"login":"reviewer"}},{"id":2,"path":"file.txt","line":4,"body":"Check final line","user":{"login":"reviewer"}}]\n'
     ;;
+  "api repos/owner/repo/pulls/123/comments")
+    args="$*"
+    if [[ "$args" == *"--method POST"* ]]; then
+      printf '{"id":99,"path":"file.txt","line":2,"body":"created"}\n'
+    else
+      echo "unexpected gh comments args: $*" >&2
+      exit 1
+    fi
+    ;;
   "api graphql")
     args="$*"
     if [[ "$args" == *"viewerViewedState"* ]]; then
       printf '{"data":{"repository":{"pullRequest":{"id":"PR_node","files":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"path":"file.txt","viewerViewedState":"VIEWED"}]}}}}}\n'
+    elif [[ "$args" == *"resolveReviewThread"* ]]; then
+      printf '{"data":{"resolveReviewThread":{"thread":{"id":"thread_1","isResolved":true}}}}\n'
+    elif [[ "$args" == *"unresolveReviewThread"* ]]; then
+      printf '{"data":{"unresolveReviewThread":{"thread":{"id":"thread_1","isResolved":false}}}}\n'
     elif [[ "$args" == *"reviewThreads"* ]]; then
       if [[ "${REVIEW_MODE_FORCE_REST_COMMENTS:-}" == "1" ]]; then
         echo "forced reviewThreads failure" >&2
