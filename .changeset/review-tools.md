@@ -2,4 +2,4 @@
 release: patch
 ---
 
-Add a ReviewMode action picker, PR status/check/url/browser helpers, thread resolve/unresolve commands, GitHub suggestion comments, and a healthcheck.
+Add ReviewMode action helpers for PR status, checks, URL copy, browser handoff, thread resolution, suggestion comments, and health checks.
