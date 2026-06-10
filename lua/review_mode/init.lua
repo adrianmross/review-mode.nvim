@@ -196,6 +196,37 @@ local function gh_json_async(args, callback)
   end)
 end
 
+local function open_lines_preview(lines, filetype, opts)
+  opts = opts or {}
+  local preview_filetype = filetype or "markdown"
+  local bufnr = vim.lsp.util.open_floating_preview(lines, preview_filetype, {
+    border = "rounded",
+    focusable = true,
+    max_width = opts.max_width or math.floor(vim.o.columns * 0.75),
+    max_height = opts.max_height or math.floor(vim.o.lines * 0.65),
+  })
+  if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+    vim.bo[bufnr].filetype = preview_filetype
+  end
+end
+
+local function active_pr_arg()
+  if state.pr and state.pr ~= "" then
+    return tostring(state.pr)
+  end
+  return env_value("GH_REVIEW_PR")
+end
+
+local function pr_url_async(callback)
+  local args = { "pr", "view" }
+  local pr = active_pr_arg()
+  if pr then
+    args[#args + 1] = pr
+  end
+  vim.list_extend(args, { "--json", "url", "-q", ".url" })
+  system_async(vim.list_extend({ "gh" }, args), {}, callback)
+end
+
 local is_current
 
 local function repo_slug_async(generation, callback)
@@ -3549,7 +3580,88 @@ function M.reply()
   end)
 end
 
-local function visual_range()
+local function thread_comment_on_current_line()
+  local path = current_relpath()
+  if not path then
+    return nil, "current buffer is not under repo root"
+  end
+
+  if vim.tbl_isempty(state.comments) then
+    hydrate_comments()
+  end
+
+  local line = vim.api.nvim_win_get_cursor(0)[1]
+  local comments = comments_for_line(path, line)
+  if #comments == 0 then
+    return nil, "no PR comment thread on current line"
+  end
+
+  local target = comments[#comments]
+  if not target.thread_id then
+    return nil, "current comment was loaded without a review thread id"
+  end
+  return target, nil
+end
+
+local function set_thread_resolved(resolved)
+  if not state.repo or not state.pr then
+    vim.notify("Review Mode thread: start Review Mode first", vim.log.levels.WARN)
+    return
+  end
+
+  local target, err = thread_comment_on_current_line()
+  if not target then
+    vim.notify("Review Mode thread: " .. tostring(err), vim.log.levels.WARN)
+    return
+  end
+
+  local field = resolved and "resolveReviewThread" or "unresolveReviewThread"
+  local mutation = string.format(
+    [[
+mutation($threadId: ID!) {
+  %s(input: {threadId: $threadId}) {
+    thread {
+      id
+      isResolved
+    }
+  }
+}
+]],
+    field
+  )
+
+  local result, mutation_err = gh_json({
+    "api",
+    "graphql",
+    "-f",
+    "query=" .. mutation,
+    "-F",
+    "threadId=" .. target.thread_id,
+  })
+  if not result then
+    vim.notify("Review Mode thread update failed: " .. tostring(mutation_err or "unknown error"), vim.log.levels.ERROR)
+    return
+  end
+
+  state.comments = {}
+  state.comment_threads = {}
+  load_comments_async()
+  vim.notify(resolved and "Resolved PR review thread" or "Unresolved PR review thread")
+end
+
+function M.resolve_thread()
+  set_thread_resolved(true)
+end
+
+function M.unresolve_thread()
+  set_thread_resolved(false)
+end
+
+local function visual_range(command)
+  if command and command.range and command.range > 0 then
+    return command.line1, command.line2
+  end
+
   local mode = vim.fn.mode()
   if mode ~= "v" and mode ~= "V" and mode ~= "\22" then
     local line = vim.api.nvim_win_get_cursor(0)[1]
@@ -3564,67 +3676,214 @@ local function visual_range()
   return start_line, end_line
 end
 
-function M.comment()
+local function selected_text(start_line, end_line)
+  return table.concat(vim.api.nvim_buf_get_lines(0, start_line - 1, end_line, false), "\n")
+end
+
+local function submit_review_comment(path, start_line, end_line, body)
+  if not state.repo or not state.pr then
+    vim.notify("Review Mode comment: start Review Mode first", vim.log.levels.WARN)
+    return false
+  end
+
+  local commit_id = state.head or system({ "gh", "pr", "view", state.pr, "--json", "headRefOid", "-q", ".headRefOid" })
+  if not commit_id then
+    vim.notify("Review Mode comment: could not determine PR head SHA", vim.log.levels.ERROR)
+    return false
+  end
+
+  local args = {
+    "api",
+    string.format("repos/%s/pulls/%s/comments", state.repo, state.pr),
+    "--method",
+    "POST",
+    "-f",
+    "body=" .. body,
+    "-f",
+    "commit_id=" .. commit_id,
+    "-f",
+    "path=" .. path,
+    "-F",
+    "line=" .. tostring(end_line),
+    "-F",
+    "side=RIGHT",
+  }
+
+  if start_line ~= end_line then
+    vim.list_extend(args, {
+      "-F",
+      "start_line=" .. tostring(start_line),
+      "-F",
+      "start_side=RIGHT",
+    })
+  end
+
+  local created, err = gh_json(args)
+  if not created then
+    vim.notify("Review Mode comment failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
+    return false
+  end
+
+  state.comments = {}
+  load_comments_async()
+  vim.notify(string.format("Submitted PR comment on %s:%d", path, end_line))
+  return true
+end
+
+function M.comment(command)
   local path = current_relpath()
   if not path then
     vim.notify("Review Mode comment: current buffer is not under repo root", vim.log.levels.WARN)
     return
   end
 
-  if not state.repo or not state.pr then
-    vim.notify("Review Mode comment: start Review Mode first", vim.log.levels.WARN)
-    return
-  end
-
-  local start_line, end_line = visual_range()
+  local start_line, end_line = visual_range(command)
   vim.ui.input({ prompt = string.format("PR comment %s:%d-%d: ", path, start_line, end_line) }, function(input)
     local body = trim(input or "")
     if body == "" then
       return
     end
+    submit_review_comment(path, start_line, end_line, body)
+  end)
+end
 
-    local commit_id = state.head
-      or system({ "gh", "pr", "view", state.pr, "--json", "headRefOid", "-q", ".headRefOid" })
-    if not commit_id then
-      vim.notify("Review Mode comment: could not determine PR head SHA", vim.log.levels.ERROR)
+function M.suggest(command)
+  local path = current_relpath()
+  if not path then
+    vim.notify("Review Mode suggestion: current buffer is not under repo root", vim.log.levels.WARN)
+    return
+  end
+
+  local start_line, end_line = visual_range(command)
+  vim.ui.input({
+    prompt = string.format("PR suggestion %s:%d-%d: ", path, start_line, end_line),
+    default = selected_text(start_line, end_line),
+  }, function(input)
+    local suggestion = input or ""
+    if suggestion == "" then
+      return
+    end
+    submit_review_comment(path, start_line, end_line, "```suggestion\n" .. suggestion .. "\n```")
+  end)
+end
+
+function M.open_browser()
+  pr_url_async(function(url, err)
+    if not url then
+      vim.notify("Review Mode browser: " .. tostring(err or "could not determine PR URL"), vim.log.levels.ERROR)
       return
     end
 
-    local args = {
-      "api",
-      string.format("repos/%s/pulls/%s/comments", state.repo, state.pr),
-      "--method",
-      "POST",
-      "-f",
-      "body=" .. body,
-      "-f",
-      "commit_id=" .. commit_id,
-      "-f",
-      "path=" .. path,
-      "-F",
-      "line=" .. tostring(end_line),
-      "-F",
-      "side=RIGHT",
+    local open_cmd
+    if vim.fn.has("mac") == 1 then
+      open_cmd = { "open", url }
+    elseif vim.fn.has("win32") == 1 then
+      open_cmd = { "cmd", "/c", "start", "", url }
+    else
+      open_cmd = { "xdg-open", url }
+    end
+    system_async(open_cmd, {}, function(_, open_err)
+      if open_err then
+        vim.notify("Review Mode browser: " .. tostring(open_err), vim.log.levels.ERROR)
+      end
+    end)
+  end)
+end
+
+function M.copy_url()
+  pr_url_async(function(url, err)
+    if not url then
+      vim.notify("Review Mode URL: " .. tostring(err or "could not determine PR URL"), vim.log.levels.ERROR)
+      return
+    end
+
+    vim.fn.setreg('"', url)
+    pcall(vim.fn.setreg, "+", url)
+    vim.notify("Copied PR URL: " .. url)
+  end)
+end
+
+function M.checks()
+  local args = { "gh", "pr", "checks" }
+  local pr = active_pr_arg()
+  if pr then
+    args[#args + 1] = pr
+  end
+  system_async(args, { raw = true }, function(stdout, err)
+    if not stdout then
+      vim.notify("Review Mode checks: " .. tostring(err or "could not load checks"), vim.log.levels.ERROR)
+      return
+    end
+
+    local lines = vim.split(vim.trim(stdout), "\n", { plain = true })
+    if #lines == 0 or (#lines == 1 and lines[1] == "") then
+      lines = { "No PR checks found" }
+    end
+    open_lines_preview(lines, "text")
+  end)
+end
+
+function M.status()
+  local args = { "pr", "view" }
+  local pr = active_pr_arg()
+  if pr then
+    args[#args + 1] = pr
+  end
+  vim.list_extend(args, { "--json", "title,state,isDraft,mergeable,reviewDecision,headRefName,baseRefName,url" })
+
+  gh_json_async(args, function(result, err)
+    if not result then
+      vim.notify("Review Mode status: " .. tostring(err or "could not load PR status"), vim.log.levels.ERROR)
+      return
+    end
+
+    local lines = {
+      string.format("# %s", result.title or "Pull request"),
+      "",
+      string.format("State: %s%s", result.state or "unknown", result.isDraft and " draft" or ""),
+      string.format("Branch: %s -> %s", result.headRefName or "?", result.baseRefName or "?"),
+      string.format("Mergeable: %s", result.mergeable or "unknown"),
+      string.format("Review: %s", result.reviewDecision or "none"),
+      string.format("URL: %s", result.url or ""),
     }
+    open_lines_preview(lines, "markdown")
+  end)
+end
 
-    if start_line ~= end_line then
-      vim.list_extend(args, {
-        "-F",
-        "start_line=" .. tostring(start_line),
-        "-F",
-        "start_side=RIGHT",
-      })
+local function action_items()
+  return {
+    { label = "Open in browser", run = M.open_browser },
+    { label = "Copy PR URL", run = M.copy_url },
+    { label = "Show PR status", run = M.status },
+    { label = "Show PR checks", run = M.checks },
+    { label = "Show current thread", run = M.show_thread },
+    { label = "Reply to current thread", run = M.reply },
+    { label = "Resolve current thread", run = M.resolve_thread },
+    { label = "Unresolve current thread", run = M.unresolve_thread },
+    { label = "Comment on line/range", run = M.comment },
+    { label = "Suggest change for line/range", run = M.suggest },
+    { label = "Toggle viewed", run = M.toggle_viewed },
+    {
+      label = "Viewed file list",
+      run = function()
+        M.list_viewed("all")
+      end,
+    },
+    { label = "Summary", run = M.summary },
+  }
+end
+
+function M.actions()
+  local items = action_items()
+  vim.ui.select(items, {
+    prompt = "Review Mode action",
+    format_item = function(item)
+      return item.label
+    end,
+  }, function(item)
+    if item and item.run then
+      item.run()
     end
-
-    local created, err = gh_json(args)
-    if not created then
-      vim.notify("Review Mode comment failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
-      return
-    end
-
-    state.comments = {}
-    load_comments_async()
-    vim.notify(string.format("Submitted PR comment on %s:%d", path, end_line))
   end)
 end
 
@@ -3734,6 +3993,11 @@ function M.setup(opts)
 
   if state.config.commands then
     vim.api.nvim_create_user_command("ReviewMode", M.start, { desc = "Start Review Mode" })
+    vim.api.nvim_create_user_command("ReviewModeActions", M.actions, { desc = "Open Review Mode action picker" })
+    vim.api.nvim_create_user_command("ReviewModeBrowser", M.open_browser, { desc = "Open the current PR in a browser" })
+    vim.api.nvim_create_user_command("ReviewModeCopyUrl", M.copy_url, { desc = "Copy the current PR URL" })
+    vim.api.nvim_create_user_command("ReviewModeChecks", M.checks, { desc = "Show current PR checks" })
+    vim.api.nvim_create_user_command("ReviewModeStatus", M.status, { desc = "Show current PR status" })
     vim.api.nvim_create_user_command("ReviewModeStop", M.stop, { desc = "Stop normal Review Mode" })
     vim.api.nvim_create_user_command("ReviewModeRefresh", M.refresh, { desc = "Refresh normal Review Mode" })
     vim.api.nvim_create_user_command("ReviewModeNextChange", M.next_change, { desc = "Alias for ReviewModeNextHunk" })
@@ -3794,9 +4058,24 @@ function M.setup(opts)
       { desc = "Reply to PR comment thread on the current line" }
     )
     vim.api.nvim_create_user_command(
+      "ReviewModeResolveThread",
+      M.resolve_thread,
+      { desc = "Resolve PR comment thread on the current line" }
+    )
+    vim.api.nvim_create_user_command(
+      "ReviewModeUnresolveThread",
+      M.unresolve_thread,
+      { desc = "Unresolve PR comment thread on the current line" }
+    )
+    vim.api.nvim_create_user_command(
       "ReviewModeComment",
       M.comment,
       { range = true, desc = "Create PR comment for current line or visual range" }
+    )
+    vim.api.nvim_create_user_command(
+      "ReviewModeSuggest",
+      M.suggest,
+      { range = true, desc = "Create PR suggestion for current line or visual range" }
     )
     vim.api.nvim_create_user_command("ReviewModeViewedToggle", function()
       M.toggle_viewed()

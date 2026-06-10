@@ -11,7 +11,8 @@ The goal is to keep review inside normal files instead of a dedicated diff UI:
 - loads GitHub review comments asynchronously with a small disk cache
 - tracks viewed/unviewed PR files locally, with optional GitHub-backed viewed sync
 - opens the base version of the current file in a side-by-side diff split
-- creates line or visual-range PR comments through `gh`
+- creates line or visual-range PR comments and suggestions through `gh`
+- opens quick PR actions for status, checks, browser handoff, URL copy, and thread resolution
 
 ## Requirements
 
@@ -38,6 +39,7 @@ With `lazy.nvim`:
   keys = {
     { "<leader>rm", "<cmd>ReviewMode<cr>", desc = "Review mode" },
     { "<leader>rN", "<cmd>ReviewModeStop<cr>", desc = "Review mode stop" },
+    { "<leader>ra", "<cmd>ReviewModeActions<cr>", desc = "Review actions" },
     { "<leader>rd", "<cmd>ReviewModeOldToggle<cr>", desc = "Review diff" },
     { "<leader>rD", "<cmd>ReviewModeDiffLayoutToggle<cr>", desc = "Review diff layout" },
     { "<leader>rf", "<cmd>ReviewModeDiffFullToggle<cr>", desc = "Review diff full file" },
@@ -49,6 +51,7 @@ With `lazy.nvim`:
     { "<leader>rS", "<cmd>ReviewModeViewedSyncToggle<cr>", desc = "Review toggle viewed sync" },
     { "<leader>rc", "<cmd>ReviewModeThread<cr>", desc = "Review line comments" },
     { "<leader>rr", "<cmd>ReviewModeReply<cr>", desc = "Review reply" },
+    { "<leader>rR", "<cmd>ReviewModeResolveThread<cr>", desc = "Review resolve thread" },
     {
       "<leader>rp",
       function()
@@ -107,6 +110,11 @@ after every changed file under it is viewed.
 ## Commands
 
 - `:ReviewMode` starts normal-buffer Review Mode
+- `:ReviewModeActions` opens a small action picker for common PR actions
+- `:ReviewModeBrowser` opens the current PR in your browser
+- `:ReviewModeCopyUrl` copies the current PR URL to registers
+- `:ReviewModeChecks` shows `gh pr checks` output in a floating preview
+- `:ReviewModeStatus` shows current PR status in a floating preview
 - `:ReviewModeStop` stops review mode and clears plugin state
 - `:ReviewModeRefresh` reloads changed files and comments
 - `:ReviewModeNextHunk` jumps to the next PR hunk
@@ -120,7 +128,10 @@ after every changed file under it is viewed.
 - `:ReviewModeDiffFullToggle` toggles the open diff between condensed context and full-file context
 - `:ReviewModeThread` shows comments on the current line
 - `:ReviewModeReply` replies to the latest comment on the current line
+- `:ReviewModeResolveThread` resolves the PR review thread on the current line
+- `:ReviewModeUnresolveThread` unresolves the PR review thread on the current line
 - `:ReviewModeComment` creates a PR comment on the current line or visual range
+- `:ReviewModeSuggest` creates a GitHub suggestion comment on the current line or visual range
 - `:ReviewModeViewedToggle` toggles viewed state for the current PR file
 - `:ReviewModeViewedNext` marks the current PR file viewed and jumps to the next unviewed file
 - `:ReviewModeViewedFeatureToggle` toggles viewed-state tracking on or off
