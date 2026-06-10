@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/adrianmross/review-mode.nvim/compare/v0.10.0...v0.10.1) (2026-06-10)
+
+
+### Features
+
+* add ReviewMode action helpers ([#39](https://github.com/adrianmross/review-mode.nvim/issues/39)) ([e6e796b](https://github.com/adrianmross/review-mode.nvim/commit/e6e796bb1ab83f7c98164a532940f2b27910a82a))
+
 ## [0.10.0](https://github.com/adrianmross/review-mode.nvim/compare/v0.9.0...v0.10.0) (2026-06-10)
 
 
