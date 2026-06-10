@@ -1,9 +1,9 @@
-local state = require("pr_review")
+local state = require("review_mode")
 
 local Decorator = require("nvim-tree.renderer.decorator"):extend()
 
-local changed_hl = "PrReviewTreeChanged"
-local viewed_hl = "PrReviewTreeViewed"
+local changed_hl = "ReviewModeTreeChanged"
+local viewed_hl = "ReviewModeTreeViewed"
 
 local function ensure_highlights()
   pcall(vim.api.nvim_set_hl, 0, changed_hl, { default = true, fg = "#F59E0B" })

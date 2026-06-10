@@ -4,13 +4,13 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-files="${PR_REVIEW_BENCH_FILES:-1000}"
-lines="${PR_REVIEW_BENCH_LINES:-80}"
-target_index="${PR_REVIEW_BENCH_TARGET_INDEX:-$((files / 2))}"
-idle_ms="${PR_REVIEW_BENCH_IDLE_MS:-0}"
-post_edit_idle_ms="${PR_REVIEW_BENCH_POST_EDIT_IDLE_MS:-0}"
-baseline_ref="${PR_REVIEW_BENCH_BASELINE_REF:-v0.2.0}"
-tmp="$(mktemp -d "${TMPDIR:-/tmp}/pr-review-bench.XXXXXX")"
+files="${REVIEW_MODE_BENCH_FILES:-1000}"
+lines="${REVIEW_MODE_BENCH_LINES:-80}"
+target_index="${REVIEW_MODE_BENCH_TARGET_INDEX:-$((files / 2))}"
+idle_ms="${REVIEW_MODE_BENCH_IDLE_MS:-0}"
+post_edit_idle_ms="${REVIEW_MODE_BENCH_POST_EDIT_IDLE_MS:-0}"
+baseline_ref="${REVIEW_MODE_BENCH_BASELINE_REF:-v0.2.0}"
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/review-mode-bench.XXXXXX")"
 mkdir -p "$tmp/bin" "$tmp/repo" "$tmp/current-cache" "$tmp/current-state" "$tmp/baseline-cache" "$tmp/baseline-state"
 
 cat > "$tmp/bin/gh" <<'GH'
@@ -90,11 +90,11 @@ run_case() {
     GH_REVIEW_PR=123 \
     GH_REVIEW_BASE=main \
     GH_REVIEW_HEAD=abc123 \
-    PR_REVIEW_PLUGIN_ROOT="$plugin_root" \
-    PR_REVIEW_BENCH_FILE="$target_file" \
-    PR_REVIEW_BENCH_LABEL="$label" \
-    PR_REVIEW_BENCH_IDLE_MS="$idle_ms" \
-    PR_REVIEW_BENCH_POST_EDIT_IDLE_MS="$post_edit_idle_ms" \
+    REVIEW_MODE_PLUGIN_ROOT="$plugin_root" \
+    REVIEW_MODE_BENCH_FILE="$target_file" \
+    REVIEW_MODE_BENCH_LABEL="$label" \
+    REVIEW_MODE_BENCH_IDLE_MS="$idle_ms" \
+    REVIEW_MODE_BENCH_POST_EDIT_IDLE_MS="$post_edit_idle_ms" \
     nvim --headless -u NONE -i NONE \
       -c "set noswapfile" \
       -l "$repo_root/scripts/benchmark.lua"

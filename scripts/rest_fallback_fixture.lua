@@ -1,4 +1,4 @@
-local repo_root = assert(os.getenv("PR_REVIEW_PLUGIN_ROOT"), "PR_REVIEW_PLUGIN_ROOT is required")
+local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
 
 vim.opt.runtimepath:prepend(repo_root)
 package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
@@ -7,7 +7,7 @@ local function wait_for(predicate, message)
   assert(vim.wait(5000, predicate, 20), message)
 end
 
-local pr = require("pr_review")
+local pr = require("review_mode")
 pr.setup({
   gitsigns = { enabled = false },
   nvim_tree = { enabled = false },

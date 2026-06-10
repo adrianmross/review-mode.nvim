@@ -1,4 +1,4 @@
-local repo_root = assert(os.getenv("PR_REVIEW_PLUGIN_ROOT"), "PR_REVIEW_PLUGIN_ROOT is required")
+local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
 
 vim.opt.runtimepath:prepend(repo_root)
 package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
@@ -10,7 +10,7 @@ local function wait_for(predicate, message)
 end
 
 local function comment_marks()
-  local ns = vim.api.nvim_get_namespaces().pr_review_normal
+  local ns = vim.api.nvim_get_namespaces().review_mode_normal
   if not ns then
     return {}
   end
@@ -18,7 +18,7 @@ local function comment_marks()
 end
 
 local function diff_marks(bufnr)
-  local ns = vim.api.nvim_get_namespaces().pr_review_diff
+  local ns = vim.api.nvim_get_namespaces().review_mode_diff
   if not ns then
     return {}
   end
@@ -124,7 +124,7 @@ local function last_notification()
 end
 
 local function viewed_sync_queue_count()
-  local path = vim.fs.joinpath(vim.fn.stdpath("state"), "pr-review-state.json")
+  local path = vim.fs.joinpath(vim.fn.stdpath("state"), "review-mode-state.json")
   local ok, lines = pcall(vim.fn.readfile, path)
   if not ok or #lines == 0 then
     return 0
@@ -140,7 +140,7 @@ local function viewed_sync_queue_count()
   return count
 end
 
-local pr = require("pr_review")
+local pr = require("review_mode")
 pr.setup({
   gitsigns = { enabled = false },
   nvim_tree = { enabled = false, show_viewed = true },
@@ -157,20 +157,22 @@ assert(pr.config().nvim_tree.show_viewed, "show_viewed config was not enabled")
 assert(pr.config().nvim_tree.show_processing == nil, "old nvim-tree viewed option alias should not be exposed")
 
 local commands = vim.api.nvim_get_commands({})
-assert(commands.PrReviewViewedToggle, "PrReviewViewedToggle command missing")
-assert(commands.PrReviewViewedList, "PrReviewViewedList command missing")
-assert(commands.PrReviewViewedFeatureToggle, "PrReviewViewedFeatureToggle command missing")
-assert(commands.PrReviewDiffLayoutToggle, "PrReviewDiffLayoutToggle command missing")
-assert(commands.PrReviewDiffFullToggle, "PrReviewDiffFullToggle command missing")
-assert(not commands.PrReviewProcessedToggle, "old viewed toggle command alias should be removed")
-assert(not commands.PrReviewProcessedList, "old viewed list command alias should be removed")
-assert(not commands.PrReviewProcessedClear, "old viewed clear command alias should be removed")
-assert(not commands.PrReviewProcessedSync, "old viewed sync command alias should be removed")
-assert(not commands.PrReviewProcessedSyncToggle, "old viewed sync-toggle command alias should be removed")
-assert(not commands.PrReviewProcessingToggle, "old viewed feature-toggle command alias should be removed")
-assert(has_value(vim.fn.getcompletion("PrReviewViewedList ", "cmdline"), "viewed"), "viewed list completion missing")
+assert(commands.ReviewMode, "ReviewMode command missing")
+assert(not commands.ReviewModeStart, "old start command alias should be removed")
+assert(commands.ReviewModeViewedToggle, "ReviewModeViewedToggle command missing")
+assert(commands.ReviewModeViewedList, "ReviewModeViewedList command missing")
+assert(commands.ReviewModeViewedFeatureToggle, "ReviewModeViewedFeatureToggle command missing")
+assert(commands.ReviewModeDiffLayoutToggle, "ReviewModeDiffLayoutToggle command missing")
+assert(commands.ReviewModeDiffFullToggle, "ReviewModeDiffFullToggle command missing")
+assert(not commands.ReviewModeProcessedToggle, "old viewed toggle command alias should be removed")
+assert(not commands.ReviewModeProcessedList, "old viewed list command alias should be removed")
+assert(not commands.ReviewModeProcessedClear, "old viewed clear command alias should be removed")
+assert(not commands.ReviewModeProcessedSync, "old viewed sync command alias should be removed")
+assert(not commands.ReviewModeProcessedSyncToggle, "old viewed sync-toggle command alias should be removed")
+assert(not commands.ReviewModeProcessingToggle, "old viewed feature-toggle command alias should be removed")
+assert(has_value(vim.fn.getcompletion("ReviewModeViewedList ", "cmdline"), "viewed"), "viewed list completion missing")
 assert(
-  has_value(vim.fn.getcompletion("PrReviewViewedList ", "cmdline"), "unviewed"),
+  has_value(vim.fn.getcompletion("ReviewModeViewedList ", "cmdline"), "unviewed"),
   "unviewed list completion missing"
 )
 
@@ -225,8 +227,8 @@ pr.toggle_viewed()
 assert(not pr.is_viewed_file("file.txt"), "viewed toggle did not mark file unviewed")
 
 pr.list_viewed("unviewed")
-local unviewed_menu, unviewed_winid = lines_by_filetype("pr-review-menu")
-local preview_lines = lines_by_filetype("pr-review-preview")
+local unviewed_menu, unviewed_winid = lines_by_filetype("review-mode-menu")
+local preview_lines = lines_by_filetype("review-mode-preview")
 assert(
   has_line_parts(unviewed_menu, { "☐ 1", "+2", "-1", comment_sign .. " 1", "file.txt" }),
   "unviewed picker file label was wrong"
@@ -252,7 +254,7 @@ end, "viewed picker toggle did not mark selected file viewed")
 pr.toggle_viewed("file.txt")
 assert(not pr.is_viewed_file("file.txt"), "viewed picker toggle restore failed")
 pr.list_viewed("viewed")
-local viewed_menu, viewed_winid = lines_by_filetype("pr-review-menu")
+local viewed_menu, viewed_winid = lines_by_filetype("review-mode-menu")
 assert(has_line(viewed_menu, "No matching PR files"), "viewed picker should be empty")
 vim.api.nvim_set_current_win(viewed_winid)
 vim.api.nvim_feedkeys("q", "x", false)
@@ -271,12 +273,12 @@ wait_for(function()
   return pr.is_viewed_file("file.txt")
 end, "GitHub viewed sync did not restore viewed state")
 
-vim.env.PR_REVIEW_FAIL_MUTATION = "1"
+vim.env.REVIEW_MODE_FAIL_MUTATION = "1"
 pr.toggle_viewed()
 wait_for(function()
   return viewed_sync_queue_count() == 1
 end, "failed viewed sync mutation was not queued")
-vim.env.PR_REVIEW_FAIL_MUTATION = nil
+vim.env.REVIEW_MODE_FAIL_MUTATION = nil
 pr.flush_viewed_sync()
 wait_for(function()
   return viewed_sync_queue_count() == 0
@@ -296,7 +298,7 @@ package.preload["nvim-tree.renderer.decorator"] = function()
   }
 end
 
-local Decorator = require("pr_review.integrations.nvim_tree")
+local Decorator = require("review_mode.integrations.nvim_tree")
 local decorator = setmetatable({}, { __index = Decorator })
 decorator:new()
 local tree_node = { absolute_path = vim.fs.joinpath(pr.root(), "file.txt") }
@@ -304,9 +306,9 @@ local icons = decorator:icons(tree_node)
 assert(pr.unresolved_comment_count("file.txt") == 1, "unresolved file comment count was wrong")
 assert(has_icon(icons, comment_sign .. " 1"), "nvim-tree comment marker missing")
 assert(has_icon(icons, "✓"), "nvim-tree viewed marker missing")
-assert(has_icon_hl(icons, "✓", "PrReviewTreeViewed"), "nvim-tree viewed marker highlight was wrong")
+assert(has_icon_hl(icons, "✓", "ReviewModeTreeViewed"), "nvim-tree viewed marker highlight was wrong")
 assert(not has_icon(icons, "☐"), "nvim-tree changed marker shown for viewed file")
-assert(decorator:highlight_group(tree_node) == "PrReviewTreeViewed", "nvim-tree viewed file highlight was wrong")
+assert(decorator:highlight_group(tree_node) == "ReviewModeTreeViewed", "nvim-tree viewed file highlight was wrong")
 
 local unviewed_tree_node = { absolute_path = vim.fs.joinpath(pr.root(), "nested/other.txt") }
 icons = decorator:icons(unviewed_tree_node)
@@ -314,10 +316,10 @@ assert(pr.unresolved_comment_count("nested/other.txt") == 1, "unresolved nested 
 assert(has_icon(icons, comment_sign .. " 1"), "nvim-tree nested comment marker missing")
 assert(pr.unviewed_count("nested/other.txt") == 1, "unviewed file count was wrong")
 assert(has_icon(icons, "☐ 1"), "nvim-tree changed marker missing for unviewed file")
-assert(has_icon_hl(icons, "☐ 1", "PrReviewTreeChanged"), "nvim-tree changed marker highlight was wrong")
+assert(has_icon_hl(icons, "☐ 1", "ReviewModeTreeChanged"), "nvim-tree changed marker highlight was wrong")
 assert(not has_icon(icons, "✓"), "nvim-tree viewed marker shown for unviewed file")
 assert(
-  decorator:highlight_group(unviewed_tree_node) == "PrReviewTreeChanged",
+  decorator:highlight_group(unviewed_tree_node) == "ReviewModeTreeChanged",
   "nvim-tree changed file highlight was wrong"
 )
 
@@ -327,9 +329,9 @@ assert(pr.unresolved_comment_count("nested") == 1, "unresolved folder comment co
 assert(has_icon(dir_icons, comment_sign .. " 1"), "nvim-tree folder comment marker missing")
 assert(pr.unviewed_count("nested") == 2, "unviewed folder count was wrong")
 assert(has_icon(dir_icons, "☐ 2"), "nvim-tree changed folder marker missing")
-assert(has_icon_hl(dir_icons, "☐ 2", "PrReviewTreeChanged"), "nvim-tree changed folder marker highlight was wrong")
+assert(has_icon_hl(dir_icons, "☐ 2", "ReviewModeTreeChanged"), "nvim-tree changed folder marker highlight was wrong")
 assert(not pr.is_viewed_dir("nested"), "viewed dir state was true before all children were viewed")
-assert(decorator:highlight_group(dir_node) == "PrReviewTreeChanged", "nvim-tree changed folder highlight was wrong")
+assert(decorator:highlight_group(dir_node) == "ReviewModeTreeChanged", "nvim-tree changed folder highlight was wrong")
 
 dir_node.open = true
 assert(decorator:icons(dir_node) == nil, "nvim-tree open folder markers should be hidden")
@@ -349,7 +351,7 @@ assert(pr.unviewed_count("nested") == 1, "unviewed parent folder count did not u
 deep_dir_icons = decorator:icons(deep_dir_node)
 assert(has_icon(deep_dir_icons, "✓"), "nvim-tree viewed deep folder marker missing")
 assert(
-  has_icon_hl(deep_dir_icons, "✓", "PrReviewTreeViewed"),
+  has_icon_hl(deep_dir_icons, "✓", "ReviewModeTreeViewed"),
   "nvim-tree viewed deep folder marker highlight was wrong"
 )
 
@@ -361,8 +363,8 @@ assert(pr.unviewed_count("nested") == 0, "unviewed folder count did not clear af
 dir_icons = decorator:icons(dir_node)
 assert(has_icon(dir_icons, comment_sign .. " 1"), "nvim-tree viewed folder comment marker missing")
 assert(has_icon(dir_icons, "✓"), "nvim-tree viewed folder marker missing")
-assert(has_icon_hl(dir_icons, "✓", "PrReviewTreeViewed"), "nvim-tree viewed folder marker highlight was wrong")
-assert(decorator:highlight_group(dir_node) == "PrReviewTreeViewed", "nvim-tree viewed folder highlight was wrong")
+assert(has_icon_hl(dir_icons, "✓", "ReviewModeTreeViewed"), "nvim-tree viewed folder marker highlight was wrong")
+assert(decorator:highlight_group(dir_node) == "ReviewModeTreeViewed", "nvim-tree viewed folder highlight was wrong")
 
 pr.config().nvim_tree.show_viewed = false
 icons = decorator:icons(tree_node)

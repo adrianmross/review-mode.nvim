@@ -1,6 +1,6 @@
-# pr-review.nvim
+# review-mode.nvim
 
-Fast GitHub PR review mode for ordinary Neovim buffers.
+Fast GitHub pull request review mode for ordinary Neovim buffers.
 
 The goal is to keep review inside normal files instead of a dedicated diff UI:
 
@@ -30,39 +30,39 @@ With `lazy.nvim`:
 
 ```lua
 {
-  "adrianmross/pr-review.nvim",
+  "adrianmross/review-mode.nvim",
   dependencies = {
     "lewis6991/gitsigns.nvim",
   },
   opts = {},
   keys = {
-    { "<leader>rm", "<cmd>PrReviewStart<cr>", desc = "Review mode" },
-    { "<leader>rN", "<cmd>PrReviewStop<cr>", desc = "Review mode stop" },
-    { "<leader>rd", "<cmd>PrReviewOldToggle<cr>", desc = "Review diff" },
-    { "<leader>rD", "<cmd>PrReviewDiffLayoutToggle<cr>", desc = "Review diff layout" },
-    { "<leader>rf", "<cmd>PrReviewDiffFullToggle<cr>", desc = "Review diff full file" },
-    { "<leader>rv", "<cmd>PrReviewViewedToggle<cr>", desc = "Toggle file viewed" },
-    { "<leader>rl", "<cmd>PrReviewViewedList<cr>", desc = "Review viewed files list" },
-    { "<leader>rV", "<cmd>PrReviewViewedFeatureToggle<cr>", desc = "Review toggle viewed state" },
-    { "<leader>rC", "<cmd>PrReviewCommentsToggle<cr>", desc = "Review toggle comments" },
-    { "<leader>rs", "<cmd>PrReviewViewedSync<cr>", desc = "Review sync viewed" },
-    { "<leader>rS", "<cmd>PrReviewViewedSyncToggle<cr>", desc = "Review toggle viewed sync" },
-    { "<leader>rc", "<cmd>PrReviewThread<cr>", desc = "Review line comments" },
-    { "<leader>rr", "<cmd>PrReviewReply<cr>", desc = "Review reply" },
+    { "<leader>rm", "<cmd>ReviewMode<cr>", desc = "Review mode" },
+    { "<leader>rN", "<cmd>ReviewModeStop<cr>", desc = "Review mode stop" },
+    { "<leader>rd", "<cmd>ReviewModeOldToggle<cr>", desc = "Review diff" },
+    { "<leader>rD", "<cmd>ReviewModeDiffLayoutToggle<cr>", desc = "Review diff layout" },
+    { "<leader>rf", "<cmd>ReviewModeDiffFullToggle<cr>", desc = "Review diff full file" },
+    { "<leader>rv", "<cmd>ReviewModeViewedToggle<cr>", desc = "Toggle file viewed" },
+    { "<leader>rl", "<cmd>ReviewModeViewedList<cr>", desc = "Review viewed files list" },
+    { "<leader>rV", "<cmd>ReviewModeViewedFeatureToggle<cr>", desc = "Review toggle viewed state" },
+    { "<leader>rC", "<cmd>ReviewModeCommentsToggle<cr>", desc = "Review toggle comments" },
+    { "<leader>rs", "<cmd>ReviewModeViewedSync<cr>", desc = "Review sync viewed" },
+    { "<leader>rS", "<cmd>ReviewModeViewedSyncToggle<cr>", desc = "Review toggle viewed sync" },
+    { "<leader>rc", "<cmd>ReviewModeThread<cr>", desc = "Review line comments" },
+    { "<leader>rr", "<cmd>ReviewModeReply<cr>", desc = "Review reply" },
     {
       "<leader>rp",
       function()
-        require("pr_review").comment()
+        require("review_mode").comment()
       end,
       mode = { "n", "v" },
       desc = "Review comment",
     },
-    { "]h", "<cmd>PrReviewNextHunk<cr>", desc = "Next PR hunk" },
-    { "[h", "<cmd>PrReviewPrevHunk<cr>", desc = "Previous PR hunk" },
-    { "]c", "<cmd>PrReviewNextComment<cr>", desc = "Next PR comment" },
-    { "[c", "<cmd>PrReviewPrevComment<cr>", desc = "Previous PR comment" },
-    { "]f", "<cmd>PrReviewNextFile<cr>", desc = "Next changed file" },
-    { "[f", "<cmd>PrReviewPrevFile<cr>", desc = "Previous changed file" },
+    { "]h", "<cmd>ReviewModeNextHunk<cr>", desc = "Next PR hunk" },
+    { "[h", "<cmd>ReviewModePrevHunk<cr>", desc = "Previous PR hunk" },
+    { "]c", "<cmd>ReviewModeNextComment<cr>", desc = "Next PR comment" },
+    { "[c", "<cmd>ReviewModePrevComment<cr>", desc = "Previous PR comment" },
+    { "]f", "<cmd>ReviewModeNextFile<cr>", desc = "Next changed file" },
+    { "[f", "<cmd>ReviewModePrevFile<cr>", desc = "Previous changed file" },
   },
 }
 ```
@@ -90,7 +90,7 @@ require("nvim-tree").setup({
       "Bookmark",
       "Diagnostics",
       "Copied",
-      require "pr_review.integrations.nvim_tree",
+      require "review_mode.integrations.nvim_tree",
       "Cut",
     },
   },
@@ -106,38 +106,38 @@ after every changed file under it is viewed.
 
 ## Commands
 
-- `:PrReviewStart` starts normal-buffer PR review mode
-- `:PrReviewStop` stops review mode and clears plugin state
-- `:PrReviewRefresh` reloads changed files and comments
-- `:PrReviewNextHunk` jumps to the next PR hunk
-- `:PrReviewPrevHunk` jumps to the previous PR hunk
-- `:PrReviewNextComment` jumps to the next PR comment
-- `:PrReviewPrevComment` jumps to the previous PR comment
-- `:PrReviewNextFile` jumps to the next changed file
-- `:PrReviewPrevFile` jumps to the previous changed file
-- `:PrReviewOldToggle` toggles the base version or unified diff for the current file
-- `:PrReviewDiffLayoutToggle` toggles the open diff between side-by-side and unified layout
-- `:PrReviewDiffFullToggle` toggles the open diff between condensed context and full-file context
-- `:PrReviewThread` shows comments on the current line
-- `:PrReviewReply` replies to the latest comment on the current line
-- `:PrReviewComment` creates a PR comment on the current line or visual range
-- `:PrReviewViewedToggle` toggles viewed state for the current PR file
-- `:PrReviewViewedNext` marks the current PR file viewed and jumps to the next unviewed file
-- `:PrReviewViewedFeatureToggle` toggles viewed-state tracking on or off
-- `:PrReviewCommentsToggle` toggles PR comments on or off
-- `:PrReviewViewedList [all|viewed|unviewed]` opens a fuzzy PR file menu with diff stats and preview; press `Space` or `t` to toggle viewed state
-- `:PrReviewViewedClear` clears local viewed state for the current PR
-- `:PrReviewViewedSync` pulls viewed state from GitHub
-- `:PrReviewViewedSyncToggle` toggles GitHub viewed-state sync
-- `:PrReviewSummary` shows file, comment, thread, and viewed-sync counts.
+- `:ReviewMode` starts normal-buffer Review Mode
+- `:ReviewModeStop` stops review mode and clears plugin state
+- `:ReviewModeRefresh` reloads changed files and comments
+- `:ReviewModeNextHunk` jumps to the next PR hunk
+- `:ReviewModePrevHunk` jumps to the previous PR hunk
+- `:ReviewModeNextComment` jumps to the next PR comment
+- `:ReviewModePrevComment` jumps to the previous PR comment
+- `:ReviewModeNextFile` jumps to the next changed file
+- `:ReviewModePrevFile` jumps to the previous changed file
+- `:ReviewModeOldToggle` toggles the base version or unified diff for the current file
+- `:ReviewModeDiffLayoutToggle` toggles the open diff between side-by-side and unified layout
+- `:ReviewModeDiffFullToggle` toggles the open diff between condensed context and full-file context
+- `:ReviewModeThread` shows comments on the current line
+- `:ReviewModeReply` replies to the latest comment on the current line
+- `:ReviewModeComment` creates a PR comment on the current line or visual range
+- `:ReviewModeViewedToggle` toggles viewed state for the current PR file
+- `:ReviewModeViewedNext` marks the current PR file viewed and jumps to the next unviewed file
+- `:ReviewModeViewedFeatureToggle` toggles viewed-state tracking on or off
+- `:ReviewModeCommentsToggle` toggles PR comments on or off
+- `:ReviewModeViewedList [all|viewed|unviewed]` opens a fuzzy PR file menu with diff stats and preview; press `Space` or `t` to toggle viewed state
+- `:ReviewModeViewedClear` clears local viewed state for the current PR
+- `:ReviewModeViewedSync` pulls viewed state from GitHub
+- `:ReviewModeViewedSyncToggle` toggles GitHub viewed-state sync
+- `:ReviewModeSummary` shows file, comment, thread, and viewed-sync counts.
 
 ## gh-dash / Worktree Handoff
 
 For external launchers, set `GH_REVIEW_REPO` and `GH_REVIEW_PR` before opening
-Neovim, then run `+PrReviewStart`:
+Neovim, then run `+ReviewMode`:
 
 ```sh
-GH_REVIEW_REPO=adrianmross/example GH_REVIEW_PR=123 nvim +PrReviewStart
+GH_REVIEW_REPO=adrianmross/example GH_REVIEW_PR=123 nvim +ReviewMode
 ```
 
 If those variables are not set, the plugin asks `gh` for the current repo and PR.
@@ -145,7 +145,7 @@ If those variables are not set, the plugin asks `gh` for the current repo and PR
 ## Options
 
 ```lua
-require("pr_review").setup({
+require("review_mode").setup({
   auto_open_first_change = true,
   comments = {
     enabled = true,
@@ -194,7 +194,7 @@ require("pr_review").setup({
 })
 ```
 
-`PrReviewStart` loads PR metadata and changed-file status asynchronously. If
+`ReviewMode` loads PR metadata and changed-file status asynchronously. If
 `GH_REVIEW_BASE` is set by a launcher, changed-file loading starts immediately
 without waiting for GitHub metadata. Hunk locations are loaded lazily per file,
 with immediate focused-file prefetch, opportunistic `gitsigns.nvim` hunk-cache
@@ -204,16 +204,16 @@ reuse, and an optional delayed background scan for PRs under
 External launchers can provide `GH_REVIEW_REPO`, `GH_REVIEW_PR`,
 `GH_REVIEW_BASE`, and `GH_REVIEW_HEAD` to avoid startup discovery calls.
 
-Viewed state is persisted in `stdpath("state")/pr-review-state.json` by
-default. Set `viewed.sync = true` or run `:PrReviewViewedSyncToggle` to pull
+Viewed state is persisted in `stdpath("state")/review-mode-state.json` by
+default. Set `viewed.sync = true` or run `:ReviewModeViewedSyncToggle` to pull
 GitHub's PR file viewed state at startup and push local viewed/unviewed toggles
 back to GitHub.
 
 The built-in side-by-side old-version split remains the default diff backend.
-Set `diff.layout = "unified"` or run `:PrReviewDiffLayoutToggle` to use an
+Set `diff.layout = "unified"` or run `:ReviewModeDiffLayoutToggle` to use an
 inline unified diff buffer in the current window instead. Closing unified mode
 restores the original file buffer. Set `diff.full_file = true` or run
-`:PrReviewDiffFullToggle` to show full-file context; condensed unified diffs use
+`:ReviewModeDiffFullToggle` to show full-file context; condensed unified diffs use
 `diff.unified_context` common lines around each hunk, and condensed side-by-side
 diffs fold unchanged regions in both diff windows. When `diff.use_fast_diffopt`
 is enabled, side-by-side diffs temporarily apply `diff.fast_diffopt`, then

@@ -1,9 +1,9 @@
 local M = {}
 
-local ns = vim.api.nvim_create_namespace("pr_review_normal")
-local diff_ns = vim.api.nvim_create_namespace("pr_review_diff")
-local picker_ns = vim.api.nvim_create_namespace("pr_review_picker")
-local cache_dir = vim.fs.joinpath(vim.fn.stdpath("cache"), "pr-review-comments")
+local ns = vim.api.nvim_create_namespace("review_mode_normal")
+local diff_ns = vim.api.nvim_create_namespace("review_mode_diff")
+local picker_ns = vim.api.nvim_create_namespace("review_mode_picker")
+local cache_dir = vim.fs.joinpath(vim.fn.stdpath("cache"), "review-mode-comments")
 local default_comment_sign_text = ""
 local defaults = {
   auto_open_first_change = true,
@@ -102,7 +102,7 @@ local state = {
 }
 
 local setup_done = false
-local diff_text_hl = "PrReviewDiffText"
+local diff_text_hl = "ReviewModeDiffText"
 local diff_text_priority = 1000
 local close_old_view
 
@@ -429,7 +429,7 @@ local function hydrate_comments()
 end
 
 local function viewed_state_path()
-  return state.config.viewed.state_path or vim.fs.joinpath(vim.fn.stdpath("state"), "pr-review-state.json")
+  return state.config.viewed.state_path or vim.fs.joinpath(vim.fn.stdpath("state"), "review-mode-state.json")
 end
 
 local function load_viewed_store()
@@ -486,7 +486,7 @@ local function persist_viewed_state()
   entry.sync_queue = state.viewed_sync_queue
   local ok, err = pcall(write_json_file, viewed_state_path(), load_viewed_store())
   if not ok then
-    vim.notify("PR review viewed state: " .. tostring(err), vim.log.levels.WARN)
+    vim.notify("Review Mode viewed state: " .. tostring(err), vim.log.levels.WARN)
   end
 end
 
@@ -1015,7 +1015,7 @@ local function sync_viewed_from_github_async(generation, force)
     end
 
     if not viewed then
-      vim.notify("PR review viewed sync failed: " .. tostring(err or "unknown error"), vim.log.levels.WARN)
+      vim.notify("Review Mode viewed sync failed: " .. tostring(err or "unknown error"), vim.log.levels.WARN)
       return
     end
 
@@ -1106,7 +1106,7 @@ local function sync_viewed_path_to_github_async(path, viewed, opts)
   github_pr_node_id_async(generation, function(pr_id, err)
     if not pr_id then
       queue_viewed_sync(path, viewed)
-      vim.notify("PR review viewed sync queued: " .. tostring(err or "unknown error"), vim.log.levels.WARN)
+      vim.notify("Review Mode viewed sync queued: " .. tostring(err or "unknown error"), vim.log.levels.WARN)
       return
     end
 
@@ -1138,7 +1138,7 @@ mutation($pullRequestId: ID!, $path: String!) {
 
       if not result then
         queue_viewed_sync(path, viewed)
-        vim.notify("PR review viewed sync queued: " .. tostring(mutation_err or "unknown error"), vim.log.levels.WARN)
+        vim.notify("Review Mode viewed sync queued: " .. tostring(mutation_err or "unknown error"), vim.log.levels.WARN)
         return
       end
 
@@ -1678,7 +1678,7 @@ local function ensure_active()
     return true
   end
 
-  vim.notify("PR review mode is not active", vim.log.levels.WARN)
+  vim.notify("Review Mode is not active", vim.log.levels.WARN)
   return false
 end
 
@@ -1688,7 +1688,7 @@ local function jump_changed_file(delta)
   end
 
   if not state.maps_loaded then
-    vim.notify("PR review mode: changed files are still loading", vim.log.levels.INFO)
+    vim.notify("Review Mode: changed files are still loading", vim.log.levels.INFO)
     return
   end
 
@@ -1714,7 +1714,7 @@ local function jump_hunk(delta)
   end
 
   if not state.maps_loaded then
-    vim.notify("PR review mode: changed files are still loading", vim.log.levels.INFO)
+    vim.notify("Review Mode: changed files are still loading", vim.log.levels.INFO)
     return
   end
 
@@ -1762,7 +1762,7 @@ local function jump_comment(delta)
   end
 
   if not state.config.comments.enabled then
-    vim.notify("PR review comments are disabled", vim.log.levels.WARN)
+    vim.notify("Review Mode comments are disabled", vim.log.levels.WARN)
     return
   end
 
@@ -1774,7 +1774,7 @@ local function jump_comment(delta)
   local positions = comment_positions()
   if #positions == 0 then
     vim.notify(
-      state.comments_loading and "PR review comments are still loading" or "No PR comments loaded",
+      state.comments_loading and "Review Mode comments are still loading" or "No PR comments loaded",
       vim.log.levels.INFO
     )
     return
@@ -1969,7 +1969,7 @@ local function load_review_async(generation, opts)
     end
 
     if err then
-      vim.notify("PR review mode: " .. tostring(err), vim.log.levels.ERROR)
+      vim.notify("Review Mode: " .. tostring(err), vim.log.levels.ERROR)
       return
     end
 
@@ -1986,7 +1986,7 @@ local function load_review_async(generation, opts)
 
     vim.notify(
       string.format(
-        "PR review mode: %s#%s against %s (%d files)",
+        "Review Mode: %s#%s against %s (%d files)",
         state.repo or "repo",
         state.pr or "?",
         state.base or "?",
@@ -2036,7 +2036,7 @@ end
 function M.start()
   local root, root_err = repo_root()
   if not root then
-    vim.notify("PR review mode: " .. tostring(root_err or "not in a git repo"), vim.log.levels.ERROR)
+    vim.notify("Review Mode: " .. tostring(root_err or "not in a git repo"), vim.log.levels.ERROR)
     return
   end
 
@@ -2058,7 +2058,7 @@ function M.start()
     load_comments_async()
     load_review_async(generation, { open_initial = true })
   else
-    vim.notify("PR review mode: loading PR metadata")
+    vim.notify("Review Mode: loading PR metadata")
   end
 
   load_metadata_async(generation, function(result, err)
@@ -2070,13 +2070,13 @@ function M.start()
       if review_loading_started then
         state.metadata_loaded = true
         vim.notify(
-          "PR review mode metadata refresh failed: " .. tostring(err or "could not load PR metadata"),
+          "Review Mode metadata refresh failed: " .. tostring(err or "could not load PR metadata"),
           vim.log.levels.WARN
         )
         return
       end
       state.active = false
-      vim.notify("PR review mode: " .. tostring(err or "could not load PR metadata"), vim.log.levels.ERROR)
+      vim.notify("Review Mode: " .. tostring(err or "could not load PR metadata"), vim.log.levels.ERROR)
       return
     end
 
@@ -2110,7 +2110,7 @@ function M.stop()
   close_old_view()
   annotate_open_buffers()
   refresh_tree()
-  vim.notify("PR review mode stopped")
+  vim.notify("Review Mode stopped")
 end
 
 function M.refresh()
@@ -2120,7 +2120,7 @@ function M.refresh()
   end
 
   if not state.metadata_loaded then
-    vim.notify("PR review mode: metadata is still loading", vim.log.levels.INFO)
+    vim.notify("Review Mode: metadata is still loading", vim.log.levels.INFO)
     return
   end
 
@@ -2406,14 +2406,14 @@ local function open_old_unified(path, current_win, current_buf, base_content, ge
         state.old_loading = false
         if result.code ~= 0 and result.code ~= 1 then
           vim.notify(
-            "PR review unified diff: " .. trim(result.stderr ~= "" and result.stderr or result.stdout),
+            "Review Mode unified diff: " .. trim(result.stderr ~= "" and result.stderr or result.stdout),
             vim.log.levels.WARN
           )
           return
         end
 
         if not vim.api.nvim_win_is_valid(current_win) or not vim.api.nvim_buf_is_valid(current_buf) then
-          vim.notify("PR review unified diff: target window is no longer valid", vim.log.levels.WARN)
+          vim.notify("Review Mode unified diff: target window is no longer valid", vim.log.levels.WARN)
           return
         end
 
@@ -2457,14 +2457,14 @@ local function open_old_view(path, current_win, current_buf)
         base_missing = true
       else
         state.old_loading = false
-        vim.notify("PR review old version: " .. tostring(err or "file not present at base"), vim.log.levels.WARN)
+        vim.notify("Review Mode old version: " .. tostring(err or "file not present at base"), vim.log.levels.WARN)
         return
       end
     end
 
     if not vim.api.nvim_win_is_valid(current_win) or not vim.api.nvim_buf_is_valid(current_buf) then
       state.old_loading = false
-      vim.notify("PR review old version: target window is no longer valid", vim.log.levels.WARN)
+      vim.notify("Review Mode old version: target window is no longer valid", vim.log.levels.WARN)
       return
     end
 
@@ -2590,12 +2590,12 @@ function M.old_toggle()
 
   local path = current_relpath()
   if not path then
-    vim.notify("PR review old version: current buffer is not under repo root", vim.log.levels.WARN)
+    vim.notify("Review Mode old version: current buffer is not under repo root", vim.log.levels.WARN)
     return
   end
 
   if state.old_loading then
-    vim.notify("PR review old version: base file is still loading", vim.log.levels.INFO)
+    vim.notify("Review Mode old version: base file is still loading", vim.log.levels.INFO)
     return
   end
 
@@ -2606,14 +2606,14 @@ end
 
 function M.toggle_diff_layout()
   state.config.diff.layout = state.config.diff.layout == "side_by_side" and "unified" or "side_by_side"
-  vim.notify("PR review diff layout: " .. (state.config.diff.layout == "unified" and "unified" or "side-by-side"))
+  vim.notify("Review Mode diff layout: " .. (state.config.diff.layout == "unified" and "unified" or "side-by-side"))
   refresh_old_view()
   vim.cmd("redrawtabline")
 end
 
 function M.toggle_diff_full_file()
   state.config.diff.full_file = not state.config.diff.full_file
-  vim.notify("PR review diff context: " .. (state.config.diff.full_file and "full file" or "condensed"))
+  vim.notify("Review Mode diff context: " .. (state.config.diff.full_file and "full file" or "condensed"))
   if state.old_layout == "side_by_side" and old_view_is_open() then
     apply_side_by_side_context()
     vim.cmd("redrawtabline")
@@ -2656,13 +2656,13 @@ function M.toggle_viewed(path)
   end
 
   if not state.config.viewed.enabled then
-    vim.notify("PR review viewed state is disabled", vim.log.levels.WARN)
+    vim.notify("Review Mode viewed state is disabled", vim.log.levels.WARN)
     return
   end
 
   path = path or current_relpath()
   if not path or not state.files[path] then
-    vim.notify("PR review viewed state: current buffer is not a changed PR file", vim.log.levels.WARN)
+    vim.notify("Review Mode viewed state: current buffer is not a changed PR file", vim.log.levels.WARN)
     return
   end
 
@@ -2681,13 +2681,13 @@ function M.mark_viewed(path, opts)
   end
 
   if not state.config.viewed.enabled then
-    vim.notify("PR review viewed state is disabled", vim.log.levels.WARN)
+    vim.notify("Review Mode viewed state is disabled", vim.log.levels.WARN)
     return false
   end
 
   path = path or current_relpath()
   if not path or not state.files[path] then
-    vim.notify("PR review viewed state: current buffer is not a changed PR file", vim.log.levels.WARN)
+    vim.notify("Review Mode viewed state: current buffer is not a changed PR file", vim.log.levels.WARN)
     return false
   end
 
@@ -2750,7 +2750,7 @@ function M.sync_viewed()
   end
 
   if not state.config.viewed.enabled then
-    vim.notify("PR review viewed state is disabled", vim.log.levels.WARN)
+    vim.notify("Review Mode viewed state is disabled", vim.log.levels.WARN)
     return
   end
 
@@ -2760,7 +2760,7 @@ end
 
 function M.toggle_viewed_sync()
   state.config.viewed.sync = not state.config.viewed.sync
-  vim.notify("PR review GitHub viewed sync " .. (state.config.viewed.sync and "enabled" or "disabled"))
+  vim.notify("Review Mode GitHub viewed sync " .. (state.config.viewed.sync and "enabled" or "disabled"))
   if state.config.viewed.sync and state.active then
     sync_viewed_from_github_async(state.generation)
   end
@@ -2779,7 +2779,7 @@ function M.toggle_viewed_feature()
   end
 
   schedule_comments_ui_refresh()
-  vim.notify("PR review viewed state " .. (state.config.viewed.enabled and "enabled" or "disabled"))
+  vim.notify("Review Mode viewed state " .. (state.config.viewed.enabled and "enabled" or "disabled"))
 end
 
 function M.toggle_comments()
@@ -2791,17 +2791,17 @@ function M.toggle_comments()
   end
 
   schedule_comments_ui_refresh()
-  vim.notify("PR review comments " .. (state.config.comments.enabled and "enabled" or "disabled"))
+  vim.notify("Review Mode comments " .. (state.config.comments.enabled and "enabled" or "disabled"))
 end
 
 local viewed_picker = nil
 
 local picker_hls = {
-  add = "PrReviewPickerAdd",
-  delete = "PrReviewPickerDelete",
-  prompt = "PrReviewPickerPrompt",
-  viewed = "PrReviewPickerViewed",
-  unviewed = "PrReviewPickerUnviewed",
+  add = "ReviewModePickerAdd",
+  delete = "ReviewModePickerDelete",
+  prompt = "ReviewModePickerPrompt",
+  viewed = "ReviewModePickerViewed",
+  unviewed = "ReviewModePickerUnviewed",
 }
 
 local function ensure_viewed_picker_highlights()
@@ -3167,7 +3167,7 @@ local function set_viewed_picker_filter(filter)
   viewed_picker.selected = 1
   if viewed_picker.prompt_winid and vim.api.nvim_win_is_valid(viewed_picker.prompt_winid) then
     vim.api.nvim_win_set_config(viewed_picker.prompt_winid, {
-      title = string.format(" PR review files [%s] ", viewed_picker.filter),
+      title = string.format(" Review Mode files [%s] ", viewed_picker.filter),
       title_pos = "left",
     })
   end
@@ -3250,7 +3250,7 @@ local function open_viewed_picker(filter)
     viewed_picker.selected = 1
     if viewed_picker.prompt_winid and vim.api.nvim_win_is_valid(viewed_picker.prompt_winid) then
       vim.api.nvim_win_set_config(viewed_picker.prompt_winid, {
-        title = string.format(" PR review files [%s] ", viewed_picker.filter),
+        title = string.format(" Review Mode files [%s] ", viewed_picker.filter),
         title_pos = "left",
       })
     end
@@ -3270,9 +3270,9 @@ local function open_viewed_picker(filter)
   local list_width = math.max(36, math.floor(width * 0.48))
   local preview_width = math.max(24, width - list_width - 2)
 
-  local prompt_bufnr = create_picker_buffer("pr-review-menu-prompt")
-  local list_bufnr = create_picker_buffer("pr-review-menu")
-  local preview_bufnr = create_picker_buffer("pr-review-preview")
+  local prompt_bufnr = create_picker_buffer("review-mode-menu-prompt")
+  local list_bufnr = create_picker_buffer("review-mode-menu")
+  local preview_bufnr = create_picker_buffer("review-mode-preview")
 
   local prompt_winid = vim.api.nvim_open_win(prompt_bufnr, true, {
     relative = "editor",
@@ -3282,7 +3282,7 @@ local function open_viewed_picker(filter)
     height = 1,
     style = "minimal",
     border = "rounded",
-    title = string.format(" PR review files [%s] ", filter),
+    title = string.format(" Review Mode files [%s] ", filter),
     title_pos = "left",
   })
   local list_winid = vim.api.nvim_open_win(list_bufnr, false, {
@@ -3334,7 +3334,7 @@ local function open_viewed_picker(filter)
   local function map(bufnr, mode, lhs, callback)
     vim.keymap.set(mode, lhs, callback, { buffer = bufnr, nowait = true, silent = true })
   end
-  local picker_group = vim.api.nvim_create_augroup("pr_review_viewed_picker", { clear = true })
+  local picker_group = vim.api.nvim_create_augroup("review_mode_viewed_picker", { clear = true })
 
   for _, bufnr in ipairs({ prompt_bufnr, list_bufnr, preview_bufnr }) do
     map(bufnr, "n", "q", close_viewed_picker)
@@ -3539,7 +3539,7 @@ function M.reply()
       "body=" .. body,
     })
     if not created then
-      vim.notify("PR review reply failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
+      vim.notify("Review Mode reply failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
       return
     end
 
@@ -3567,12 +3567,12 @@ end
 function M.comment()
   local path = current_relpath()
   if not path then
-    vim.notify("PR review comment: current buffer is not under repo root", vim.log.levels.WARN)
+    vim.notify("Review Mode comment: current buffer is not under repo root", vim.log.levels.WARN)
     return
   end
 
   if not state.repo or not state.pr then
-    vim.notify("PR review comment: start review mode first", vim.log.levels.WARN)
+    vim.notify("Review Mode comment: start Review Mode first", vim.log.levels.WARN)
     return
   end
 
@@ -3586,7 +3586,7 @@ function M.comment()
     local commit_id = state.head
       or system({ "gh", "pr", "view", state.pr, "--json", "headRefOid", "-q", ".headRefOid" })
     if not commit_id then
-      vim.notify("PR review comment: could not determine PR head SHA", vim.log.levels.ERROR)
+      vim.notify("Review Mode comment: could not determine PR head SHA", vim.log.levels.ERROR)
       return
     end
 
@@ -3618,7 +3618,7 @@ function M.comment()
 
     local created, err = gh_json(args)
     if not created then
-      vim.notify("PR review comment failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
+      vim.notify("Review Mode comment failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
       return
     end
 
@@ -3733,75 +3733,75 @@ function M.setup(opts)
   state.config = normalize_config(opts)
 
   if state.config.commands then
-    vim.api.nvim_create_user_command("PrReviewStart", M.start, { desc = "Start normal PR review mode" })
-    vim.api.nvim_create_user_command("PrReviewStop", M.stop, { desc = "Stop normal PR review mode" })
-    vim.api.nvim_create_user_command("PrReviewRefresh", M.refresh, { desc = "Refresh normal PR review mode" })
-    vim.api.nvim_create_user_command("PrReviewNextChange", M.next_change, { desc = "Alias for PrReviewNextHunk" })
-    vim.api.nvim_create_user_command("PrReviewPrevChange", M.prev_change, { desc = "Alias for PrReviewPrevHunk" })
+    vim.api.nvim_create_user_command("ReviewMode", M.start, { desc = "Start Review Mode" })
+    vim.api.nvim_create_user_command("ReviewModeStop", M.stop, { desc = "Stop normal Review Mode" })
+    vim.api.nvim_create_user_command("ReviewModeRefresh", M.refresh, { desc = "Refresh normal Review Mode" })
+    vim.api.nvim_create_user_command("ReviewModeNextChange", M.next_change, { desc = "Alias for ReviewModeNextHunk" })
+    vim.api.nvim_create_user_command("ReviewModePrevChange", M.prev_change, { desc = "Alias for ReviewModePrevHunk" })
     vim.api.nvim_create_user_command(
-      "PrReviewNextHunk",
+      "ReviewModeNextHunk",
       M.next_hunk,
       { desc = "Jump to next PR hunk in normal review mode" }
     )
     vim.api.nvim_create_user_command(
-      "PrReviewPrevHunk",
+      "ReviewModePrevHunk",
       M.prev_hunk,
       { desc = "Jump to previous PR hunk in normal review mode" }
     )
     vim.api.nvim_create_user_command(
-      "PrReviewNextComment",
+      "ReviewModeNextComment",
       M.next_comment,
       { desc = "Jump to next PR comment in normal review mode" }
     )
     vim.api.nvim_create_user_command(
-      "PrReviewPrevComment",
+      "ReviewModePrevComment",
       M.prev_comment,
       { desc = "Jump to previous PR comment in normal review mode" }
     )
     vim.api.nvim_create_user_command(
-      "PrReviewNextFile",
+      "ReviewModeNextFile",
       M.next_file,
       { desc = "Jump to next changed PR file in normal review mode" }
     )
     vim.api.nvim_create_user_command(
-      "PrReviewPrevFile",
+      "ReviewModePrevFile",
       M.prev_file,
       { desc = "Jump to previous changed PR file in normal review mode" }
     )
     vim.api.nvim_create_user_command(
-      "PrReviewOldToggle",
+      "ReviewModeOldToggle",
       M.old_toggle,
       { desc = "Toggle old PR base version beside current file" }
     )
     vim.api.nvim_create_user_command(
-      "PrReviewDiffLayoutToggle",
+      "ReviewModeDiffLayoutToggle",
       M.toggle_diff_layout,
       { desc = "Toggle PR diff layout between side-by-side and unified" }
     )
     vim.api.nvim_create_user_command(
-      "PrReviewDiffFullToggle",
+      "ReviewModeDiffFullToggle",
       M.toggle_diff_full_file,
       { desc = "Toggle PR diff context between condensed and full file" }
     )
     vim.api.nvim_create_user_command(
-      "PrReviewThread",
+      "ReviewModeThread",
       M.show_thread,
       { desc = "Show PR comments for the current line" }
     )
     vim.api.nvim_create_user_command(
-      "PrReviewReply",
+      "ReviewModeReply",
       M.reply,
       { desc = "Reply to PR comment thread on the current line" }
     )
     vim.api.nvim_create_user_command(
-      "PrReviewComment",
+      "ReviewModeComment",
       M.comment,
-      { range = true, desc = "Create PR review comment for current line or visual range" }
+      { range = true, desc = "Create PR comment for current line or visual range" }
     )
-    vim.api.nvim_create_user_command("PrReviewViewedToggle", function()
+    vim.api.nvim_create_user_command("ReviewModeViewedToggle", function()
       M.toggle_viewed()
     end, { desc = "Toggle viewed state for the current PR file" })
-    vim.api.nvim_create_user_command("PrReviewViewedList", function(command)
+    vim.api.nvim_create_user_command("ReviewModeViewedList", function(command)
       M.list_viewed(command.args ~= "" and command.args or "all")
     end, {
       nargs = "?",
@@ -3811,34 +3811,34 @@ function M.setup(opts)
       desc = "Open PR file picker by viewed state",
     })
     vim.api.nvim_create_user_command(
-      "PrReviewViewedNext",
+      "ReviewModeViewedNext",
       M.mark_viewed_next,
       { desc = "Mark current PR file viewed and jump to next unviewed file" }
     )
     vim.api.nvim_create_user_command(
-      "PrReviewViewedFeatureToggle",
+      "ReviewModeViewedFeatureToggle",
       M.toggle_viewed_feature,
       { desc = "Toggle PR viewed state" }
     )
-    vim.api.nvim_create_user_command("PrReviewCommentsToggle", M.toggle_comments, { desc = "Toggle PR comments" })
+    vim.api.nvim_create_user_command("ReviewModeCommentsToggle", M.toggle_comments, { desc = "Toggle PR comments" })
     vim.api.nvim_create_user_command(
-      "PrReviewViewedClear",
+      "ReviewModeViewedClear",
       M.clear_viewed,
       { desc = "Clear viewed state for the current PR" }
     )
     vim.api.nvim_create_user_command(
-      "PrReviewViewedSync",
+      "ReviewModeViewedSync",
       M.sync_viewed,
       { desc = "Pull viewed state from GitHub for the current PR" }
     )
     vim.api.nvim_create_user_command(
-      "PrReviewViewedSyncToggle",
+      "ReviewModeViewedSyncToggle",
       M.toggle_viewed_sync,
       { desc = "Toggle GitHub viewed-state sync" }
     )
     vim.api.nvim_create_user_command("PrViewedToggle", function()
       M.toggle_viewed()
-    end, { desc = "Alias for PrReviewViewedToggle" })
+    end, { desc = "Alias for ReviewModeViewedToggle" })
     vim.api.nvim_create_user_command("PrViewedList", function(command)
       M.list_viewed(command.args ~= "" and command.args or "all")
     end, {
@@ -3846,9 +3846,9 @@ function M.setup(opts)
       complete = function()
         return { "all", "viewed", "unviewed" }
       end,
-      desc = "Alias for PrReviewViewedList",
+      desc = "Alias for ReviewModeViewedList",
     })
-    vim.api.nvim_create_user_command("PrReviewSummary", M.summary, { desc = "Show PR review summary" })
+    vim.api.nvim_create_user_command("ReviewModeSummary", M.summary, { desc = "Show Review Mode summary" })
   end
 
   if setup_done then
@@ -3858,7 +3858,7 @@ function M.setup(opts)
   setup_done = true
 
   vim.api.nvim_create_autocmd({ "BufReadPost", "BufEnter" }, {
-    group = vim.api.nvim_create_augroup("normal_pr_review", { clear = true }),
+    group = vim.api.nvim_create_augroup("normal_review_mode", { clear = true }),
     callback = function(args)
       close_stale_side_by_side_pair()
       annotate_buffer(args.buf)
@@ -3874,14 +3874,14 @@ function M.setup(opts)
   })
 
   vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
-    group = vim.api.nvim_create_augroup("normal_pr_review_old_view", { clear = true }),
+    group = vim.api.nvim_create_augroup("normal_review_mode_old_view", { clear = true }),
     callback = function(args)
       close_side_by_side_pair_for_buffer(args.buf)
     end,
   })
 
   vim.api.nvim_create_autocmd("WinClosed", {
-    group = vim.api.nvim_create_augroup("normal_pr_review_old_view_window", { clear = true }),
+    group = vim.api.nvim_create_augroup("normal_review_mode_old_view_window", { clear = true }),
     callback = function(args)
       close_side_by_side_pair_for_window(tonumber(args.match))
     end,
@@ -3889,7 +3889,7 @@ function M.setup(opts)
 
   vim.api.nvim_create_autocmd("User", {
     pattern = "GitSignsUpdate",
-    group = vim.api.nvim_create_augroup("normal_pr_review_gitsigns", { clear = true }),
+    group = vim.api.nvim_create_augroup("normal_review_mode_gitsigns", { clear = true }),
     callback = function(args)
       local bufnr = args.data and args.data.buffer
       local path = bufnr and buf_relpath(bufnr)
