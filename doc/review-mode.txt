@@ -6,7 +6,8 @@ CONTENTS                                                  *review-mode-contents*
 1. Overview                                      |review-mode-overview|
 2. Commands                                      |review-mode-commands|
 3. Keymaps                                       |review-mode-keymaps|
-4. Setup                                         |review-mode-setup|
+4. Picker Providers                              |review-mode-pickers|
+5. Setup                                         |review-mode-setup|
 
 ==============================================================================
 OVERVIEW                                                  *review-mode-overview*
@@ -17,7 +18,8 @@ review comments asynchronously, and provides commands for jumping through PR
 hunks, PR comments, and changed files.
 
 The plugin uses `gh` for PR metadata, comments, replies, thread state, checks,
-and browser handoff metadata.
+and browser handoff metadata. Picker integrations for snacks.nvim and Telescope
+are optional and fall back to the native picker.
 
 ==============================================================================
 COMMANDS                                                  *review-mode-commands*
@@ -28,7 +30,8 @@ COMMANDS                                                  *review-mode-commands*
 
                                                         *:ReviewModeActions*
 :ReviewModeActions
-        Open an action picker for common PR actions.
+        Open an action picker for common PR actions, using the configured picker
+        provider.
 
                                                         *:ReviewModeBrowser*
 :ReviewModeBrowser
@@ -133,8 +136,8 @@ COMMANDS                                                  *review-mode-commands*
                                                         *:ReviewModeViewedList*
 :ReviewModeViewedList [all|viewed|unviewed]
         Open a fuzzy PR file menu by viewed state, with additions/deletions and
-        a diff preview. Press Space or t to toggle viewed state for the
-        selected file.
+        a diff preview. Press Space or t in the native picker, or <Tab>/<C-t>
+        in external pickers, to toggle viewed state for the selected file.
 
                                                         *:ReviewModeViewedClear*
 :ReviewModeViewedClear
@@ -167,6 +170,17 @@ review discussion:
 <
 
 ==============================================================================
+PICKER PROVIDERS                                          *review-mode-pickers*
+
+ReviewMode can use its native picker, snacks.nvim, or Telescope for
+:ReviewModeActions and :ReviewModeViewedList. The default picker.provider =
+"auto" tries snacks.nvim first, then Telescope, then the native picker. Set
+picker.provider to "native", "snacks", or "telescope" to prefer one provider.
+
+External providers are optional. If a requested provider is unavailable or fails,
+ReviewMode falls back to the native picker.
+
+==============================================================================
 SETUP                                                        *review-mode-setup*
 
 >
@@ -194,6 +208,9 @@ SETUP                                                        *review-mode-setup*
       enabled = true,
       show_comments = true,
       show_viewed = true,
+    },
+    picker = {
+      provider = "auto",
     },
     viewed = {
       enabled = true,

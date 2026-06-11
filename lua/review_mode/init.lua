@@ -30,6 +30,9 @@ local defaults = {
     show_comments = true,
     show_viewed = true,
   },
+  picker = {
+    provider = "auto",
+  },
   viewed = {
     enabled = true,
     sync = false,
@@ -122,6 +125,17 @@ local function normalize_config(opts)
     config.diff.layout = defaults.diff.layout
   end
   config.diff.unified_context = math.max(0, tonumber(config.diff.unified_context) or defaults.diff.unified_context)
+
+  local picker = config.picker or {}
+  if
+    picker.provider ~= "auto"
+    and picker.provider ~= "native"
+    and picker.provider ~= "snacks"
+    and picker.provider ~= "telescope"
+  then
+    picker.provider = defaults.picker.provider
+  end
+  config.picker = picker
 
   return config
 end
@@ -2827,6 +2841,51 @@ end
 
 local viewed_picker = nil
 
+local function configured_picker_provider()
+  return ((state.config.picker or {}).provider or "auto")
+end
+
+local function picker_provider_order()
+  local provider = configured_picker_provider()
+  if provider == "auto" then
+    return { "snacks", "telescope", "native" }
+  end
+  if provider == "native" then
+    return { "native" }
+  end
+  return { provider, "native" }
+end
+
+local function notify_picker_error(provider, err)
+  if configured_picker_provider() == provider then
+    vim.notify(
+      string.format("Review Mode picker: %s failed, using native picker: %s", provider, tostring(err)),
+      vim.log.levels.WARN
+    )
+  end
+end
+
+local function get_snacks_picker()
+  local snacks = rawget(_G, "Snacks")
+  if snacks and snacks.picker and snacks.picker.pick then
+    return snacks.picker
+  end
+
+  local ok, mod = pcall(require, "snacks")
+  if ok and mod and mod.picker and mod.picker.pick then
+    return mod.picker
+  end
+  return nil
+end
+
+local function close_picker_object(picker)
+  if picker and type(picker.close) == "function" then
+    pcall(function()
+      picker:close()
+    end)
+  end
+end
+
 local picker_hls = {
   add = "ReviewModePickerAdd",
   delete = "ReviewModePickerDelete",
@@ -3006,7 +3065,7 @@ local function set_buffer_lines(bufnr, lines)
   vim.bo[bufnr].modifiable = false
 end
 
-local function viewed_picker_preview_lines(item)
+local function viewed_picker_preview_lines(item, preview_cache)
   if not item then
     return { "No matching PR files" }
   end
@@ -3023,7 +3082,8 @@ local function viewed_picker_preview_lines(item)
     "",
   }
 
-  viewed_picker.preview_cache[item.path] = viewed_picker.preview_cache[item.path]
+  preview_cache = preview_cache or (viewed_picker and viewed_picker.preview_cache) or {}
+  preview_cache[item.path] = preview_cache[item.path]
     or system({
       "git",
       "diff",
@@ -3036,7 +3096,7 @@ local function viewed_picker_preview_lines(item)
       item.path,
     }, { cwd = state.root, raw = true })
 
-  local diff = viewed_picker.preview_cache[item.path] or ""
+  local diff = preview_cache[item.path] or ""
   if diff == "" then
     lines[#lines + 1] = "No diff preview available"
     return lines
@@ -3273,7 +3333,7 @@ local function create_picker_buffer(filetype)
   return bufnr
 end
 
-local function open_viewed_picker(filter)
+local function open_native_viewed_picker(filter)
   filter = normalize_viewed_filter(filter)
 
   if viewed_picker and viewed_picker.prompt_winid and vim.api.nvim_win_is_valid(viewed_picker.prompt_winid) then
@@ -3444,6 +3504,208 @@ local function open_viewed_picker(filter)
   render_viewed_picker()
   vim.api.nvim_set_current_win(prompt_winid)
   vim.cmd.startinsert({ bang = true })
+end
+
+local function viewed_picker_items_for_provider(filter)
+  local items = viewed_picker_items(normalize_viewed_filter(filter), "")
+  if #items == 0 then
+    return {}
+  end
+  return items
+end
+
+local function open_snacks_viewed_picker(filter)
+  local picker = get_snacks_picker()
+  if not picker then
+    return false
+  end
+
+  filter = normalize_viewed_filter(filter)
+  local preview_cache = {}
+  local snacks_items = vim.tbl_map(function(item)
+    return {
+      text = item.label,
+      item = item,
+      file = item.path,
+      preview = {
+        text = table.concat(viewed_picker_preview_lines(item, preview_cache), "\n"),
+        ft = "diff",
+        loc = false,
+      },
+    }
+  end, viewed_picker_items_for_provider(filter))
+
+  picker.pick({
+    source = "review_mode_files",
+    title = string.format("Review Mode files [%s]", filter),
+    items = snacks_items,
+    preview = "preview",
+    confirm = function(instance, selected)
+      local item = selected and (selected.item or selected)
+      if not item then
+        return
+      end
+      close_picker_object(instance)
+      jump_to_path(item.path, 1)
+    end,
+    actions = {
+      toggle_viewed = function(instance, selected)
+        local item = selected and (selected.item or selected)
+        if not item then
+          return
+        end
+        close_picker_object(instance)
+        M.toggle_viewed(item.path)
+        vim.schedule(function()
+          M.list_viewed(filter)
+        end)
+      end,
+      filter_all = function(instance)
+        close_picker_object(instance)
+        vim.schedule(function()
+          M.list_viewed("all")
+        end)
+      end,
+      filter_viewed = function(instance)
+        close_picker_object(instance)
+        vim.schedule(function()
+          M.list_viewed("viewed")
+        end)
+      end,
+      filter_unviewed = function(instance)
+        close_picker_object(instance)
+        vim.schedule(function()
+          M.list_viewed("unviewed")
+        end)
+      end,
+    },
+    win = {
+      input = {
+        keys = {
+          ["<C-t>"] = { "toggle_viewed", mode = { "i", "n" } },
+          ["<Tab>"] = { "toggle_viewed", mode = { "i", "n" } },
+          ["<C-a>"] = { "filter_all", mode = { "i", "n" } },
+          ["<C-v>"] = { "filter_viewed", mode = { "i", "n" } },
+          ["<C-u>"] = { "filter_unviewed", mode = { "i", "n" } },
+        },
+      },
+      list = {
+        keys = {
+          ["<C-t>"] = "toggle_viewed",
+          ["<Tab>"] = "toggle_viewed",
+          a = "filter_all",
+          v = "filter_viewed",
+          u = "filter_unviewed",
+        },
+      },
+    },
+  })
+  return true
+end
+
+local function open_telescope_viewed_picker(filter)
+  local ok_pickers, pickers = pcall(require, "telescope.pickers")
+  local ok_finders, finders = pcall(require, "telescope.finders")
+  local ok_previewers, previewers = pcall(require, "telescope.previewers")
+  local ok_conf, conf = pcall(require, "telescope.config")
+  local ok_actions, actions = pcall(require, "telescope.actions")
+  local ok_state, action_state = pcall(require, "telescope.actions.state")
+  if not (ok_pickers and ok_finders and ok_previewers and ok_conf and ok_actions and ok_state) then
+    return false
+  end
+
+  filter = normalize_viewed_filter(filter)
+  local preview_cache = {}
+  local items = viewed_picker_items_for_provider(filter)
+  local function refresh_filter(prompt_bufnr, next_filter)
+    actions.close(prompt_bufnr)
+    vim.schedule(function()
+      M.list_viewed(next_filter)
+    end)
+  end
+
+  pickers
+    .new({}, {
+      prompt_title = string.format("Review Mode files [%s]", filter),
+      finder = finders.new_table({
+        results = items,
+        entry_maker = function(item)
+          return {
+            value = item,
+            display = item.label,
+            ordinal = item.search,
+            path = item.path,
+          }
+        end,
+      }),
+      sorter = conf.values.generic_sorter({}),
+      previewer = previewers.new_buffer_previewer({
+        title = "Preview",
+        define_preview = function(self, entry)
+          local item = entry and entry.value
+          vim.bo[self.state.bufnr].filetype = "diff"
+          vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, viewed_picker_preview_lines(item, preview_cache))
+          highlight_diff_preview(self.state.bufnr)
+        end,
+      }),
+      attach_mappings = function(prompt_bufnr, map)
+        actions.select_default:replace(function()
+          local selection = action_state.get_selected_entry()
+          actions.close(prompt_bufnr)
+          if selection and selection.value then
+            jump_to_path(selection.value.path, 1)
+          end
+        end)
+        local function toggle_selected()
+          local selection = action_state.get_selected_entry()
+          actions.close(prompt_bufnr)
+          if selection and selection.value then
+            M.toggle_viewed(selection.value.path)
+            vim.schedule(function()
+              M.list_viewed(filter)
+            end)
+          end
+        end
+        map({ "i", "n" }, "<C-t>", toggle_selected)
+        map({ "i", "n" }, "<Tab>", toggle_selected)
+        map({ "i", "n" }, "<C-a>", function()
+          refresh_filter(prompt_bufnr, "all")
+        end)
+        map({ "i", "n" }, "<C-v>", function()
+          refresh_filter(prompt_bufnr, "viewed")
+        end)
+        map({ "i", "n" }, "<C-u>", function()
+          refresh_filter(prompt_bufnr, "unviewed")
+        end)
+        return true
+      end,
+    })
+    :find()
+  return true
+end
+
+local function open_viewed_picker(filter)
+  for _, provider in ipairs(picker_provider_order()) do
+    if provider == "native" then
+      open_native_viewed_picker(filter)
+      return
+    end
+
+    local ok, opened = pcall(function()
+      if provider == "snacks" then
+        return open_snacks_viewed_picker(filter)
+      elseif provider == "telescope" then
+        return open_telescope_viewed_picker(filter)
+      end
+      return false
+    end)
+    if ok and opened then
+      return
+    end
+    if not ok then
+      notify_picker_error(provider, opened)
+    end
+  end
 end
 
 function M.list_viewed(filter)
@@ -3852,39 +4114,134 @@ end
 
 local function action_items()
   return {
-    { label = "Open in browser", run = M.open_browser },
-    { label = "Copy PR URL", run = M.copy_url },
-    { label = "Show PR status", run = M.status },
-    { label = "Show PR checks", run = M.checks },
-    { label = "Show current thread", run = M.show_thread },
-    { label = "Reply to current thread", run = M.reply },
-    { label = "Resolve current thread", run = M.resolve_thread },
-    { label = "Unresolve current thread", run = M.unresolve_thread },
-    { label = "Comment on line/range", run = M.comment },
-    { label = "Suggest change for line/range", run = M.suggest },
-    { label = "Toggle viewed", run = M.toggle_viewed },
+    { category = "PR", label = "Open in browser", run = M.open_browser },
+    { category = "PR", label = "Copy PR URL", run = M.copy_url },
+    { category = "PR", label = "Show PR status", run = M.status },
+    { category = "PR", label = "Show PR checks", run = M.checks },
+    { category = "Thread", label = "Show current thread", run = M.show_thread },
+    { category = "Thread", label = "Reply to current thread", run = M.reply },
+    { category = "Thread", label = "Resolve current thread", run = M.resolve_thread },
+    { category = "Thread", label = "Unresolve current thread", run = M.unresolve_thread },
+    { category = "Review", label = "Comment on line/range", run = M.comment },
+    { category = "Review", label = "Suggest change for line/range", run = M.suggest },
+    { category = "Files", label = "Toggle viewed", run = M.toggle_viewed },
     {
+      category = "Files",
       label = "Viewed file list",
       run = function()
         M.list_viewed("all")
       end,
     },
-    { label = "Summary", run = M.summary },
+    { category = "PR", label = "Summary", run = M.summary },
   }
+end
+
+local function action_item_label(item)
+  return string.format("%-8s %s", item.category or "Review", item.label)
+end
+
+local function run_action_item(item)
+  if item and item.run then
+    item.run()
+  end
+end
+
+local function open_native_actions_picker(items)
+  vim.ui.select(items, {
+    prompt = "Review Mode action",
+    format_item = action_item_label,
+  }, run_action_item)
+end
+
+local function open_snacks_actions_picker(items)
+  local picker = get_snacks_picker()
+  if not picker then
+    return false
+  end
+
+  picker.pick({
+    source = "review_mode_actions",
+    title = "Review Mode actions",
+    items = vim.tbl_map(function(item)
+      return {
+        text = action_item_label(item),
+        item = item,
+        preview = {
+          text = string.format("# %s\n\n%s", item.label, item.category or "Review"),
+          ft = "markdown",
+          loc = false,
+        },
+      }
+    end, items),
+    preview = "preview",
+    confirm = function(instance, selected)
+      close_picker_object(instance)
+      run_action_item(selected and (selected.item or selected))
+    end,
+  })
+  return true
+end
+
+local function open_telescope_actions_picker(items)
+  local ok_pickers, pickers = pcall(require, "telescope.pickers")
+  local ok_finders, finders = pcall(require, "telescope.finders")
+  local ok_conf, conf = pcall(require, "telescope.config")
+  local ok_actions, actions = pcall(require, "telescope.actions")
+  local ok_state, action_state = pcall(require, "telescope.actions.state")
+  if not (ok_pickers and ok_finders and ok_conf and ok_actions and ok_state) then
+    return false
+  end
+
+  pickers
+    .new({}, {
+      prompt_title = "Review Mode actions",
+      finder = finders.new_table({
+        results = items,
+        entry_maker = function(item)
+          return {
+            value = item,
+            display = action_item_label(item),
+            ordinal = table.concat({ item.category or "Review", item.label }, " "),
+          }
+        end,
+      }),
+      sorter = conf.values.generic_sorter({}),
+      attach_mappings = function(prompt_bufnr)
+        actions.select_default:replace(function()
+          local selection = action_state.get_selected_entry()
+          actions.close(prompt_bufnr)
+          run_action_item(selection and selection.value)
+        end)
+        return true
+      end,
+    })
+    :find()
+  return true
 end
 
 function M.actions()
   local items = action_items()
-  vim.ui.select(items, {
-    prompt = "Review Mode action",
-    format_item = function(item)
-      return item.label
-    end,
-  }, function(item)
-    if item and item.run then
-      item.run()
+  for _, provider in ipairs(picker_provider_order()) do
+    if provider == "native" then
+      open_native_actions_picker(items)
+      return
     end
-  end)
+
+    local ok, opened = pcall(function()
+      if provider == "snacks" then
+        return open_snacks_actions_picker(items)
+      elseif provider == "telescope" then
+        return open_telescope_actions_picker(items)
+      end
+      return false
+    end)
+    if ok and opened then
+      return
+    end
+    if not ok then
+      notify_picker_error(provider, opened)
+    end
+  end
 end
 
 function M.is_active()

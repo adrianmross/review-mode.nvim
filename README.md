@@ -13,6 +13,7 @@ The goal is to keep review inside normal files instead of a dedicated diff UI:
 - opens the base version of the current file in a side-by-side diff split
 - creates line or visual-range PR comments and suggestions through `gh`
 - opens quick PR actions for status, checks, browser handoff, URL copy, and thread resolution
+- can use snacks.nvim or Telescope for action and viewed-file pickers, with the native picker as fallback
 
 ## Requirements
 
@@ -21,6 +22,7 @@ The goal is to keep review inside normal files instead of a dedicated diff UI:
 - GitHub CLI `gh`, authenticated for the target repository
 - optional: `lewis6991/gitsigns.nvim`
 - optional: `nvim-tree/nvim-tree.lua`
+- optional: `folke/snacks.nvim` or `nvim-telescope/telescope.nvim` for picker UI
 
 The plugin assumes the current checkout is a PR branch and compares
 `origin/<base>...HEAD`, where `<base>` comes from `gh pr view`.
@@ -110,7 +112,7 @@ after every changed file under it is viewed.
 ## Commands
 
 - `:ReviewMode` starts normal-buffer Review Mode
-- `:ReviewModeActions` opens a small action picker for common PR actions
+- `:ReviewModeActions` opens an action picker for common PR actions, using the configured picker provider
 - `:ReviewModeBrowser` opens the current PR in your browser
 - `:ReviewModeCopyUrl` copies the current PR URL to registers
 - `:ReviewModeChecks` shows `gh pr checks` output in a floating preview
@@ -136,7 +138,7 @@ after every changed file under it is viewed.
 - `:ReviewModeViewedNext` marks the current PR file viewed and jumps to the next unviewed file
 - `:ReviewModeViewedFeatureToggle` toggles viewed-state tracking on or off
 - `:ReviewModeCommentsToggle` toggles PR comments on or off
-- `:ReviewModeViewedList [all|viewed|unviewed]` opens a fuzzy PR file menu with diff stats and preview; press `Space` or `t` to toggle viewed state
+- `:ReviewModeViewedList [all|viewed|unviewed]` opens a fuzzy PR file menu with diff stats and preview; press `Space` or `t` in the native picker, or `<Tab>`/`<C-t>` in external pickers, to toggle viewed state
 - `:ReviewModeViewedClear` clears local viewed state for the current PR
 - `:ReviewModeViewedSync` pulls viewed state from GitHub
 - `:ReviewModeViewedSyncToggle` toggles GitHub viewed-state sync
@@ -152,6 +154,14 @@ GH_REVIEW_REPO=adrianmross/example GH_REVIEW_PR=123 nvim +ReviewMode
 ```
 
 If those variables are not set, the plugin asks `gh` for the current repo and PR.
+
+## Picker Providers
+
+ReviewMode uses its native picker by default, but `picker.provider = "auto"`
+will use snacks.nvim when available, then Telescope, then the native picker.
+Set `picker.provider = "native"`, `"snacks"`, or `"telescope"` to prefer a
+specific provider. `:ReviewModeActions` uses the provider for the action list,
+and `:ReviewModeViewedList` uses it for changed-file search and diff preview.
 
 ## Options
 
@@ -180,6 +190,9 @@ require("review_mode").setup({
     enabled = true,
     show_comments = true,
     show_viewed = true,
+  },
+  picker = {
+    provider = "auto", -- "auto" | "native" | "snacks" | "telescope"
   },
   viewed = {
     enabled = true,
