@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.2](https://github.com/adrianmross/review-mode.nvim/compare/v0.10.1...v0.10.2) (2026-06-11)
+
+
+### Features
+
+* add external picker providers ([#41](https://github.com/adrianmross/review-mode.nvim/issues/41)) ([8a7b304](https://github.com/adrianmross/review-mode.nvim/commit/8a7b304f49e3d663b4b5b669151039f78a7b6e73))
+
 ## [0.10.1](https://github.com/adrianmross/review-mode.nvim/compare/v0.10.0...v0.10.1) (2026-06-10)
 
 
