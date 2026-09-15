@@ -2219,12 +2219,14 @@ local function ensure_diff_highlights()
   pcall(vim.api.nvim_set_hl, 0, diff_text_hl, { default = true, link = "DiffText" })
 end
 
+-- Only meaningful inside a hunk body. File headers ("--- a/x", "+++ b/x") live
+-- before the first @@, and a changed line can itself start with "--" or "++".
 local function is_deleted_diff_line(line)
-  return line:sub(1, 1) == "-" and line:sub(1, 3) ~= "---"
+  return line:sub(1, 1) == "-"
 end
 
 local function is_added_diff_line(line)
-  return line:sub(1, 1) == "+" and line:sub(1, 3) ~= "+++"
+  return line:sub(1, 1) == "+"
 end
 
 local function changed_line_ranges(old_text, new_text)
@@ -2278,6 +2280,10 @@ local function apply_partial_diff_highlights(bufnr)
 
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local index = 1
+  while index <= #lines and not lines[index]:match("^@@") do
+    index = index + 1
+  end
+
   while index <= #lines do
     if is_deleted_diff_line(lines[index]) then
       local deleted = {}
@@ -2307,19 +2313,14 @@ local function apply_partial_diff_highlights(bufnr)
   end
 end
 
-local function parse_diff_hunk_header(line)
-  local old_start, old_count, new_start, new_count = line:match("^@@ %-(%d+),?(%d*) %+(%d+),?(%d*) @@")
-  if not old_start then
-    return nil
+local function buffer_text(lines)
+  if #lines == 0 then
+    return ""
   end
-
-  return tonumber(old_start),
-    tonumber(old_count ~= "" and old_count or "1"),
-    tonumber(new_start),
-    tonumber(new_count ~= "" and new_count or "1")
+  return table.concat(lines, "\n") .. "\n"
 end
 
-local function apply_side_by_side_partial_diff_highlights(old_buf, new_buf, diff)
+local function apply_side_by_side_partial_diff_highlights(old_buf, old_lines, new_buf, new_lines)
   if not state.config.diff.partial_line_highlights then
     return
   end
@@ -2328,68 +2329,25 @@ local function apply_side_by_side_partial_diff_highlights(old_buf, new_buf, diff
   vim.api.nvim_buf_clear_namespace(old_buf, diff_ns, 0, -1)
   vim.api.nvim_buf_clear_namespace(new_buf, diff_ns, 0, -1)
 
-  local old_line = nil
-  local new_line = nil
-  local deleted = {}
-  local added = {}
+  local hunks = vim.diff(buffer_text(old_lines), buffer_text(new_lines), {
+    result_type = "indices",
+    ctxlen = 0,
+  })
 
-  local function flush_pairs()
-    for index = 1, math.min(#deleted, #added) do
+  for _, hunk in ipairs(hunks or {}) do
+    local old_start, old_count, new_start, new_count = hunk[1], hunk[2], hunk[3], hunk[4]
+    for offset = 0, math.min(old_count, new_count) - 1 do
       highlight_partial_line_pair(
         old_buf,
-        deleted[index].row,
-        deleted[index].line,
+        old_start + offset - 1,
+        old_lines[old_start + offset],
         new_buf,
-        added[index].row,
-        added[index].line,
+        new_start + offset - 1,
+        new_lines[new_start + offset],
         0
       )
     end
-    deleted = {}
-    added = {}
   end
-
-  for _, line in ipairs(split_blob_lines(diff)) do
-    local hunk_old_start, _, hunk_new_start = parse_diff_hunk_header(line)
-    if hunk_old_start then
-      flush_pairs()
-      old_line = hunk_old_start
-      new_line = hunk_new_start
-    elseif old_line and is_deleted_diff_line(line) then
-      deleted[#deleted + 1] = { row = old_line - 1, line = line:sub(2) }
-      old_line = old_line + 1
-    elseif old_line and is_added_diff_line(line) then
-      added[#added + 1] = { row = new_line - 1, line = line:sub(2) }
-      new_line = new_line + 1
-    elseif old_line then
-      flush_pairs()
-      if line:sub(1, 1) == " " then
-        old_line = old_line + 1
-        new_line = new_line + 1
-      end
-    end
-  end
-
-  flush_pairs()
-end
-
-local function diff_for_partial_highlights(path, base_content, head_lines, base_missing)
-  local tmpdir = vim.fn.tempname()
-  local head_rel = write_temp_diff_file(tmpdir, "head", path, head_lines)
-  local base_rel = base_missing and "/dev/null"
-    or write_temp_diff_file(tmpdir, "base", path, split_blob_lines(base_content))
-  local result = vim
-    .system(
-      { "git", "diff", "--no-index", "--no-color", "--unified=0", "--", base_rel, head_rel },
-      { text = true, cwd = tmpdir }
-    )
-    :wait()
-  pcall(vim.fn.delete, tmpdir, "rf")
-
-  if result.code ~= 0 and result.code ~= 1 then
-    return nil
-  end
-  return result.stdout or ""
 end
 
 local function open_old_side_by_side(path, current_win, current_buf, current_filetype, base_content, base_missing)
@@ -2405,24 +2363,25 @@ local function open_old_side_by_side(path, current_win, current_buf, current_fil
   state.old_path = path
   vim.api.nvim_win_set_buf(state.old_win, state.old_buf)
   vim.api.nvim_buf_set_name(state.old_buf, "pr-base://" .. base_ref() .. "/" .. path)
-  vim.api.nvim_buf_set_lines(state.old_buf, 0, -1, false, split_blob_lines(base_content))
+  local base_lines = base_missing and {} or split_blob_lines(base_content)
+  vim.api.nvim_buf_set_lines(state.old_buf, 0, -1, false, base_lines)
   vim.bo[state.old_buf].buftype = "nofile"
   vim.bo[state.old_buf].bufhidden = "wipe"
   vim.bo[state.old_buf].modifiable = false
   vim.bo[state.old_buf].readonly = true
   vim.bo[state.old_buf].filetype = current_filetype
 
-  local side_by_side_diff =
-    diff_for_partial_highlights(path, base_content, vim.api.nvim_buf_get_lines(current_buf, 0, -1, false), base_missing)
-
   apply_old_diffopt()
 
   vim.cmd("diffthis")
   vim.api.nvim_set_current_win(current_win)
   vim.cmd("diffthis")
-  if side_by_side_diff then
-    apply_side_by_side_partial_diff_highlights(state.old_buf, current_buf, side_by_side_diff)
-  end
+  apply_side_by_side_partial_diff_highlights(
+    state.old_buf,
+    base_lines,
+    current_buf,
+    vim.api.nvim_buf_get_lines(current_buf, 0, -1, false)
+  )
   apply_side_by_side_context()
   vim.api.nvim_set_current_win(current_win)
 end

@@ -109,13 +109,13 @@ git checkout -q -B main
 printf 'one\n\nbase\nsame1\nsame2\nsame3\nsame4\nsame5\ntail\n' > file.txt
 mkdir -p nested
 mkdir -p nested/deeper
-printf 'alpha\nbase\nomega\n' > nested/other.txt
+printf 'alpha\n-- old\nomega\n' > nested/other.txt
 printf 'deep\nbase\n' > nested/deeper/more.txt
 git add file.txt nested/other.txt nested/deeper/more.txt
 git commit -q -m base
 git checkout -q -b feature
 printf 'one\ntwo\n\nbase changed\nsame1\nsame2\nsame3\nsame4\nsame5\ntail\n' > file.txt
-printf 'alpha\nfeature\nomega\n' > nested/other.txt
+printf 'alpha\n-- new\nomega\n' > nested/other.txt
 printf 'deep\nfeature\n' > nested/deeper/more.txt
 printf 'new one\nnew two\n' > new.txt
 git add file.txt nested/other.txt nested/deeper/more.txt new.txt

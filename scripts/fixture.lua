@@ -616,6 +616,34 @@ for _, mark in ipairs(diff_marks(vim.api.nvim_get_current_buf())) do
 end
 assert(side_by_side_span_found, "side-by-side partial changed span missing")
 
+-- a removed line whose content starts with "--" must not be read as a diff header
+pr.old_toggle()
+wait_for(function()
+  return #vim.api.nvim_list_wins() == 1
+end, "side-by-side pair did not close before comment-line diff check")
+vim.cmd.edit("nested/other.txt")
+pr.old_toggle()
+wait_for(function()
+  return #vim.api.nvim_list_wins() == 2 and buffer_lines_matching("pr%-base://") ~= nil
+end, "side-by-side diff did not open for comment-line change")
+local comment_span_found = false
+for _, mark in ipairs(diff_marks(vim.api.nvim_get_current_buf())) do
+  local _, row, col, details = unpack(mark)
+  if row == 1 and col == #"-- " and details.end_col == #"-- new" then
+    comment_span_found = true
+  end
+end
+assert(comment_span_found, "partial span missing for changed line starting with --")
+pr.old_toggle()
+wait_for(function()
+  return #vim.api.nvim_list_wins() == 1
+end, "comment-line side-by-side pair did not close")
+vim.cmd.edit("file.txt")
+pr.old_toggle()
+wait_for(function()
+  return #vim.api.nvim_list_wins() == 2 and buffer_lines_matching("pr%-base://") ~= nil
+end, "side-by-side diff did not reopen after comment-line diff check")
+
 vim.cmd.edit("nested/other.txt")
 wait_for(function()
   return #vim.api.nvim_list_wins() == 1 and buffer_lines_matching("pr%-base://") == nil
