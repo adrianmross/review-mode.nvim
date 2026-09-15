@@ -130,6 +130,16 @@ local function last_notification()
   return notifications[#notifications] or ""
 end
 
+local function notification_count(needle)
+  local count = 0
+  for _, message in ipairs(notifications) do
+    if message:find(needle, 1, true) then
+      count = count + 1
+    end
+  end
+  return count
+end
+
 local function viewed_sync_queue_count()
   local path = vim.fs.joinpath(vim.fn.stdpath("state"), "review-mode-state.json")
   local ok, lines = pcall(vim.fn.readfile, path)
@@ -463,11 +473,44 @@ pr.toggle_viewed()
 wait_for(function()
   return viewed_sync_queue_count() == 1
 end, "failed viewed sync mutation was not queued")
+
+-- a failed flush must release the in-flight guard instead of waiting out a timer
+local queued_notifications = notification_count("Review Mode viewed sync queued")
+pr.flush_viewed_sync()
+wait_for(function()
+  return notification_count("Review Mode viewed sync queued") == queued_notifications + 1
+end, "failed viewed sync flush was not reported")
+pr.flush_viewed_sync()
+wait_for(function()
+  return notification_count("Review Mode viewed sync queued") == queued_notifications + 2
+end, "failed viewed sync flush left the in-flight guard stuck")
 vim.env.REVIEW_MODE_FAIL_MUTATION = nil
 pr.flush_viewed_sync()
 wait_for(function()
   return viewed_sync_queue_count() == 0
 end, "queued viewed sync mutation was not flushed")
+
+-- a generation bump mid-flush must not wedge every later flush
+vim.env.REVIEW_MODE_FAIL_MUTATION = "1"
+pr.toggle_viewed()
+wait_for(function()
+  return viewed_sync_queue_count() == 1
+end, "second failed viewed sync mutation was not queued")
+local wedged_notifications = notification_count("Review Mode viewed sync queued")
+pr.flush_viewed_sync()
+pr.refresh()
+wait_for(function()
+  return pr.is_changed_file("file.txt")
+end, "refresh did not reload the changed file map")
+pr.flush_viewed_sync()
+wait_for(function()
+  return notification_count("Review Mode viewed sync queued") > wedged_notifications
+end, "a refresh during a flush wedged the viewed sync queue")
+vim.env.REVIEW_MODE_FAIL_MUTATION = nil
+pr.flush_viewed_sync()
+wait_for(function()
+  return viewed_sync_queue_count() == 0
+end, "queued viewed sync mutation was not flushed after a refresh")
 
 vim.cmd.edit("file.txt")
 pr.mark_viewed_next()
