@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.11.0](https://github.com/adrianmross/review-mode.nvim/compare/v0.10.2...v0.11.0) (2026-09-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* the "native" picker provider no longer has a diff preview, live filtering or an in-picker viewed toggle. Install snacks.nvim or Telescope for those; :ReviewModeViewedToggle still works everywhere.
+
+### Features
+
+* **mode:** step in and out without ending the session ([#54](https://github.com/adrianmross/review-mode.nvim/issues/54)) ([0d33012](https://github.com/adrianmross/review-mode.nvim/commit/0d3301272c5569486afdaf241dadc1ca2467e8b8))
+* **review:** follow HEAD so mid-review commits join the review ([#55](https://github.com/adrianmross/review-mode.nvim/issues/55)) ([b46e28f](https://github.com/adrianmross/review-mode.nvim/commit/b46e28fde2a206e979a6de45200efae292955a40))
+
+
+### Bug Fixes
+
+* **cache:** prune stale PR comment cache entries ([#50](https://github.com/adrianmross/review-mode.nvim/issues/50)) ([ccd926c](https://github.com/adrianmross/review-mode.nvim/commit/ccd926c4866ea96b5cbb8ac0ad8bf2c8e972bd45))
+* **diff:** stop reading changed lines as diff headers ([#43](https://github.com/adrianmross/review-mode.nvim/issues/43)) ([6feede9](https://github.com/adrianmross/review-mode.nvim/commit/6feede9d0d0bf1fa38bb445de39fe49b3cd26979))
+* **github:** stop blocking the editor on PR writes ([#45](https://github.com/adrianmross/review-mode.nvim/issues/45)) ([0672dc7](https://github.com/adrianmross/review-mode.nvim/commit/0672dc7578aa40e7341ceca8ce174103cb181d93))
+* **gitsigns:** hand the gutter base back when the session ends ([#51](https://github.com/adrianmross/review-mode.nvim/issues/51)) ([ce072d4](https://github.com/adrianmross/review-mode.nvim/commit/ce072d460ae6c1620d649fc4d3479faba54e0c05))
+* **viewed:** release the sync guard on completion, not on a timer ([#44](https://github.com/adrianmross/review-mode.nvim/issues/44)) ([b8bd98f](https://github.com/adrianmross/review-mode.nvim/commit/b8bd98f9eb52e45378d772fab6b0109b6c1be329))
+
+
+### Performance Improvements
+
+* **nvim-tree:** roll up directory totals once per render ([#47](https://github.com/adrianmross/review-mode.nvim/issues/47)) ([3bb05d5](https://github.com/adrianmross/review-mode.nvim/commit/3bb05d524004007f803ce9f5de18da83cc41dff7))
+* **picker:** build snacks previews per selection ([#46](https://github.com/adrianmross/review-mode.nvim/issues/46)) ([9ef4de7](https://github.com/adrianmross/review-mode.nvim/commit/9ef4de7f177d0d22fde9d0f154ba1af4ffb4900f))
+
+
+### Code Refactoring
+
+* replace the native picker with vim.ui.select ([#48](https://github.com/adrianmross/review-mode.nvim/issues/48)) ([b71d8b4](https://github.com/adrianmross/review-mode.nvim/commit/b71d8b4032e477c0c041617bd10de5c91691eff8))
+
 ## [0.10.2](https://github.com/adrianmross/review-mode.nvim/compare/v0.10.1...v0.10.2) (2026-06-11)
 
 
