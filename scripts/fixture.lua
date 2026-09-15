@@ -867,3 +867,29 @@ wait_for(function()
 end, "closing added file base buffer did not close side-by-side pair")
 
 pr.stop()
+
+-- the gutter base is global, so ending the session has to hand it back
+local gitsigns_bases = {}
+package.preload["gitsigns"] = function()
+  return {
+    change_base = function(base, global)
+      gitsigns_bases[#gitsigns_bases + 1] = { base = base, global = global }
+    end,
+  }
+end
+pr.config().gitsigns.enabled = true
+pr.start()
+wait_for(function()
+  return #gitsigns_bases >= 1
+end, "gitsigns base was not set when review mode started")
+assert(gitsigns_bases[1].base == "origin/main", "gitsigns base was not set to the PR base")
+assert(gitsigns_bases[1].global == true, "gitsigns base was not set globally")
+pr.stop()
+wait_for(function()
+  return #gitsigns_bases >= 2
+end, "gitsigns base was not restored when review mode stopped")
+assert(gitsigns_bases[2].base == nil, "gitsigns base was not reset to the index on stop")
+assert(gitsigns_bases[2].global == true, "gitsigns base reset was not global")
+pr.config().gitsigns.enabled = false
+package.loaded["gitsigns"] = nil
+package.preload["gitsigns"] = nil
