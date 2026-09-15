@@ -181,19 +181,6 @@ local function system_async(args, opts, callback)
   end)
 end
 
-local function gh_json(args)
-  local full = vim.list_extend({ "gh" }, args)
-  local stdout, err = system(full)
-  if not stdout then
-    return nil, err
-  end
-  local ok, decoded = pcall(vim.json.decode, stdout)
-  if not ok then
-    return nil, "Failed to decode gh JSON output"
-  end
-  return decoded
-end
-
 local function gh_json_async(args, callback)
   local full = vim.list_extend({ "gh" }, args)
   system_async(full, {}, function(stdout, err)
@@ -908,7 +895,8 @@ local function load_comments_from_rest_async(generation)
   end)
 end
 
-local function load_comments_async()
+local function load_comments_async(opts)
+  opts = opts or {}
   if
     not state.config.comments.enabled
     or not state.active
@@ -920,7 +908,8 @@ local function load_comments_async()
   end
 
   local generation = state.generation
-  local fresh = hydrate_comments()
+  -- after a write the cache is stale by definition, so never serve it back
+  local fresh = not opts.force and hydrate_comments()
   schedule_comments_ui_refresh()
   if fresh then
     return
@@ -3823,22 +3812,22 @@ function M.reply()
       return
     end
 
-    local created, err = gh_json({
+    gh_json_async({
       "api",
       string.format("repos/%s/pulls/%s/comments/%s/replies", state.repo, state.pr, target.id),
       "--method",
       "POST",
       "-f",
       "body=" .. body,
-    })
-    if not created then
-      vim.notify("Review Mode reply failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
-      return
-    end
+    }, function(created, err)
+      if not created then
+        vim.notify("Review Mode reply failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
+        return
+      end
 
-    state.comments = {}
-    load_comments_async()
-    vim.notify("Submitted PR thread reply")
+      load_comments_async({ force = true })
+      vim.notify("Submitted PR thread reply")
+    end)
   end)
 end
 
@@ -3892,23 +3881,25 @@ mutation($threadId: ID!) {
     field
   )
 
-  local result, mutation_err = gh_json({
+  gh_json_async({
     "api",
     "graphql",
     "-f",
     "query=" .. mutation,
     "-F",
     "threadId=" .. target.thread_id,
-  })
-  if not result then
-    vim.notify("Review Mode thread update failed: " .. tostring(mutation_err or "unknown error"), vim.log.levels.ERROR)
-    return
-  end
+  }, function(result, mutation_err)
+    if not result then
+      vim.notify(
+        "Review Mode thread update failed: " .. tostring(mutation_err or "unknown error"),
+        vim.log.levels.ERROR
+      )
+      return
+    end
 
-  state.comments = {}
-  state.comment_threads = {}
-  load_comments_async()
-  vim.notify(resolved and "Resolved PR review thread" or "Unresolved PR review thread")
+    load_comments_async({ force = true })
+    vim.notify(resolved and "Resolved PR review thread" or "Unresolved PR review thread")
+  end)
 end
 
 function M.resolve_thread()
@@ -3942,18 +3933,7 @@ local function selected_text(start_line, end_line)
   return table.concat(vim.api.nvim_buf_get_lines(0, start_line - 1, end_line, false), "\n")
 end
 
-local function submit_review_comment(path, start_line, end_line, body)
-  if not state.repo or not state.pr then
-    vim.notify("Review Mode comment: start Review Mode first", vim.log.levels.WARN)
-    return false
-  end
-
-  local commit_id = state.head or system({ "gh", "pr", "view", state.pr, "--json", "headRefOid", "-q", ".headRefOid" })
-  if not commit_id then
-    vim.notify("Review Mode comment: could not determine PR head SHA", vim.log.levels.ERROR)
-    return false
-  end
-
+local function post_review_comment(path, start_line, end_line, body, commit_id)
   local args = {
     "api",
     string.format("repos/%s/pulls/%s/comments", state.repo, state.pr),
@@ -3980,16 +3960,40 @@ local function submit_review_comment(path, start_line, end_line, body)
     })
   end
 
-  local created, err = gh_json(args)
-  if not created then
-    vim.notify("Review Mode comment failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
-    return false
+  gh_json_async(args, function(created, err)
+    if not created then
+      vim.notify("Review Mode comment failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
+      return
+    end
+
+    load_comments_async({ force = true })
+    vim.notify(string.format("Submitted PR comment on %s:%d", path, end_line))
+  end)
+end
+
+local function submit_review_comment(path, start_line, end_line, body)
+  if not state.repo or not state.pr then
+    vim.notify("Review Mode comment: start Review Mode first", vim.log.levels.WARN)
+    return
   end
 
-  state.comments = {}
-  load_comments_async()
-  vim.notify(string.format("Submitted PR comment on %s:%d", path, end_line))
-  return true
+  if state.head then
+    post_review_comment(path, start_line, end_line, body, state.head)
+    return
+  end
+
+  system_async(
+    { "gh", "pr", "view", state.pr, "--json", "headRefOid", "-q", ".headRefOid" },
+    {},
+    function(commit_id, err)
+      if not commit_id then
+        vim.notify("Review Mode comment: " .. tostring(err or "could not determine PR head SHA"), vim.log.levels.ERROR)
+        return
+      end
+
+      post_review_comment(path, start_line, end_line, body, commit_id)
+    end
+  )
 end
 
 function M.comment(command)

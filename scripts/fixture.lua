@@ -369,6 +369,17 @@ wait_for(function()
   return last_notification():find("Unresolved PR review thread", 1, true) ~= nil
 end, "unresolve thread command did not report success")
 
+local original_reply_input = vim.ui.input
+vim.ui.input = function(_, callback)
+  callback("looks good to me")
+end
+vim.api.nvim_win_set_cursor(0, { 2, 0 })
+pr.reply()
+vim.ui.input = original_reply_input
+wait_for(function()
+  return last_notification():find("Submitted PR thread reply", 1, true) ~= nil
+end, "reply command did not post a thread reply")
+
 local original_input = vim.ui.input
 vim.ui.input = function(opts, callback)
   assert(opts.default and opts.default:find("two", 1, true), "suggestion default text missing")

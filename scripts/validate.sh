@@ -51,6 +51,9 @@ case "$1 $2" in
   "api repos/owner/repo/pulls/123/comments?per_page=100"|"api repos/owner/repo/pulls/123/comments?per_page=100&page=1")
     printf '[{"id":1,"path":"file.txt","line":2,"body":"Needs review","user":{"login":"reviewer"}},{"id":2,"path":"file.txt","line":4,"body":"Check final line","user":{"login":"reviewer"}}]\n'
     ;;
+  "api repos/owner/repo/pulls/123/comments/1/replies")
+    printf '{"id":100,"path":"file.txt","line":2,"body":"replied"}\n'
+    ;;
   "api repos/owner/repo/pulls/123/comments")
     args="$*"
     if [[ "$args" == *"--method POST"* ]]; then
