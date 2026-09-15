@@ -20,6 +20,16 @@ nvim --headless -u NONE -i NONE \
   -c "helptags $help_dir" \
   -c qa
 
+# The bundled UI must build on the public API, the same as anyone else's would.
+# If one of these needs a plugin internal, the API is missing something: add it
+# to review_mode.api rather than reaching around it.
+for ui in lua/review_mode/panel.lua lua/review_mode/picker.lua lua/review_mode/integrations/nvim_tree.lua; do
+  if grep -nE 'require\("review_mode\.(state|github|viewed|comments|diff|init)"\)' "$ui"; then
+    echo "$ui reaches past review_mode.api (see the rule in lua/review_mode/api.lua)" >&2
+    exit 1
+  fi
+done
+
 stylua --check lua plugin scripts/fixture.lua scripts/rest_fallback_fixture.lua
 git diff --check
 bash scripts/release-check.sh
@@ -49,7 +59,7 @@ case "$1 $2" in
     printf 'owner/repo\n'
     ;;
   "api repos/owner/repo/pulls/123/comments?per_page=100"|"api repos/owner/repo/pulls/123/comments?per_page=100&page=1")
-    printf '[{"id":1,"path":"file.txt","line":2,"body":"Needs review","user":{"login":"reviewer"}},{"id":2,"path":"file.txt","line":4,"body":"Check final line","user":{"login":"reviewer"}}]\n'
+    printf '%s\n' '[{"id":1,"path":"file.txt","line":2,"body":"Needs review","user":{"login":"reviewer"},"created_at":"2024-01-02T03:04:05Z","html_url":"https://github.com/owner/repo/pull/123#discussion_r1","author_association":"OWNER","reactions":{"+1":2,"laugh":0,"hooray":1,"heart":0,"rocket":0,"eyes":0,"total_count":3}},{"id":2,"path":"file.txt","line":4,"body":"Check final line","user":{"login":"reviewer"},"created_at":"2024-01-02T03:04:05Z","author_association":"NONE","reactions":{"+1":0,"total_count":0}}]'
     ;;
   "api repos/owner/repo/pulls/123/comments/1/replies")
     args="$*"
@@ -82,7 +92,9 @@ case "$1 $2" in
         echo "forced reviewThreads failure" >&2
         exit 1
       fi
-      printf '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"id":"thread_1","path":"file.txt","line":2,"originalLine":2,"startLine":null,"isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_1","databaseId":1,"path":"file.txt","line":2,"originalLine":2,"startLine":null,"body":"Needs review","author":{"login":"reviewer"}}]}},{"id":"thread_2","path":"file.txt","line":4,"originalLine":4,"startLine":null,"isResolved":true,"isOutdated":false,"comments":{"nodes":[{"id":"comment_2","databaseId":2,"path":"file.txt","line":4,"originalLine":4,"startLine":null,"body":"Check final line","author":{"login":"reviewer"}}]}},{"id":"thread_3","path":"nested/other.txt","line":2,"originalLine":2,"startLine":null,"isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_3","databaseId":3,"path":"nested/other.txt","line":2,"originalLine":2,"startLine":null,"body":"Review nested change","author":{"login":"reviewer"}}]}}]}}}}}\n'
+      # printf '%s\n' so the escaped newlines inside comment bodies survive as
+      # JSON escapes instead of being expanded into real newlines.
+      printf '%s\n' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"id":"thread_1","path":"file.txt","line":2,"originalLine":2,"startLine":null,"diffSide":"RIGHT","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_1","databaseId":1,"path":"file.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r1","state":"SUBMITTED","authorAssociation":"OWNER","viewerDidAuthor":false,"body":"Needs review\n\n```suggestion\ntwo improved\n```","author":{"login":"reviewer"},"reactionGroups":[{"content":"THUMBS_UP","reactors":{"totalCount":2}},{"content":"HOORAY","reactors":{"totalCount":1}},{"content":"EYES","reactors":{"totalCount":0}}]}]}},{"id":"thread_2","path":"file.txt","line":4,"originalLine":4,"startLine":null,"diffSide":"RIGHT","isResolved":true,"isOutdated":false,"comments":{"nodes":[{"id":"comment_2","databaseId":2,"path":"file.txt","line":4,"originalLine":4,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r2","authorAssociation":"CONTRIBUTOR","body":"Check final line","author":{"login":"reviewer"},"reactionGroups":[]},{"id":"comment_4","databaseId":4,"path":"file.txt","line":4,"originalLine":4,"startLine":null,"createdAt":"2024-01-03T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r4","authorAssociation":"MEMBER","body":"Fixed in the follow-up commit.","author":{"login":"maintainer"},"reactionGroups":[{"content":"HEART","reactors":{"totalCount":1}}]}]}},{"id":"thread_3","path":"nested/other.txt","line":2,"originalLine":2,"startLine":null,"diffSide":"RIGHT","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_3","databaseId":3,"path":"nested/other.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r3","authorAssociation":"NONE","body":"Review nested change","author":{"login":"reviewer"},"reactionGroups":[]}]}}]}}}}}'
     elif [[ "$args" == *"pullRequest(number"* ]]; then
       printf '{"data":{"repository":{"pullRequest":{"id":"PR_node"}}}}\n'
     elif [[ "$args" == *"markFileAsViewed"* ]]; then
