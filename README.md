@@ -13,7 +13,7 @@ The goal is to keep review inside normal files instead of a dedicated diff UI:
 - opens the base version of the current file in a side-by-side diff split
 - creates line or visual-range PR comments and suggestions through `gh`
 - opens quick PR actions for status, checks, browser handoff, URL copy, and thread resolution
-- can use snacks.nvim or Telescope for action and viewed-file pickers, with the native picker as fallback
+- can use snacks.nvim or Telescope for action and viewed-file pickers, with `vim.ui.select` as fallback
 
 ## Requirements
 
@@ -138,7 +138,7 @@ after every changed file under it is viewed.
 - `:ReviewModeViewedNext` marks the current PR file viewed and jumps to the next unviewed file
 - `:ReviewModeViewedFeatureToggle` toggles viewed-state tracking on or off
 - `:ReviewModeCommentsToggle` toggles PR comments on or off
-- `:ReviewModeViewedList [all|viewed|unviewed]` opens a fuzzy PR file menu with diff stats and preview; press `Space` or `t` in the native picker, or `<Tab>`/`<C-t>` in external pickers, to toggle viewed state
+- `:ReviewModeViewedList [all|viewed|unviewed]` opens a PR file list with diff stats; snacks.nvim and Telescope add a diff preview and toggle viewed state with `<Tab>`/`<C-t>`
 - `:ReviewModeViewedClear` clears local viewed state for the current PR
 - `:ReviewModeViewedSync` pulls viewed state from GitHub
 - `:ReviewModeViewedSyncToggle` toggles GitHub viewed-state sync
@@ -157,11 +157,17 @@ If those variables are not set, the plugin asks `gh` for the current repo and PR
 
 ## Picker Providers
 
-ReviewMode uses its native picker by default, but `picker.provider = "auto"`
-will use snacks.nvim when available, then Telescope, then the native picker.
-Set `picker.provider = "native"`, `"snacks"`, or `"telescope"` to prefer a
-specific provider. `:ReviewModeActions` uses the provider for the action list,
-and `:ReviewModeViewedList` uses it for changed-file search and diff preview.
+The default `picker.provider = "auto"` uses snacks.nvim when available, then
+Telescope, then the built-in `vim.ui.select`. Set `picker.provider = "native"`,
+`"snacks"`, or `"telescope"` to prefer a specific provider. `:ReviewModeActions`
+uses the provider for the action list, and `:ReviewModeViewedList` uses it for
+changed-file selection.
+
+The `"native"` provider is plain `vim.ui.select`, so it shows the same
+`viewed / +N / -N / comments / path` labels but has no diff preview, no live
+filtering and no in-picker viewed toggle. Anything that configures
+`vim.ui.select` (dressing.nvim, snacks.input, mini.pick) styles it for free.
+Install snacks.nvim or Telescope for the preview and toggle keymaps.
 
 ## Options
 
