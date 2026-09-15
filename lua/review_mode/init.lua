@@ -416,13 +416,16 @@ local function prune_comment_cache()
 end
 
 local function write_comment_cache_entry(key, grouped, threads)
-  pcall(function()
-    write_json_file(cache_path(key), { fetched_at = os.time(), grouped = grouped, threads = threads or {} })
-    if not comment_cache_pruned then
-      comment_cache_pruned = true
-      prune_comment_cache()
-    end
-  end)
+  pcall(write_json_file, cache_path(key), { fetched_at = os.time(), grouped = grouped, threads = threads or {} })
+
+  if comment_cache_pruned then
+    return
+  end
+
+  -- one attempt per session either way: a scan that fails once will fail again,
+  -- and it must not take the cache write down with it
+  comment_cache_pruned = true
+  pcall(prune_comment_cache)
 end
 
 local function group_comments(comments)
