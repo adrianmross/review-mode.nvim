@@ -3543,11 +3543,6 @@ local function open_snacks_viewed_picker(filter)
       text = item.label,
       item = item,
       file = item.path,
-      preview = {
-        text = table.concat(viewed_picker_preview_lines(item, preview_cache), "\n"),
-        ft = "diff",
-        loc = false,
-      },
     }
   end, viewed_picker_items_for_provider(filter))
 
@@ -3555,7 +3550,14 @@ local function open_snacks_viewed_picker(filter)
     source = "review_mode_files",
     title = string.format("Review Mode files [%s]", filter),
     items = snacks_items,
-    preview = "preview",
+    -- built per selection: each preview shells out to git diff for that file
+    preview = function(ctx)
+      local item = ctx.item and (ctx.item.item or ctx.item)
+      ctx.preview:reset()
+      ctx.preview:set_lines(viewed_picker_preview_lines(item, preview_cache))
+      ctx.preview:highlight({ ft = "diff" })
+      return true
+    end,
     confirm = function(instance, selected)
       local item = selected and (selected.item or selected)
       if not item then

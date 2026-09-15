@@ -222,9 +222,22 @@ wait_for(function()
   return pr.comment_count("file.txt") == 2
 end, "PR comments did not load")
 
+local function fake_snacks_preview()
+  local preview = { lines = {}, ft = nil }
+  preview.reset = function() end
+  preview.set_lines = function(_, lines)
+    preview.lines = lines
+  end
+  preview.highlight = function(_, opts)
+    preview.ft = opts and opts.ft
+  end
+  return preview
+end
+
 local original_snacks = rawget(_G, "Snacks")
 local snacks_actions_opts = nil
 local snacks_files_opts = nil
+local snacks_files_preview = nil
 _G.Snacks = {
   picker = {
     pick = function(opts)
@@ -234,12 +247,11 @@ _G.Snacks = {
         assert(opts.items[1].preview.text:find("Open in browser", 1, true), "snacks action preview missing")
       elseif opts.source == "review_mode_files" then
         snacks_files_opts = opts
-        assert(opts.title:find("unviewed", 1, true), "snacks file title filter missing")
-        assert(opts.items[1].preview.text:find(opts.items[1].item.path, 1, true), "snacks file preview path missing")
-        assert(
-          opts.items[1].preview.text:find("+feature", 1, true) or opts.items[1].preview.text:find("+new", 1, true),
-          "snacks file preview diff missing"
-        )
+        if type(opts.preview) == "function" then
+          local preview = fake_snacks_preview()
+          opts.preview({ item = opts.items[1], preview = preview })
+          snacks_files_preview = preview
+        end
       else
         error("unexpected snacks picker source: " .. tostring(opts.source))
       end
@@ -251,6 +263,16 @@ pr.actions()
 assert(snacks_actions_opts, "snacks action picker was not used")
 pr.list_viewed("unviewed")
 assert(snacks_files_opts, "snacks viewed picker was not used")
+assert(snacks_files_opts.title:find("unviewed", 1, true), "snacks file title filter missing")
+assert(snacks_files_opts.items[1].preview == nil, "snacks items should not carry eagerly built previews")
+assert(type(snacks_files_opts.preview) == "function", "snacks file preview should be built per selection")
+assert(snacks_files_preview, "snacks lazy preview was not invoked")
+assert(snacks_files_preview.ft == "diff", "snacks file preview filetype was wrong")
+assert(has_line(snacks_files_preview.lines, snacks_files_opts.items[1].item.path), "snacks file preview path missing")
+assert(
+  has_line(snacks_files_preview.lines, "+feature") or has_line(snacks_files_preview.lines, "+new"),
+  "snacks file preview diff missing"
+)
 _G.Snacks = original_snacks
 
 local telescope_state = { maps = {} }
