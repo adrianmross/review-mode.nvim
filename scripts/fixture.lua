@@ -192,6 +192,14 @@ assert(
   "unviewed list completion missing"
 )
 
+local comment_cache_dir = vim.fs.joinpath(vim.fn.stdpath("cache"), "review-mode-comments")
+local stale_cache_path = vim.fs.joinpath(comment_cache_dir, "owner_repo_999.json")
+local fresh_cache_path = vim.fs.joinpath(comment_cache_dir, "owner_repo_123.json")
+vim.fn.mkdir(comment_cache_dir, "p")
+vim.fn.writefile({ vim.json.encode({ fetched_at = 0, grouped = {}, threads = {} }) }, stale_cache_path)
+local stale_time = os.time() - 60 * 24 * 60 * 60
+assert(vim.uv.fs_utime(stale_cache_path, stale_time, stale_time), "could not age the stale cache entry")
+
 pr.start()
 wait_for(function()
   return pr.is_changed_file("file.txt")
@@ -211,6 +219,10 @@ end, "GitHub viewed state did not load")
 wait_for(function()
   return pr.comment_count("file.txt") == 2
 end, "PR comments did not load")
+wait_for(function()
+  return vim.uv.fs_stat(stale_cache_path) == nil
+end, "stale comment cache entry was not pruned")
+assert(vim.uv.fs_stat(fresh_cache_path), "current comment cache entry was pruned")
 
 local original_snacks = rawget(_G, "Snacks")
 local snacks_actions_opts = nil

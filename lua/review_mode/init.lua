@@ -397,9 +397,31 @@ local function read_comment_cache(key)
   return read_json_file(cache_path(key))
 end
 
+-- one file per PR is written forever otherwise, and each one holds every review
+-- comment body for that PR
+local comment_cache_max_age_seconds = 30 * 24 * 60 * 60
+local comment_cache_pruned = false
+
+local function prune_comment_cache()
+  local cutoff = os.time() - comment_cache_max_age_seconds
+  for name, kind in vim.fs.dir(cache_dir) do
+    if kind == "file" and name:match("%.json$") then
+      local path = vim.fs.joinpath(cache_dir, name)
+      local stat = vim.uv.fs_stat(path)
+      if stat and stat.mtime and stat.mtime.sec < cutoff then
+        vim.uv.fs_unlink(path)
+      end
+    end
+  end
+end
+
 local function write_comment_cache_entry(key, grouped, threads)
   pcall(function()
     write_json_file(cache_path(key), { fetched_at = os.time(), grouped = grouped, threads = threads or {} })
+    if not comment_cache_pruned then
+      comment_cache_pruned = true
+      prune_comment_cache()
+    end
   end)
 end
 
