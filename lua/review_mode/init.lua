@@ -1312,10 +1312,6 @@ local function parse_hunks_by_path(patch)
   return by_path
 end
 
-local function parse_hunks(patch, path)
-  return parse_hunks_by_path(patch)[path] or {}
-end
-
 local function build_changed_maps_async(generation, callback)
   reset_changed_data()
   state.maps_loading = true
@@ -1347,7 +1343,6 @@ local function build_changed_maps_async(generation, callback)
             parse_changed_file_stats(numstat)
           end
           state.maps_loaded = true
-          state.maps_loading = false
           callback(nil)
         end
       )
@@ -1571,9 +1566,6 @@ local function nearby_paths(path)
   local results = {}
   local count = state.config.performance.hunk_prefetch.count
   local index = path and state.file_index[path] or 1
-  if not index then
-    index = 1
-  end
 
   for offset = 0, count - 1 do
     local next_path = state.file_order[index + offset]
@@ -3311,9 +3303,7 @@ function M.show_thread()
     end
   end
 
-  vim.lsp.util.open_floating_preview(lines, "markdown", {
-    border = "rounded",
-    focusable = true,
+  open_lines_preview(lines, "markdown", {
     max_width = math.floor(vim.o.columns * 0.6),
     max_height = math.floor(vim.o.lines * 0.5),
   })
