@@ -52,7 +52,13 @@ case "$1 $2" in
     printf '[{"id":1,"path":"file.txt","line":2,"body":"Needs review","user":{"login":"reviewer"}},{"id":2,"path":"file.txt","line":4,"body":"Check final line","user":{"login":"reviewer"}}]\n'
     ;;
   "api repos/owner/repo/pulls/123/comments/1/replies")
-    printf '{"id":100,"path":"file.txt","line":2,"body":"replied"}\n'
+    args="$*"
+    if [[ "$args" == *"--method POST"* ]]; then
+      printf '{"id":100,"path":"file.txt","line":2,"body":"replied"}\n'
+    else
+      echo "unexpected gh replies args: $*" >&2
+      exit 1
+    fi
     ;;
   "api repos/owner/repo/pulls/123/comments")
     args="$*"
