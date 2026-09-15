@@ -84,6 +84,7 @@ local state = {
   viewed_order = {},
   viewed_sync_queue = {},
   viewed_store = nil,
+  dir_totals = nil,
   viewed_loading = false,
   viewed_sync_loading = false,
   pr_node_id = nil,
@@ -557,6 +558,8 @@ local function set_viewed_path(path, viewed)
   if not path or not state.config.viewed.enabled then
     return false
   end
+
+  state.dir_totals = nil
 
   if viewed then
     state.viewed[path] = true
@@ -4282,6 +4285,49 @@ function M.is_viewed_file(path)
   return state.config.viewed.enabled and state.viewed[path] == true
 end
 
+local function unresolved_file_comment_count(path)
+  local count = 0
+  for _, comment in ipairs(state.comments[path] or {}) do
+    if comment.is_resolved ~= true then
+      count = count + 1
+    end
+  end
+  return count
+end
+
+-- nvim-tree asks every visible node for its counts on every render, so walking
+-- file_order per directory made a render O(nodes * changed files). Roll the
+-- per-directory totals up once instead.
+--
+-- The memo lives for one event-loop turn: a render is synchronous, and the bulk
+-- rewrites of state.viewed/state.comments all happen inside async callbacks,
+-- which are turns of their own. set_viewed_path clears it directly because a
+-- toggle can be followed by a read in the same turn.
+local function dir_totals()
+  if state.dir_totals then
+    return state.dir_totals
+  end
+
+  local totals = { changed = {}, unviewed = {}, unresolved = {} }
+  for _, file in ipairs(state.file_order) do
+    local unviewed = state.viewed[file] and 0 or 1
+    local unresolved = unresolved_file_comment_count(file)
+    local dir = vim.fs.dirname(file)
+    while dir and dir ~= "." and dir ~= "" do
+      totals.changed[dir] = (totals.changed[dir] or 0) + 1
+      totals.unviewed[dir] = (totals.unviewed[dir] or 0) + unviewed
+      totals.unresolved[dir] = (totals.unresolved[dir] or 0) + unresolved
+      dir = vim.fs.dirname(dir)
+    end
+  end
+
+  state.dir_totals = totals
+  vim.schedule(function()
+    state.dir_totals = nil
+  end)
+  return totals
+end
+
 function M.unviewed_count(path)
   if not state.config.viewed.enabled or not path then
     return 0
@@ -4295,34 +4341,16 @@ function M.unviewed_count(path)
     return 0
   end
 
-  local count = 0
-  local prefix = path .. "/"
-  for _, file in ipairs(state.file_order) do
-    if vim.startswith(file, prefix) and not state.viewed[file] then
-      count = count + 1
-    end
-  end
-
-  return count
+  return dir_totals().unviewed[path] or 0
 end
 
 function M.is_viewed_dir(path)
-  if not state.config.viewed.enabled or not state.dirs[path] or M.unviewed_count(path) > 0 then
+  if not state.config.viewed.enabled or not state.dirs[path] then
     return false
   end
 
-  local prefix = path .. "/"
-  local has_changed_child = false
-  for _, file in ipairs(state.file_order) do
-    if vim.startswith(file, prefix) then
-      has_changed_child = true
-      if not state.viewed[file] then
-        return false
-      end
-    end
-  end
-
-  return has_changed_child
+  local totals = dir_totals()
+  return (totals.changed[path] or 0) > 0 and (totals.unviewed[path] or 0) == 0
 end
 
 function M.comment_count(path)
@@ -4335,28 +4363,14 @@ function M.unresolved_comment_count(path)
   end
 
   if state.files[path] then
-    local count = 0
-    for _, comment in ipairs(state.comments[path] or {}) do
-      if comment.is_resolved ~= true then
-        count = count + 1
-      end
-    end
-    return count
+    return unresolved_file_comment_count(path)
   end
 
   if not state.dirs[path] then
     return 0
   end
 
-  local count = 0
-  local prefix = path .. "/"
-  for _, file in ipairs(state.file_order) do
-    if vim.startswith(file, prefix) then
-      count = count + M.unresolved_comment_count(file)
-    end
-  end
-
-  return count
+  return dir_totals().unresolved[path] or 0
 end
 
 function M.config()

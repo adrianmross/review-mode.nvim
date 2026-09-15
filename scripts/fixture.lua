@@ -616,6 +616,13 @@ assert(has_icon(dir_icons, "✓"), "nvim-tree viewed folder marker missing")
 assert(has_icon_hl(dir_icons, "✓", "ReviewModeTreeViewed"), "nvim-tree viewed folder marker highlight was wrong")
 assert(decorator:highlight_group(dir_node) == "ReviewModeTreeViewed", "nvim-tree viewed folder highlight was wrong")
 
+-- a toggle must invalidate the rolled-up directory totals within the same turn
+local nested_unviewed = pr.unviewed_count("nested")
+pr.toggle_viewed("nested/other.txt")
+assert(pr.unviewed_count("nested") == nested_unviewed + 1, "directory unviewed count was stale after toggle")
+pr.toggle_viewed("nested/other.txt")
+assert(pr.unviewed_count("nested") == nested_unviewed, "directory unviewed count was stale after restoring toggle")
+
 pr.config().nvim_tree.show_viewed = false
 icons = decorator:icons(tree_node)
 assert(has_icon(icons, comment_sign .. " 1"), "nvim-tree comment marker missing when viewed marker disabled")

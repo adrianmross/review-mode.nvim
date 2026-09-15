@@ -56,8 +56,7 @@ function Decorator:changed_icon(rel, show_unviewed_count)
   return { str = label, hl = { changed_hl } }
 end
 
-function Decorator:comment_icon(rel)
-  local count = state.unresolved_comment_count(rel)
+function Decorator:comment_icon(count)
   local comments = comment_config()
   return {
     str = string.format("%s %d", comments.sign_text or "", count),
@@ -76,8 +75,9 @@ function Decorator:icons(node)
   if state.is_changed_file(rel) then
     local config = state.config()
     local icons = {}
-    if config.nvim_tree.show_comments and state.unresolved_comment_count(rel) > 0 then
-      icons[#icons + 1] = self:comment_icon(rel)
+    local comments = config.nvim_tree.show_comments and state.unresolved_comment_count(rel) or 0
+    if comments > 0 then
+      icons[#icons + 1] = self:comment_icon(comments)
     end
     if config.nvim_tree.show_viewed and state.is_viewed_file(rel) then
       icons[#icons + 1] = self.viewed_icon
@@ -94,8 +94,9 @@ function Decorator:icons(node)
 
     local config = state.config()
     local icons = {}
-    if config.nvim_tree.show_comments and state.unresolved_comment_count(rel) > 0 then
-      icons[#icons + 1] = self:comment_icon(rel)
+    local comments = config.nvim_tree.show_comments and state.unresolved_comment_count(rel) or 0
+    if comments > 0 then
+      icons[#icons + 1] = self:comment_icon(comments)
     end
     if config.nvim_tree.show_viewed and state.is_viewed_dir(rel) then
       icons[#icons + 1] = self.viewed_icon
