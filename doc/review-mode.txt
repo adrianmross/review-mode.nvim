@@ -4,10 +4,11 @@
 CONTENTS                                                  *review-mode-contents*
 
 1. Overview                                      |review-mode-overview|
-2. Commands                                      |review-mode-commands|
-3. Keymaps                                       |review-mode-keymaps|
-4. Picker Providers                              |review-mode-pickers|
-5. Setup                                         |review-mode-setup|
+2. The Mode                                      |review-mode-mode|
+3. Commands                                      |review-mode-commands|
+4. Keymaps                                       |review-mode-keymaps|
+5. Picker Providers                              |review-mode-pickers|
+6. Setup                                         |review-mode-setup|
 
 ==============================================================================
 OVERVIEW                                                  *review-mode-overview*
@@ -24,11 +25,57 @@ Picker integrations for snacks.nvim and Telescope are optional and fall back
 to vim.ui.select.
 
 ==============================================================================
+THE MODE                                                      *review-mode-mode*
+
+The mode and the review session are separate. The session holds the PR context
+(base ref, changed files, comments, viewed state); the mode is the key layer
+and decorations over it.
+
+Stepping out with |:ReviewModeLeave| restores your own mappings and puts the
+Gitsigns gutter back to the index, so you can stage and commit normally, while
+comment signs and nvim-tree markers stay visible and nothing is re-fetched.
+Stepping back in with |:ReviewModeEnter| is instant. |:ReviewModeStop| is what
+ends the session.
+
+Keys installed while in the mode (see mode.keys to change them):
+
+        ]h / [h         next / previous PR hunk
+        ]c / [c         next / previous PR comment
+        ]f / [f         next / previous changed file
+        <Tab>           mark viewed, jump to next unviewed file
+        <S-Tab>         toggle viewed
+        <Esc>           step out of the mode
+
+A mapping shadowed by the layer is saved on entry and restored on exit.
+
+With mode.workspace = "tab" the review keeps its own tabpage: entering focuses
+it, leaving returns to the previous tabpage, and the layout survives in
+between. Ending the session closes it. The default "inplace" leaves your
+windows alone.
+
+                                                        *review-mode-statusline*
+vim.g.review_mode is "mode", "session", or nil.
+require("review_mode").statusline() returns a short summary such as
+"REVIEW owner/repo#123 3/12".
+
+The plugin fires these |User| autocommands: ReviewModeStart, ReviewModeEnter,
+ReviewModeLeave, ReviewModeStop.
+
+==============================================================================
 COMMANDS                                                  *review-mode-commands*
 
                                                         *:ReviewMode*
 :ReviewMode
-        Start normal-buffer Review Mode.
+        Toggle Review Mode. Starts the review session if there is none,
+        otherwise steps into or out of the mode. See |review-mode-mode|.
+
+                                                        *:ReviewModeEnter*
+:ReviewModeEnter
+        Step into Review Mode without reloading the session.
+
+                                                        *:ReviewModeLeave*
+:ReviewModeLeave
+        Step out of Review Mode, keeping the session loaded.
 
                                                         *:ReviewModeActions*
 :ReviewModeActions
@@ -212,6 +259,13 @@ SETUP                                                        *review-mode-setup*
       enabled = true,
       show_comments = true,
       show_viewed = true,
+    },
+    mode = {
+      enabled = true,
+      workspace = "inplace",
+      signs_when_out = true,
+      gitsigns_follows = true,
+      keys = { ... },
     },
     picker = {
       provider = "auto",

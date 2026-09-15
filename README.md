@@ -4,6 +4,7 @@ Fast GitHub pull request review mode for ordinary Neovim buffers.
 
 The goal is to keep review inside normal files instead of a dedicated diff UI:
 
+- steps in and out like a real mode: the key layer flips, the review session stays loaded
 - opens the first changed file when review mode starts
 - uses Gitsigns against the PR base branch for gutter changes
 - jumps between PR hunks, PR comments, and changed files
@@ -41,8 +42,8 @@ With `lazy.nvim`:
   },
   opts = {},
   keys = {
-    { "<leader>rm", "<cmd>ReviewMode<cr>", desc = "Review mode" },
-    { "<leader>rN", "<cmd>ReviewModeStop<cr>", desc = "Review mode stop" },
+    { "<leader>rm", "<cmd>ReviewMode<cr>", desc = "Review mode (toggle)" },
+    { "<leader>rN", "<cmd>ReviewModeStop<cr>", desc = "Review mode stop (end session)" },
     { "<leader>ra", "<cmd>ReviewModeActions<cr>", desc = "Review actions" },
     { "<leader>rd", "<cmd>ReviewModeOldToggle<cr>", desc = "Review diff" },
     { "<leader>rD", "<cmd>ReviewModeDiffLayoutToggle<cr>", desc = "Review diff layout" },
@@ -64,18 +65,14 @@ With `lazy.nvim`:
       mode = { "n", "v" },
       desc = "Review comment",
     },
-    { "]h", "<cmd>ReviewModeNextHunk<cr>", desc = "Next PR hunk" },
-    { "[h", "<cmd>ReviewModePrevHunk<cr>", desc = "Previous PR hunk" },
-    { "]c", "<cmd>ReviewModeNextComment<cr>", desc = "Next PR comment" },
-    { "[c", "<cmd>ReviewModePrevComment<cr>", desc = "Previous PR comment" },
-    { "]f", "<cmd>ReviewModeNextFile<cr>", desc = "Next changed file" },
-    { "[f", "<cmd>ReviewModePrevFile<cr>", desc = "Previous changed file" },
+    -- ]h/[h, ]c/[c, ]f/[f, <Tab>, <S-Tab> and <Esc> come from the mode layer
+    -- while you are in the mode; see "The Mode" below.
   },
 }
 ```
 
-Suggested navigation uses hunk keys for changed regions and comment keys for
-review discussion:
+Navigation keys are installed by the mode itself and removed when you step out,
+so they only exist while you are reviewing:
 
 - `]h` / `[h` jump to the next/previous PR hunk
 - `]c` / `[c` jump to the next/previous PR comment
@@ -112,9 +109,75 @@ folder hides these folder markers because its children show the same state
 inline. A folder switches to viewed after every changed file under it is
 viewed.
 
+## The Mode
+
+Review mode separates the *mode* from the *session*, the way normal and insert
+mode share one buffer:
+
+| | keys | comment signs, tree markers | Gitsigns gutter | comments, viewed state, hunks |
+|---|---|---|---|---|
+| in the mode | review layer | shown | vs PR base | loaded |
+| stepped out | yours back | still shown | vs index | still loaded |
+| session ended | yours | cleared | vs index | dropped |
+
+`:ReviewMode` toggles. Stepping out is instant and costs nothing — no `gh`
+calls, no re-fetch — so you can drop out mid-review, stage and commit with your
+own keys and a normal gutter, and step straight back in with the review intact.
+`:ReviewModeStop` is what actually ends the session.
+
+While you are in the mode, these keys are live and nothing else is touched. Any
+mapping of yours that they shadow is saved on entry and restored on exit:
+
+| key | action |
+|---|---|
+| `]h` / `[h` | next / previous PR hunk |
+| `]c` / `[c` | next / previous PR comment |
+| `]f` / `[f` | next / previous changed file |
+| `<Tab>` | mark viewed and jump to the next unviewed file |
+| `<S-Tab>` | toggle viewed |
+| `<Esc>` | step out of the mode |
+
+Replace them with `mode.keys`, or set `mode.keys = {}` to install none:
+
+```lua
+mode = {
+  keys = {
+    ["]h"] = "next_hunk",           -- any function name on the module
+    ["<Esc>"] = "leave",
+    ["gR"] = function() ... end,    -- or a function
+  },
+},
+```
+
+### Its own workspace (opt-in)
+
+With `mode.workspace = "tab"` the review gets its own tabpage. Entering
+switches to it, stepping out returns you to the tab you came from, and the
+review layout survives in between — so you can flip between "my work" and "the
+review" without either disturbing the other. Ending the session closes the tab.
+The default, `"inplace"`, never touches your windows.
+
+### Statusline and events
+
+`vim.g.review_mode` is `"mode"`, `"session"`, or `nil`, and
+`require("review_mode").statusline()` returns e.g. `REVIEW owner/repo#123 3/12`
+(uppercase in the mode, lowercase when stepped out). The plugin also fires
+`User ReviewModeStart`, `ReviewModeEnter`, `ReviewModeLeave` and
+`ReviewModeStop`, so you can drive a statusline, a which-key group or a
+colorscheme change yourself:
+
+```lua
+vim.api.nvim_create_autocmd("User", {
+  pattern = "ReviewModeEnter",
+  callback = function() vim.o.cursorline = true end,
+})
+```
+
 ## Commands
 
-- `:ReviewMode` starts normal-buffer Review Mode
+- `:ReviewMode` toggles Review Mode, starting the review session if there is none
+- `:ReviewModeEnter` steps into the mode without reloading the session
+- `:ReviewModeLeave` steps out of the mode, keeping the session loaded
 - `:ReviewModeActions` opens an action picker for common PR actions, using the configured picker provider
 - `:ReviewModeBrowser` opens the current PR in your browser
 - `:ReviewModeCopyUrl` copies the current PR URL to registers
@@ -199,6 +262,13 @@ require("review_mode").setup({
     enabled = true,
     show_comments = true,
     show_viewed = true,
+  },
+  mode = {
+    enabled = true,
+    workspace = "inplace",
+    signs_when_out = true,
+    gitsigns_follows = true,
+    keys = { ... },
   },
   picker = {
     provider = "auto", -- "auto" | "native" | "snacks" | "telescope"
