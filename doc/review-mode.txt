@@ -19,7 +19,7 @@ hunks, PR comments, and changed files.
 
 The plugin uses `gh` for PR metadata, comments, replies, thread state, checks,
 and browser handoff metadata. Picker integrations for snacks.nvim and Telescope
-are optional and fall back to the native picker.
+are optional and fall back to vim.ui.select.
 
 ==============================================================================
 COMMANDS                                                  *review-mode-commands*
@@ -135,9 +135,9 @@ COMMANDS                                                  *review-mode-commands*
 
                                                         *:ReviewModeViewedList*
 :ReviewModeViewedList [all|viewed|unviewed]
-        Open a fuzzy PR file menu by viewed state, with additions/deletions and
-        a diff preview. Press Space or t in the native picker, or <Tab>/<C-t>
-        in external pickers, to toggle viewed state for the selected file.
+        Open a PR file list by viewed state, with additions/deletions. The
+        snacks.nvim and Telescope providers add a diff preview and toggle
+        viewed state for the selected file with <Tab> or <C-t>.
 
                                                         *:ReviewModeViewedClear*
 :ReviewModeViewedClear
@@ -172,13 +172,15 @@ review discussion:
 ==============================================================================
 PICKER PROVIDERS                                          *review-mode-pickers*
 
-ReviewMode can use its native picker, snacks.nvim, or Telescope for
+ReviewMode can use vim.ui.select, snacks.nvim, or Telescope for
 :ReviewModeActions and :ReviewModeViewedList. The default picker.provider =
-"auto" tries snacks.nvim first, then Telescope, then the native picker. Set
+"auto" tries snacks.nvim first, then Telescope, then vim.ui.select. Set
 picker.provider to "native", "snacks", or "telescope" to prefer one provider.
 
-External providers are optional. If a requested provider is unavailable or fails,
-ReviewMode falls back to the native picker.
+The "native" provider is plain vim.ui.select: same file labels, but no diff
+preview, no live filtering and no in-picker viewed toggle. External providers
+are optional. If a requested provider is unavailable or fails, ReviewMode falls
+back to vim.ui.select.
 
 ==============================================================================
 SETUP                                                        *review-mode-setup*

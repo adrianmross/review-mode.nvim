@@ -443,38 +443,46 @@ assert(vim.api.nvim_win_get_cursor(0)[1] == 2, "previous comment did not jump ba
 pr.toggle_viewed()
 assert(not pr.is_viewed_file("file.txt"), "viewed toggle did not mark file unviewed")
 
+local native_select = nil
+local original_select = vim.ui.select
+vim.ui.select = function(items, opts, callback)
+  native_select = { items = items, opts = opts, callback = callback }
+end
 pr.list_viewed("unviewed")
-local unviewed_menu, unviewed_winid = lines_by_filetype("review-mode-menu")
-local preview_lines = lines_by_filetype("review-mode-preview")
+vim.ui.select = original_select
+assert(native_select, "native viewed picker did not use vim.ui.select")
+assert(native_select.opts.prompt:find("unviewed", 1, true), "native picker prompt filter missing")
+local native_labels = vim.tbl_map(function(item)
+  return native_select.opts.format_item(item)
+end, native_select.items)
 assert(
-  has_line_parts(unviewed_menu, { "☐ 1", "+2", "-1", comment_sign .. " 1", "file.txt" }),
-  "unviewed picker file label was wrong"
+  has_line_parts(native_labels, { "☐ 1", "+2", "-1", comment_sign .. " 1", "file.txt" }),
+  "native picker file label was wrong"
 )
 assert(
-  has_line_parts(unviewed_menu, { "☐ 1", "+1", "-1", comment_sign .. " 1", "nested/other.txt" }),
-  "unviewed picker nested file label was wrong"
+  has_line_parts(native_labels, { "☐ 1", "+1", "-1", comment_sign .. " 1", "nested/other.txt" }),
+  "native picker nested file label was wrong"
 )
 assert(
-  has_line_parts(unviewed_menu, { "☐ 1", "+1", "-1", "nested/deeper/more.txt" }),
-  "unviewed picker deep file label was wrong"
+  has_line_parts(native_labels, { "☐ 1", "+1", "-1", "nested/deeper/more.txt" }),
+  "native picker deep file label was wrong"
 )
-assert(has_line_parts(unviewed_menu, { "☐ 1", "+2", "-0", "new.txt" }), "unviewed picker added file label was wrong")
-assert(has_line(preview_lines, "file.txt"), "viewed picker preview title missing")
-assert(has_line(preview_lines, "+two"), "viewed picker preview added line missing")
-assert(has_line(preview_lines, "-base"), "viewed picker preview deleted line missing")
-vim.api.nvim_set_current_win(unviewed_winid)
-vim.api.nvim_win_set_cursor(unviewed_winid, { 1, 0 })
-vim.api.nvim_feedkeys("t", "x", false)
+assert(has_line_parts(native_labels, { "☐ 1", "+2", "-0", "new.txt" }), "native picker added file label was wrong")
+
+local selected_native_item = native_select.items[1]
+native_select.callback(selected_native_item)
 wait_for(function()
-  return pr.is_viewed_file("file.txt")
-end, "viewed picker toggle did not mark selected file viewed")
-pr.toggle_viewed("file.txt")
-assert(not pr.is_viewed_file("file.txt"), "viewed picker toggle restore failed")
+  return vim.api.nvim_buf_get_name(0):find(selected_native_item.path, 1, true) ~= nil
+end, "native picker selection did not open the file")
+
+native_select = nil
+vim.ui.select = function(items, opts, callback)
+  native_select = { items = items, opts = opts, callback = callback }
+end
 pr.list_viewed("viewed")
-local viewed_menu, viewed_winid = lines_by_filetype("review-mode-menu")
-assert(has_line(viewed_menu, "No matching PR files"), "viewed picker should be empty")
-vim.api.nvim_set_current_win(viewed_winid)
-vim.api.nvim_feedkeys("q", "x", false)
+vim.ui.select = original_select
+assert(not native_select, "native picker should not open without matching files")
+assert(last_notification():find("no viewed PR files", 1, true), "empty native picker notification missing")
 
 pr.config().viewed.sync = false
 pr.stop()
