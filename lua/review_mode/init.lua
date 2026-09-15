@@ -103,6 +103,7 @@ local state = {
   old_layout = nil,
   old_path = nil,
   old_closing = false,
+  gitsigns_base_applied = false,
 }
 
 local setup_done = false
@@ -1884,6 +1885,7 @@ local function set_gitsigns_base()
     return
   end
 
+  state.gitsigns_base_applied = true
   vim.schedule(function()
     local ok, gitsigns = pcall(require, "gitsigns")
     if ok and gitsigns.change_base then
@@ -1895,6 +1897,22 @@ local function set_gitsigns_base()
       return
     end
     pcall(vim.cmd, "Gitsigns change_base " .. base_ref() .. " --global")
+  end)
+end
+
+local function reset_gitsigns_base()
+  if not state.gitsigns_base_applied then
+    return
+  end
+
+  state.gitsigns_base_applied = false
+  vim.schedule(function()
+    local ok, gitsigns = pcall(require, "gitsigns")
+    if ok and gitsigns.change_base then
+      gitsigns.change_base(nil, true)
+      return
+    end
+    pcall(vim.cmd, "Gitsigns change_base --global")
   end)
 end
 
@@ -2170,6 +2188,7 @@ end
 
 function M.stop()
   next_generation()
+  reset_gitsigns_base()
   state.active = false
   state.metadata_loaded = false
   state.repo = nil
