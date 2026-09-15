@@ -30,6 +30,23 @@ local defaults = {
     show_comments = true,
     show_viewed = true,
   },
+  mode = {
+    enabled = true,
+    workspace = "inplace",
+    signs_when_out = true,
+    gitsigns_follows = true,
+    keys = {
+      ["]h"] = "next_hunk",
+      ["[h"] = "prev_hunk",
+      ["]c"] = "next_comment",
+      ["[c"] = "prev_comment",
+      ["]f"] = "next_file",
+      ["[f"] = "prev_file",
+      ["<Tab>"] = "mark_viewed_next",
+      ["<S-Tab>"] = "toggle_viewed",
+      ["<Esc>"] = "leave",
+    },
+  },
   picker = {
     provider = "auto",
   },
@@ -104,6 +121,10 @@ local state = {
   old_path = nil,
   old_closing = false,
   gitsigns_base_applied = false,
+  in_mode = false,
+  saved_keys = {},
+  workspace_tab = nil,
+  return_tab = nil,
 }
 
 local setup_done = false
@@ -127,6 +148,15 @@ local function normalize_config(opts)
     config.diff.layout = defaults.diff.layout
   end
   config.diff.unified_context = math.max(0, tonumber(config.diff.unified_context) or defaults.diff.unified_context)
+
+  local mode = config.mode or {}
+  if mode.workspace ~= "inplace" and mode.workspace ~= "tab" then
+    mode.workspace = defaults.mode.workspace
+  end
+  if type(mode.keys) ~= "table" then
+    mode.keys = {}
+  end
+  config.mode = mode
 
   local picker = config.picker or {}
   if
@@ -1744,6 +1774,89 @@ local function open_initial_change()
   end
 end
 
+local function announce(event)
+  vim.g.review_mode = state.in_mode and "mode" or (state.active and "session" or nil)
+  pcall(vim.api.nvim_exec_autocmds, "User", { pattern = event, modeline = false })
+  pcall(vim.cmd, "redrawstatus")
+  pcall(vim.cmd, "redrawtabline")
+end
+
+local function mode_action(action)
+  if type(action) == "function" then
+    return action
+  end
+  return function()
+    local fn = M[action]
+    if type(fn) == "function" then
+      fn()
+    end
+  end
+end
+
+local function apply_mode_keys()
+  state.saved_keys = {}
+  for lhs, action in pairs(state.config.mode.keys or {}) do
+    -- keep whatever the user had, so leaving the mode is invisible to them
+    state.saved_keys[lhs] = vim.fn.maparg(lhs, "n", false, true)
+    vim.keymap.set("n", lhs, mode_action(action), {
+      desc = "review-mode " .. lhs,
+      silent = true,
+    })
+  end
+end
+
+local function clear_mode_keys()
+  for lhs, saved in pairs(state.saved_keys or {}) do
+    pcall(vim.keymap.del, "n", lhs)
+    if saved and not vim.tbl_isempty(saved) then
+      pcall(vim.fn.mapset, saved)
+    end
+  end
+  state.saved_keys = {}
+end
+
+local function close_workspace()
+  local tab = state.workspace_tab
+  state.workspace_tab = nil
+  if tab and vim.api.nvim_tabpage_is_valid(tab) and #vim.api.nvim_list_tabpages() > 1 then
+    pcall(vim.cmd, vim.api.nvim_tabpage_get_number(tab) .. "tabclose")
+  end
+
+  local return_tab = state.return_tab
+  state.return_tab = nil
+  if return_tab and vim.api.nvim_tabpage_is_valid(return_tab) then
+    pcall(vim.api.nvim_set_current_tabpage, return_tab)
+  end
+end
+
+-- the review keeps its own tabpage, so stepping out is a tab switch and the
+-- review layout survives it
+local function focus_workspace()
+  if state.config.mode.workspace ~= "tab" then
+    return
+  end
+
+  if not state.workspace_tab or not vim.api.nvim_tabpage_is_valid(state.workspace_tab) then
+    state.return_tab = vim.api.nvim_get_current_tabpage()
+    vim.cmd("tabnew")
+    state.workspace_tab = vim.api.nvim_get_current_tabpage()
+    return
+  end
+
+  state.return_tab = vim.api.nvim_get_current_tabpage()
+  pcall(vim.api.nvim_set_current_tabpage, state.workspace_tab)
+end
+
+local function leave_workspace()
+  if state.config.mode.workspace ~= "tab" then
+    return
+  end
+
+  if state.return_tab and vim.api.nvim_tabpage_is_valid(state.return_tab) then
+    pcall(vim.api.nvim_set_current_tabpage, state.return_tab)
+  end
+end
+
 local function ensure_active()
   if state.active then
     return true
@@ -2130,6 +2243,9 @@ function M.start()
 
   state.root = root
   state.active = true
+  -- restarting while already in the mode must not capture our own mappings
+  clear_mode_keys()
+  state.in_mode = state.config.mode.enabled
   state.metadata_loaded = false
   state.repo = env_value("GH_REVIEW_REPO")
   state.pr = env_value("GH_REVIEW_PR")
@@ -2138,6 +2254,11 @@ function M.start()
   local generation = next_generation()
   reset_review_data()
   close_old_view()
+  if state.in_mode then
+    apply_mode_keys()
+  end
+  focus_workspace()
+  announce("ReviewModeStart")
 
   local review_loading_started = false
   if state.base then
@@ -2186,7 +2307,93 @@ function M.start()
   end)
 end
 
+function M.enter()
+  if not state.active then
+    M.start()
+    return
+  end
+
+  if state.in_mode then
+    return
+  end
+
+  state.in_mode = true
+  if state.config.mode.enabled then
+    apply_mode_keys()
+  end
+  focus_workspace()
+  if state.config.mode.gitsigns_follows then
+    set_gitsigns_base()
+  end
+  if not state.config.mode.signs_when_out then
+    annotate_open_buffers()
+  end
+  announce("ReviewModeEnter")
+end
+
+function M.leave()
+  if not state.in_mode then
+    return
+  end
+
+  state.in_mode = false
+  clear_mode_keys()
+  leave_workspace()
+  if state.config.mode.gitsigns_follows then
+    reset_gitsigns_base()
+  end
+  if not state.config.mode.signs_when_out then
+    for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+      clear_buffer_marks(bufnr)
+    end
+    refresh_tree()
+  end
+  announce("ReviewModeLeave")
+end
+
+function M.toggle()
+  if not state.active then
+    M.start()
+    return
+  end
+
+  if state.in_mode then
+    M.leave()
+    return
+  end
+
+  M.enter()
+end
+
+function M.is_in_mode()
+  return state.in_mode
+end
+
+function M.statusline()
+  if not state.active then
+    return ""
+  end
+
+  local viewed = 0
+  for _, path in ipairs(state.file_order) do
+    if state.viewed[path] then
+      viewed = viewed + 1
+    end
+  end
+
+  return string.format(
+    "%s %s#%s %d/%d",
+    state.in_mode and "REVIEW" or "review",
+    state.repo or "?",
+    state.pr or "?",
+    viewed,
+    #state.file_order
+  )
+end
+
 function M.stop()
+  M.leave()
+  close_workspace()
   next_generation()
   reset_gitsigns_base()
   state.active = false
@@ -2199,6 +2406,7 @@ function M.stop()
   close_old_view()
   annotate_open_buffers()
   refresh_tree()
+  announce("ReviewModeStop")
   vim.notify("Review Mode stopped")
 end
 
@@ -3929,7 +4137,15 @@ function M.setup(opts)
   state.config = normalize_config(opts)
 
   if state.config.commands then
-    vim.api.nvim_create_user_command("ReviewMode", M.start, { desc = "Start Review Mode" })
+    vim.api.nvim_create_user_command("ReviewMode", function()
+      M.toggle()
+    end, { desc = "Toggle Review Mode (starts the review session if needed)" })
+    vim.api.nvim_create_user_command("ReviewModeEnter", M.enter, { desc = "Step into Review Mode" })
+    vim.api.nvim_create_user_command(
+      "ReviewModeLeave",
+      M.leave,
+      { desc = "Step out of Review Mode, keeping the session" }
+    )
     vim.api.nvim_create_user_command("ReviewModeActions", M.actions, { desc = "Open Review Mode action picker" })
     vim.api.nvim_create_user_command("ReviewModeBrowser", M.open_browser, { desc = "Open the current PR in a browser" })
     vim.api.nvim_create_user_command("ReviewModeCopyUrl", M.copy_url, { desc = "Copy the current PR URL" })
