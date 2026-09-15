@@ -1143,7 +1143,14 @@ end
 
 local function sync_viewed_path_to_github_async(path, viewed, opts)
   opts = opts or {}
+  local function done(ok)
+    if opts.on_done then
+      opts.on_done(ok)
+    end
+  end
+
   if not state.config.viewed.enabled or not state.config.viewed.sync or not path then
+    done(false)
     return
   end
 
@@ -1152,6 +1159,7 @@ local function sync_viewed_path_to_github_async(path, viewed, opts)
     if not pr_id then
       queue_viewed_sync(path, viewed)
       vim.notify("Review Mode viewed sync queued: " .. tostring(err or "unknown error"), vim.log.levels.WARN)
+      done(false)
       return
     end
 
@@ -1184,13 +1192,12 @@ mutation($pullRequestId: ID!, $path: String!) {
       if not result then
         queue_viewed_sync(path, viewed)
         vim.notify("Review Mode viewed sync queued: " .. tostring(mutation_err or "unknown error"), vim.log.levels.WARN)
+        done(false)
         return
       end
 
       clear_queued_viewed_sync(path)
-      if opts.on_success then
-        opts.on_success()
-      end
+      done(true)
     end)
   end)
 end
@@ -1212,16 +1219,14 @@ function M.flush_viewed_sync()
 
   state.viewed_sync_loading = true
   sync_viewed_path_to_github_async(path, viewed, {
-    on_success = function()
+    on_done = function(ok)
       state.viewed_sync_loading = false
-      if not vim.tbl_isempty(state.viewed_sync_queue) then
+      -- a failed entry stays queued for the next sync rather than spinning here
+      if ok and not vim.tbl_isempty(state.viewed_sync_queue) then
         M.flush_viewed_sync()
       end
     end,
   })
-  vim.defer_fn(function()
-    state.viewed_sync_loading = false
-  end, 1000)
 end
 
 local function parse_changed_files(output)
