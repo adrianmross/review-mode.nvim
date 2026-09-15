@@ -130,6 +130,13 @@ local function last_notification()
   return notifications[#notifications] or ""
 end
 
+-- The real vim.ui.select reads EOF under "nvim -l" and ends the script with
+-- status 0, so an unstubbed call silently skips the rest of this suite instead
+-- of failing it. Every intentional picker call installs its own stub.
+vim.ui.select = function()
+  error("unexpected vim.ui.select call")
+end
+
 local function notification_count(needle)
   local count = 0
   for _, message in ipairs(notifications) do

@@ -3066,7 +3066,9 @@ local function open_native_viewed_picker(filter)
   filter = normalize_viewed_filter(filter)
   local items = viewed_picker_items_for_provider(filter)
   if #items == 0 then
-    vim.notify(string.format("Review Mode: no %s PR files", filter), vim.log.levels.INFO)
+    local message = filter == "all" and "Review Mode: no changed PR files"
+      or string.format("Review Mode: no %s PR files", filter)
+    vim.notify(message, vim.log.levels.INFO)
     return
   end
 
