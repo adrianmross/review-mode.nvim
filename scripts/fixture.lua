@@ -408,6 +408,15 @@ assert(vim.api.nvim_win_get_cursor(0)[1] == 4, "next comment did not jump to sec
 pr.prev_comment()
 assert(vim.api.nvim_win_get_cursor(0)[1] == 2, "previous comment did not jump back")
 
+pr.show_thread()
+wait_for(function()
+  return win_by_filetype("markdown") ~= nil
+end, "thread preview did not open")
+local thread_lines = lines_by_filetype("markdown")
+assert(has_line(thread_lines, "reviewer:"), "thread preview author missing")
+assert(has_line(thread_lines, "Needs review"), "thread preview body missing")
+close_win_by_filetype("markdown")
+
 pr.toggle_viewed()
 assert(not pr.is_viewed_file("file.txt"), "viewed toggle did not mark file unviewed")
 
