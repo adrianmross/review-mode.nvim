@@ -20,6 +20,8 @@ The goal is to keep review inside normal files instead of a dedicated diff UI:
 - Neovim 0.10+
 - `git`
 - GitHub CLI `gh`, authenticated for the target repository
+- a [Nerd Font](https://www.nerdfonts.com/) for the default comment sign; without one, set
+  `comments.sign_text` to any character your font has
 - optional: `lewis6991/gitsigns.nvim`
 - optional: `nvim-tree/nvim-tree.lua`
 - optional: `folke/snacks.nvim` or `nvim-telescope/telescope.nvim` for picker UI
@@ -105,9 +107,10 @@ require("nvim-tree").setup({
 Unviewed changed files and closed parent folders are marked with `☐ N`, where
 `N` is the number of unviewed changed files under that node. Viewed files and
 closed folders are marked with `✓`; files and closed folders with unresolved
-comments are also marked with ` N`. An open folder hides these folder markers
-because its children show the same state inline. A folder switches to viewed
-after every changed file under it is viewed.
+comments are also marked with ` N` (a Nerd Font comment glyph). An open
+folder hides these folder markers because its children show the same state
+inline. A folder switches to viewed after every changed file under it is
+viewed.
 
 ## Commands
 
@@ -177,7 +180,7 @@ require("review_mode").setup({
   comments = {
     enabled = true,
     cache_ttl_seconds = 300,
-    sign_text = "",
+    sign_text = "", -- Nerd Font glyph, override if your font lacks it
     sign_hl_group = "DiagnosticInfo",
     virtual_text = true,
   },
