@@ -48,6 +48,12 @@ Keys installed while in the mode (see mode.keys to change them):
 
 A mapping shadowed by the layer is saved on entry and restored on exit.
 
+A commit made during the review joins it: the reflog is watched, and on the
+next FocusGained, BufEnter or TermLeave the changed files and hunks are rebuilt
+and the PR head SHA is re-fetched so new comments anchor to a commit GitHub
+knows. Viewed state and loaded comments are kept. Set follow_head = false to
+require |:ReviewModeRefresh| instead.
+
 With mode.workspace = "tab" the review keeps its own tabpage: entering focuses
 it, leaving returns to the previous tabpage, and the layout survives in
 between. Ending the session closes it. The default "inplace" leaves your
@@ -237,6 +243,7 @@ SETUP                                                        *review-mode-setup*
 >
   require("review_mode").setup({
     auto_open_first_change = true,
+    follow_head = true,
     comments = {
       enabled = true,
       cache_ttl_seconds = 300,

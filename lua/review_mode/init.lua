@@ -7,6 +7,7 @@ local cache_dir = vim.fs.joinpath(vim.fn.stdpath("cache"), "review-mode-comments
 local default_comment_sign_text = ""
 local defaults = {
   auto_open_first_change = true,
+  follow_head = true,
   comments = {
     enabled = true,
     cache_ttl_seconds = 300,
@@ -122,6 +123,8 @@ local state = {
   old_closing = false,
   gitsigns_base_applied = false,
   in_mode = false,
+  head_log_path = nil,
+  head_log_stamp = nil,
   saved_keys = {},
   workspace_tab = nil,
   return_tab = nil,
@@ -1758,6 +1761,84 @@ local function first_hunk_line(path)
   return hunks and hunks[1] or 1
 end
 
+-- the reflog is appended on every commit, amend, rebase and checkout, so its
+-- size+mtime is a cheap stand-in for "HEAD moved" with no subprocess per event
+local head_watch = {}
+
+function head_watch.stamp()
+  if not state.head_log_path then
+    return nil
+  end
+
+  local stat = vim.uv.fs_stat(state.head_log_path)
+  if not stat then
+    return nil
+  end
+
+  local mtime = stat.mtime or {}
+  return string.format("%d:%d:%d", stat.size or 0, mtime.sec or 0, mtime.nsec or 0)
+end
+
+function head_watch.start(generation)
+  state.head_log_path = nil
+  state.head_log_stamp = nil
+  system_async({ "git", "rev-parse", "--git-path", "logs/HEAD" }, { cwd = state.root }, function(path)
+    if not is_current(generation) or not path or path == "" then
+      return
+    end
+
+    if not vim.startswith(path, "/") then
+      path = vim.fs.joinpath(state.root, path)
+    end
+    state.head_log_path = path
+    state.head_log_stamp = head_watch.stamp()
+  end)
+end
+
+function head_watch.reload()
+  local generation = state.generation
+  build_changed_maps_async(generation, function(err)
+    if not is_current(generation) then
+      return
+    end
+
+    if err then
+      vim.notify("Review Mode: " .. tostring(err), vim.log.levels.WARN)
+      return
+    end
+
+    refresh_viewed_order()
+    annotate_open_buffers()
+    refresh_tree()
+    prefetch_current_buffer()
+    start_background_hunk_scan()
+    vim.notify(string.format("Review Mode: HEAD moved, %d changed files", #state.file_order))
+  end)
+
+  -- new comments must anchor to a commit GitHub knows about, not the SHA we
+  -- captured when the review started
+  pr_meta_async(generation, function(meta)
+    if not is_current(generation) or not meta then
+      return
+    end
+    state.head = meta.headRefOid or state.head
+  end)
+end
+
+function head_watch.check()
+  if not state.config.follow_head or not state.active or not state.head_log_path or state.maps_loading then
+    return
+  end
+
+  local stamp = head_watch.stamp()
+  if not stamp or stamp == state.head_log_stamp then
+    return
+  end
+
+  state.head_log_stamp = stamp
+  head_watch.reload()
+end
+
 local function open_initial_change()
   if current_file_index() then
     return
@@ -2258,6 +2339,7 @@ function M.start()
     apply_mode_keys()
   end
   focus_workspace()
+  head_watch.start(generation)
   announce("ReviewModeStart")
 
   local review_loading_started = false
@@ -2402,6 +2484,8 @@ function M.stop()
   state.pr = nil
   state.base = nil
   state.head = nil
+  state.head_log_path = nil
+  state.head_log_stamp = nil
   reset_review_data()
   close_old_view()
   annotate_open_buffers()
@@ -4303,6 +4387,11 @@ function M.setup(opts)
         prefetch_current_buffer(args.buf)
       end
     end,
+  })
+
+  vim.api.nvim_create_autocmd({ "FocusGained", "BufEnter", "TermLeave" }, {
+    group = vim.api.nvim_create_augroup("normal_review_mode_head", { clear = true }),
+    callback = head_watch.check,
   })
 
   vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {

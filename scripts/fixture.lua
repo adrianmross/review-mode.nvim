@@ -959,3 +959,22 @@ assert(gitsigns_bases[2].global == true, "gitsigns base reset was not global")
 pr.config().gitsigns.enabled = false
 package.loaded["gitsigns"] = nil
 package.preload["gitsigns"] = nil
+
+-- a commit made during the review has to join the review
+pr.start()
+wait_for(function()
+  return pr.is_changed_file("file.txt")
+end, "changed file map did not load for follow-HEAD checks")
+wait_for(function()
+  return vim.g.review_mode ~= nil
+end, "review session did not start for follow-HEAD checks")
+assert(not pr.is_changed_file("followed.txt"), "follow-HEAD fixture file already existed")
+vim.fn.writefile({ "brand new" }, "followed.txt")
+vim.system({ "git", "add", "followed.txt" }, { text = true }):wait()
+vim.system({ "git", "commit", "-q", "-m", "followed" }, { text = true }):wait()
+assert(not pr.is_changed_file("followed.txt"), "review picked up the commit without being told HEAD moved")
+wait_for(function()
+  vim.api.nvim_exec_autocmds("FocusGained", {})
+  return pr.is_changed_file("followed.txt")
+end, "review did not follow a commit made during the review")
+pr.stop()

@@ -149,6 +149,15 @@ mode = {
 },
 ```
 
+### Committing during a review
+
+Review mode watches the reflog, so a commit you make mid-review (from Neovim, a
+`:terminal`, fugitive, or another window entirely) is picked up on the next
+`FocusGained`, `BufEnter` or `TermLeave`: the changed-file list and hunks are
+rebuilt and the PR head SHA is re-fetched, so new comments anchor to a commit
+GitHub knows about. Viewed state and loaded comments are kept. Set
+`follow_head = false` to require `:ReviewModeRefresh` instead.
+
 ### Its own workspace (opt-in)
 
 With `mode.workspace = "tab"` the review gets its own tabpage. Entering
@@ -240,6 +249,7 @@ Install snacks.nvim or Telescope for the preview and toggle keymaps.
 ```lua
 require("review_mode").setup({
   auto_open_first_change = true,
+  follow_head = true,
   comments = {
     enabled = true,
     cache_ttl_seconds = 300,
