@@ -1202,11 +1202,17 @@ mutation($pullRequestId: ID!, $path: String!) {
   end)
 end
 
+-- The guard holds the generation that owns the in-flight write rather than a
+-- bare flag. Stale callbacks bail on is_current() without reaching on_done, and
+-- M.refresh() bumps the generation without resetting state, so a boolean would
+-- stay set forever and wedge every later flush. Stamping it means a new
+-- generation simply does not match, and a late callback cannot clear a guard
+-- that a newer flush now owns.
 function M.flush_viewed_sync()
   if
     not state.config.viewed.enabled
     or not state.config.viewed.sync
-    or state.viewed_sync_loading
+    or state.viewed_sync_loading == state.generation
     or vim.tbl_isempty(state.viewed_sync_queue)
   then
     return
@@ -1217,10 +1223,15 @@ function M.flush_viewed_sync()
     return
   end
 
-  state.viewed_sync_loading = true
+  local generation = state.generation
+  state.viewed_sync_loading = generation
   sync_viewed_path_to_github_async(path, viewed, {
     on_done = function(ok)
-      state.viewed_sync_loading = false
+      if state.viewed_sync_loading ~= generation then
+        return
+      end
+
+      state.viewed_sync_loading = nil
       -- a failed entry stays queued for the next sync rather than spinning here
       if ok and not vim.tbl_isempty(state.viewed_sync_queue) then
         M.flush_viewed_sync()
