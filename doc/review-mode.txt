@@ -5,10 +5,11 @@ CONTENTS                                                  *review-mode-contents*
 
 1. Overview                                      |review-mode-overview|
 2. The Mode                                      |review-mode-mode|
-3. Commands                                      |review-mode-commands|
-4. Keymaps                                       |review-mode-keymaps|
-5. Picker Providers                              |review-mode-pickers|
-6. Setup                                         |review-mode-setup|
+3. Thread Panel                                  |review-mode-panel|
+4. Commands                                      |review-mode-commands|
+5. Keymaps                                       |review-mode-keymaps|
+6. Picker Providers                              |review-mode-pickers|
+7. Setup                                         |review-mode-setup|
 
 ==============================================================================
 OVERVIEW                                                  *review-mode-overview*
@@ -42,6 +43,7 @@ Keys installed while in the mode (see mode.keys to change them):
         ]h / [h         next / previous PR hunk
         ]c / [c         next / previous PR comment
         ]f / [f         next / previous changed file
+        gt              toggle the thread panel |review-mode-panel|
         <Tab>           mark viewed, jump to next unviewed file
         <S-Tab>         toggle viewed
         <Esc>           step out of the mode
@@ -64,8 +66,60 @@ vim.g.review_mode is "mode", "session", or nil.
 require("review_mode").statusline() returns a short summary such as
 "REVIEW owner/repo#123 3/12".
 
+Review is a key layer over normal mode, not a real Vim mode, so mode() never
+returns it and a statusline's stock mode component cannot show it.
+require("review_mode").mode_text() stands in for that component: "REVIEW" while
+the layer is live and you are in normal mode, "REVIEW INSERT" once you step
+into another mode, and the plain mode name with no review, so normal/insert
+context stays visible. It takes { label = "PR", separator = "." }.
+
+With lualine: sections = { lualine_a = { { require("review_mode").mode_text } } }
+
 The plugin fires these |User| autocommands: ReviewModeStart, ReviewModeEnter,
 ReviewModeLeave, ReviewModeStop.
+
+==============================================================================
+THREAD PANEL                                                 *review-mode-panel*
+
+|:ReviewModePanel| opens a vertical split beside the file. It follows the
+cursor: threads anchored to the current line, or every thread in the file when
+the cursor is not on one. A thread shows its author, their association with the
+repository, how long ago it was written, the reply chain, emoji reactions, and
+whether it is open, resolved, or outdated. Fenced code inside a comment is
+drawn as code instead of as more prose, and a `suggestion` block is drawn as
+the diff it would apply: the lines it replaces above the lines it proposes.
+
+Keys inside the panel:
+
+        r       reply to the thread under the cursor
+        c       comment on the line the code window is on
+        R       resolve or unresolve the thread
+        a       apply the thread's suggestion to the buffer
+        o       open the comment on GitHub
+        <CR>    jump to the thread's line in the code window
+        ]c [c   next / previous thread in the panel
+        gr      reload comments from GitHub
+        q       close the panel
+
+Resolved threads are hidden in the panel and in |:ReviewModeThread| unless a
+line has nothing else on it. Set comments.show_resolved = true to always show
+them.
+
+                                                           *review-mode-draft*
+|:ReviewModeReply|, |:ReviewModeCompose| and the panel's `r` and `c` keys open a
+markdown draft buffer rather than a vim.ui.input prompt, so a reply can be more
+than one line and can be edited before it goes out. Nothing reaches GitHub
+until the draft is confirmed.
+
+        <C-s>   post, after a prompt showing what will be sent
+        :w      same as <C-s>
+        <C-r>   quote the lines selected in the code window, with their path
+                and line numbers
+        <C-g>   seed a ```suggestion block from the lines the draft targets
+        q       discard the draft
+
+<C-r> is what lets a reply point at lines other than the one the thread is
+anchored to: select them in the code window, return to the draft, press it.
 
 ==============================================================================
 COMMANDS                                                  *review-mode-commands*
@@ -164,6 +218,20 @@ COMMANDS                                                  *review-mode-commands*
 :ReviewModeUnresolveThread
         Unresolve the PR review thread on the current line.
 
+                                                        *:ReviewModePanel*
+:ReviewModePanel
+        Toggle the thread panel beside the current file.
+
+                                                        *:ReviewModeCompose*
+:ReviewModeCompose
+        Draft a PR comment for the current line or visual range in a buffer,
+        confirmed before it is sent.
+
+                                                        *:ReviewModeApplySuggestion*
+:ReviewModeApplySuggestion
+        Apply the suggestion on the current line to the buffer, leaving it
+        unsaved.
+
                                                         *:ReviewModeComment*
 :ReviewModeComment
         Create a PR comment on the current line or visual range.
@@ -250,6 +318,13 @@ SETUP                                                        *review-mode-setup*
       sign_text = "", -- Nerd Font glyph
       sign_hl_group = "DiagnosticInfo",
       virtual_text = true,
+      show_resolved = false,
+    },
+    panel = {
+      auto_open = false,
+      follow_cursor = true,
+      position = "right",
+      width = 60,
     },
     diff = {
       fast_diffopt = "internal,filler,closeoff,indent-heuristic,linematch:0",

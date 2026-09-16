@@ -8,6 +8,7 @@ local function wait_for(predicate, message)
 end
 
 local pr = require("review_mode")
+local api = require("review_mode.api")
 pr.setup({
   gitsigns = { enabled = false },
   nvim_tree = { enabled = false },
@@ -18,10 +19,10 @@ pr.setup({
 
 pr.start()
 wait_for(function()
-  return pr.is_changed_file("file.txt")
+  return api.is_changed_file("file.txt")
 end, "changed file map did not load for REST fallback")
 wait_for(function()
-  return pr.comment_count("file.txt") == 2
+  return api.comment_count("file.txt") == 2
 end, "REST comment fallback did not load PR comments")
 
 pr.stop()

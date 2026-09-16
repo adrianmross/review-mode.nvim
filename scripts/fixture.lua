@@ -165,6 +165,7 @@ local function viewed_sync_queue_count()
 end
 
 local pr = require("review_mode")
+local api = require("review_mode.api")
 pr.setup({
   gitsigns = { enabled = false },
   nvim_tree = { enabled = false, show_viewed = true },
@@ -219,22 +220,22 @@ assert(vim.uv.fs_utime(stale_cache_path, stale_time, stale_time), "could not age
 
 pr.start()
 wait_for(function()
-  return pr.is_changed_file("file.txt")
+  return api.is_changed_file("file.txt")
 end, "changed file map did not load")
 wait_for(function()
-  return pr.is_changed_file("nested/other.txt")
+  return api.is_changed_file("nested/other.txt")
 end, "second changed file did not load")
 wait_for(function()
-  return pr.is_changed_file("nested/deeper/more.txt")
+  return api.is_changed_file("nested/deeper/more.txt")
 end, "deep changed file did not load")
 wait_for(function()
-  return pr.is_changed_file("new.txt")
+  return api.is_changed_file("new.txt")
 end, "added file did not load")
 wait_for(function()
-  return pr.is_viewed_file("file.txt")
+  return api.is_viewed_file("file.txt")
 end, "GitHub viewed state did not load")
 wait_for(function()
-  return pr.comment_count("file.txt") == 2
+  return api.comment_count("file.txt") == 3
 end, "PR comments did not load")
 wait_for(function()
   return vim.uv.fs_stat(stale_cache_path) == nil
@@ -420,16 +421,32 @@ wait_for(function()
   return last_notification():find("Unresolved PR review thread", 1, true) ~= nil
 end, "unresolve thread command did not report success")
 
-local original_reply_input = vim.ui.input
-vim.ui.input = function(_, callback)
-  callback("looks good to me")
+local original_confirm = vim.fn.confirm
+local confirm_prompts = {}
+vim.fn.confirm = function(prompt)
+  confirm_prompts[#confirm_prompts + 1] = prompt
+  return 1
 end
+
 vim.api.nvim_win_set_cursor(0, { 2, 0 })
 pr.reply()
-vim.ui.input = original_reply_input
+local composer_win = win_by_filetype("markdown")
+assert(composer_win, "reply did not open a draft buffer")
+vim.api.nvim_buf_set_lines(vim.api.nvim_win_get_buf(composer_win), 0, -1, false, { "looks good to me" })
+
+-- A draft posts nothing until it is confirmed.
+pr.composer_reference()
+local draft_lines = vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(composer_win), 0, -1, false)
+assert(has_line(draft_lines, "`file.txt:2`"), "draft reference did not cite the source line")
+assert(has_line(draft_lines, "two"), "draft reference did not quote the source line")
+assert(last_notification():find("Submitted PR thread reply", 1, true) == nil, "draft posted before confirmation")
+
+pr.composer_submit()
+assert(#confirm_prompts > 0 and confirm_prompts[1]:find("Post this reply", 1, true), "reply was not confirmed first")
 wait_for(function()
   return last_notification():find("Submitted PR thread reply", 1, true) ~= nil
 end, "reply command did not post a thread reply")
+vim.fn.confirm = original_confirm
 
 local original_input = vim.ui.input
 vim.ui.input = function(opts, callback)
@@ -445,7 +462,7 @@ end, "suggest command did not create a PR comment")
 
 pr.summary()
 assert(last_notification():find("Files: 1 viewed, 3 unviewed, 4 total", 1, true), "summary file counts were wrong")
-assert(last_notification():find("Comments: 3", 1, true), "summary comment count was wrong")
+assert(last_notification():find("Comments: 4", 1, true), "summary comment count was wrong")
 assert(last_notification():find("Threads: 3 total, 2 unresolved", 1, true), "summary thread counts were wrong")
 
 vim.cmd.edit("file.txt")
@@ -472,15 +489,189 @@ assert(vim.api.nvim_win_get_cursor(0)[1] == 2, "previous comment did not jump ba
 
 pr.show_thread()
 wait_for(function()
-  return win_by_filetype("markdown") ~= nil
+  return win_by_filetype("review-thread") ~= nil
 end, "thread preview did not open")
-local thread_lines = lines_by_filetype("markdown")
-assert(has_line(thread_lines, "reviewer:"), "thread preview author missing")
+local thread_lines = lines_by_filetype("review-thread")
+assert(has_line(thread_lines, "reviewer"), "thread preview author missing")
+assert(has_line(thread_lines, "owner"), "thread preview author association missing")
 assert(has_line(thread_lines, "Needs review"), "thread preview body missing")
-close_win_by_filetype("markdown")
+assert(has_line(thread_lines, "file.txt:2"), "thread preview location missing")
+assert(has_line(thread_lines, "open"), "thread preview resolution state missing")
+assert(has_line(thread_lines, "👍 2"), "thread preview reactions missing")
+assert(has_line(thread_lines, "┌ suggestion"), "thread preview suggestion block missing")
+assert(has_line(thread_lines, "│-two"), "thread preview suggestion did not show the replaced line")
+assert(has_line(thread_lines, "│+two improved"), "thread preview suggestion did not show the new line")
+assert(not has_line(thread_lines, "```"), "thread preview leaked a raw markdown fence")
+close_win_by_filetype("review-thread")
+
+-- A resolved thread with a reply renders both comments and the reply badge.
+vim.api.nvim_win_set_cursor(0, { 4, 0 })
+pr.show_thread()
+wait_for(function()
+  return win_by_filetype("review-thread") ~= nil
+end, "resolved thread preview did not open")
+local resolved_lines = lines_by_filetype("review-thread")
+assert(has_line(resolved_lines, "Check final line"), "resolved thread first comment missing")
+assert(has_line(resolved_lines, "Fixed in the follow-up commit."), "resolved thread reply missing")
+assert(has_line(resolved_lines, "↳ maintainer"), "resolved thread reply author missing")
+assert(has_line(resolved_lines, "resolved"), "resolved thread state missing")
+assert(has_line(resolved_lines, "↩ 1"), "resolved thread reply count missing")
+close_win_by_filetype("review-thread")
+vim.api.nvim_win_set_cursor(0, { 2, 0 })
+
+-- Panel ---------------------------------------------------------------------
+-- The public API has to be enough to build a UI on: read the session, list
+-- files and threads, render them, subscribe, and write back.
+local session = api.session()
+assert(session and session.repo == "owner/repo" and session.pr == "123", "api.session did not describe the session")
+assert(session.root and session.base == "main", "api.session missing root/base")
+assert(api.is_active(), "api.is_active was false during a session")
+
+local api_files = api.files()
+assert(#api_files == 4, "api.files returned the wrong file count")
+local by_path = {}
+for _, entry in ipairs(api_files) do
+  by_path[entry.path] = entry
+end
+assert(by_path["file.txt"], "api.files missed file.txt")
+assert(by_path["file.txt"].added == 2 and by_path["file.txt"].removed == 1, "api.files stats were wrong")
+assert(by_path["file.txt"].comments == 3, "api.files comment count was wrong")
+assert(by_path["file.txt"].unresolved == 1, "api.files unresolved count was wrong")
+assert(api.file("nope.txt") == nil, "api.file returned an entry for an unchanged path")
+
+local all_threads = api.threads({})
+assert(#all_threads >= 2, "api.threads returned too few threads")
+local line_threads = api.threads({ path = "file.txt", line = 2 })
+assert(#line_threads == 1, "api.threads did not filter by line")
+assert(line_threads[1].comments[1].author == "reviewer", "api.threads lost the comment author")
+local resolved_hidden = api.threads({ path = "file.txt" })
+local with_resolved = api.threads({ path = "file.txt", include_resolved = true })
+assert(#with_resolved > #resolved_hidden, "api.threads ignored include_resolved")
+
+local api_lines, api_marks = api.render_threads(line_threads, { width = 60 })
+assert(has_line(api_lines, "Needs review"), "api.render_threads produced no body")
+assert(#api_marks > 0, "api.render_threads produced no highlights")
+assert(api.suggestion(line_threads[1].comments[1]), "api.suggestion did not find the suggestion block")
+
+local seen = 0
+local unsubscribe = api.on("viewed_changed", function()
+  seen = seen + 1
+end)
+assert(api.set_viewed("new.txt", true), "api.set_viewed failed")
+assert(api.is_viewed_file("new.txt"), "api.set_viewed did not mark the file viewed")
+assert(api.set_viewed("new.txt", false), "api.set_viewed could not unmark")
+assert(not api.is_viewed_file("new.txt"), "api.set_viewed did not unmark the file")
+unsubscribe()
+local after_unsub = seen
+api.set_viewed("new.txt", true)
+assert(seen == after_unsub, "api.on unsubscribe did not stop the subscription")
+api.set_viewed("new.txt", false)
+
+-- hooks: an override decides where the panel goes, observers see the events
+local hook_events = {}
+local hook_window_calls = 0
+pr.config().hooks = {
+  on_panel_open = function(ctx)
+    hook_events[#hook_events + 1] = { "panel_open", ctx }
+  end,
+  on_panel_close = function()
+    hook_events[#hook_events + 1] = { "panel_close" }
+  end,
+  on_comment_posted = function(ctx)
+    hook_events[#hook_events + 1] = { "comment_posted", ctx }
+  end,
+  open_panel_window = function(ctx)
+    hook_window_calls = hook_window_calls + 1
+    vim.cmd("topleft vsplit")
+    vim.api.nvim_win_set_width(0, 40)
+    assert(ctx.buf and vim.api.nvim_buf_is_valid(ctx.buf), "panel hook got no buffer")
+    return vim.api.nvim_get_current_win()
+  end,
+}
+
+pr.toggle_panel()
+assert(pr.panel_is_open(), "panel did not open")
+assert(hook_window_calls == 1, "open_panel_window hook was not used")
+assert(vim.api.nvim_win_get_width(pr.panel_win()) == 40, "panel hook window width was ignored")
+assert(hook_events[1] and hook_events[1][1] == "panel_open", "on_panel_open did not fire")
+wait_for(function()
+  return has_line(lines_by_filetype("review-thread"), "Needs review")
+end, "panel did not render the thread on the cursor line")
+local panel_lines, panel_win = lines_by_filetype("review-thread")
+assert(has_line(panel_lines, "r reply"), "panel key hint missing")
+assert(has_line(panel_lines, "│+two improved"), "panel suggestion diff missing")
+
+local panel_ns = vim.api.nvim_get_namespaces().review_mode_panel
+assert(panel_ns, "panel highlight namespace missing")
+local panel_groups = {}
+for _, mark in
+  ipairs(vim.api.nvim_buf_get_extmarks(vim.api.nvim_win_get_buf(panel_win), panel_ns, 0, -1, { details = true }))
+do
+  panel_groups[mark[4].hl_group or mark[4].line_hl_group or ""] = true
+end
+assert(panel_groups.ReviewModeSuggestionAdd, "panel did not highlight the suggested lines")
+assert(panel_groups.ReviewModeSuggestionDelete, "panel did not highlight the replaced lines")
+assert(panel_groups.ReviewModeCommentAuthor, "panel did not highlight the comment author")
+assert(panel_groups.ReviewModeUnresolved, "panel did not highlight the unresolved state")
+
+-- Applying a suggestion edits the buffer and leaves it unsaved.
+vim.cmd.edit("file.txt")
+vim.api.nvim_win_set_cursor(0, { 2, 0 })
+pr.apply_suggestion()
+assert(vim.api.nvim_buf_get_lines(0, 1, 2, false)[1] == "two improved", "suggestion was not applied to the buffer")
+vim.cmd("silent undo")
+assert(vim.api.nvim_buf_get_lines(0, 1, 2, false)[1] == "two", "undo did not restore the buffer")
+vim.bo.modified = false
+
+-- the panel must still follow the real file while a side-by-side diff is open
+pr.old_toggle()
+wait_for(function()
+  return #vim.api.nvim_list_wins() >= 3
+end, "side-by-side diff did not open beside the panel")
+local diff_wins = api.diff_windows()
+assert(#diff_wins == 1, "diff_windows should report only the base buffer window")
+wait_for(function()
+  return has_line(lines_by_filetype("review-thread"), "Needs review")
+end, "panel lost the code window while a side-by-side diff was open")
+pr.old_toggle()
+wait_for(function()
+  return #api.diff_windows() == 0
+end, "diff_windows still reported a window after the diff closed")
+
+pr.toggle_panel()
+assert(not pr.panel_is_open(), "panel did not close")
+assert(hook_events[#hook_events][1] == "panel_close", "on_panel_close did not fire")
+
+-- a hook that throws must be reported, not fatal
+pr.config().hooks = {
+  on_panel_open = function()
+    error("boom")
+  end,
+}
+pr.toggle_panel()
+assert(pr.panel_is_open(), "a failing hook stopped the panel from opening")
+assert(last_notification():find("failed", 1, true), "a failing hook was not reported")
+pr.toggle_panel()
+pr.config().hooks = {}
+
+-- Drafting a comment seeds a suggestion from the lines it targets.
+vim.api.nvim_win_set_cursor(0, { 2, 0 })
+pr.compose_comment()
+local draft_win = assert(win_by_filetype("markdown"), "compose_comment did not open a draft buffer")
+pr.composer_suggest()
+assert(
+  has_line(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(draft_win), 0, -1, false), "```suggestion"),
+  "draft suggestion block missing"
+)
+vim.fn.confirm = function()
+  return 1
+end
+pr.composer_cancel()
+vim.fn.confirm = original_confirm
+assert(not win_by_filetype("markdown"), "draft buffer stayed open after cancel")
 
 pr.toggle_viewed()
-assert(not pr.is_viewed_file("file.txt"), "viewed toggle did not mark file unviewed")
+assert(not api.is_viewed_file("file.txt"), "viewed toggle did not mark file unviewed")
 
 local native_select = nil
 local original_select = vim.ui.select
@@ -527,14 +718,14 @@ pr.config().viewed.sync = false
 pr.stop()
 pr.start()
 wait_for(function()
-  return pr.is_changed_file("file.txt")
+  return api.is_changed_file("file.txt")
 end, "changed file map did not reload")
-assert(not pr.is_viewed_file("file.txt"), "local unviewed state did not persist")
+assert(not api.is_viewed_file("file.txt"), "local unviewed state did not persist")
 
 pr.config().viewed.sync = true
 pr.sync_viewed()
 wait_for(function()
-  return pr.is_viewed_file("file.txt")
+  return api.is_viewed_file("file.txt")
 end, "GitHub viewed sync did not restore viewed state")
 
 vim.env.REVIEW_MODE_FAIL_MUTATION = "1"
@@ -569,7 +760,7 @@ local wedged_notifications = notification_count("Review Mode viewed sync queued"
 pr.flush_viewed_sync()
 pr.refresh()
 wait_for(function()
-  return pr.is_changed_file("file.txt")
+  return api.is_changed_file("file.txt")
 end, "refresh did not reload the changed file map")
 pr.flush_viewed_sync()
 wait_for(function()
@@ -598,20 +789,20 @@ end
 local Decorator = require("review_mode.integrations.nvim_tree")
 local decorator = setmetatable({}, { __index = Decorator })
 decorator:new()
-local tree_node = { absolute_path = vim.fs.joinpath(pr.root(), "file.txt") }
+local tree_node = { absolute_path = vim.fs.joinpath(api.root(), "file.txt") }
 local icons = decorator:icons(tree_node)
-assert(pr.unresolved_comment_count("file.txt") == 1, "unresolved file comment count was wrong")
+assert(api.unresolved_count("file.txt") == 1, "unresolved file comment count was wrong")
 assert(has_icon(icons, comment_sign .. " 1"), "nvim-tree comment marker missing")
 assert(has_icon(icons, "✓"), "nvim-tree viewed marker missing")
 assert(has_icon_hl(icons, "✓", "ReviewModeTreeViewed"), "nvim-tree viewed marker highlight was wrong")
 assert(not has_icon(icons, "☐"), "nvim-tree changed marker shown for viewed file")
 assert(decorator:highlight_group(tree_node) == "ReviewModeTreeViewed", "nvim-tree viewed file highlight was wrong")
 
-local unviewed_tree_node = { absolute_path = vim.fs.joinpath(pr.root(), "nested/other.txt") }
+local unviewed_tree_node = { absolute_path = vim.fs.joinpath(api.root(), "nested/other.txt") }
 icons = decorator:icons(unviewed_tree_node)
-assert(pr.unresolved_comment_count("nested/other.txt") == 1, "unresolved nested file comment count was wrong")
+assert(api.unresolved_count("nested/other.txt") == 1, "unresolved nested file comment count was wrong")
 assert(has_icon(icons, comment_sign .. " 1"), "nvim-tree nested comment marker missing")
-assert(pr.unviewed_count("nested/other.txt") == 1, "unviewed file count was wrong")
+assert(api.unviewed_count("nested/other.txt") == 1, "unviewed file count was wrong")
 assert(has_icon(icons, "☐ 1"), "nvim-tree changed marker missing for unviewed file")
 assert(has_icon_hl(icons, "☐ 1", "ReviewModeTreeChanged"), "nvim-tree changed marker highlight was wrong")
 assert(not has_icon(icons, "✓"), "nvim-tree viewed marker shown for unviewed file")
@@ -620,31 +811,31 @@ assert(
   "nvim-tree changed file highlight was wrong"
 )
 
-local dir_node = { absolute_path = vim.fs.joinpath(pr.root(), "nested") }
+local dir_node = { absolute_path = vim.fs.joinpath(api.root(), "nested") }
 local dir_icons = decorator:icons(dir_node)
-assert(pr.unresolved_comment_count("nested") == 1, "unresolved folder comment count was wrong")
+assert(api.unresolved_count("nested") == 1, "unresolved folder comment count was wrong")
 assert(has_icon(dir_icons, comment_sign .. " 1"), "nvim-tree folder comment marker missing")
-assert(pr.unviewed_count("nested") == 2, "unviewed folder count was wrong")
+assert(api.unviewed_count("nested") == 2, "unviewed folder count was wrong")
 assert(has_icon(dir_icons, "☐ 2"), "nvim-tree changed folder marker missing")
 assert(has_icon_hl(dir_icons, "☐ 2", "ReviewModeTreeChanged"), "nvim-tree changed folder marker highlight was wrong")
-assert(not pr.is_viewed_dir("nested"), "viewed dir state was true before all children were viewed")
+assert(not api.is_viewed_dir("nested"), "viewed dir state was true before all children were viewed")
 assert(decorator:highlight_group(dir_node) == "ReviewModeTreeChanged", "nvim-tree changed folder highlight was wrong")
 
 dir_node.open = true
 assert(decorator:icons(dir_node) == nil, "nvim-tree open folder markers should be hidden")
 dir_node.open = false
 
-local deep_dir_node = { absolute_path = vim.fs.joinpath(pr.root(), "nested/deeper") }
+local deep_dir_node = { absolute_path = vim.fs.joinpath(api.root(), "nested/deeper") }
 local deep_dir_icons = decorator:icons(deep_dir_node)
-assert(pr.unviewed_count("nested/deeper") == 1, "unviewed deep folder count was wrong")
+assert(api.unviewed_count("nested/deeper") == 1, "unviewed deep folder count was wrong")
 assert(has_icon(deep_dir_icons, "☐ 1"), "nvim-tree deep folder marker missing")
 
 pr.mark_viewed("nested/deeper/more.txt", { silent = true })
 wait_for(function()
-  return pr.is_viewed_dir("nested/deeper")
+  return api.is_viewed_dir("nested/deeper")
 end, "viewed deep dir state did not cascade after child was viewed")
-assert(pr.unviewed_count("nested/deeper") == 0, "unviewed deep folder count did not clear after child was viewed")
-assert(pr.unviewed_count("nested") == 1, "unviewed parent folder count did not update after deep child was viewed")
+assert(api.unviewed_count("nested/deeper") == 0, "unviewed deep folder count did not clear after child was viewed")
+assert(api.unviewed_count("nested") == 1, "unviewed parent folder count did not update after deep child was viewed")
 deep_dir_icons = decorator:icons(deep_dir_node)
 assert(has_icon(deep_dir_icons, "✓"), "nvim-tree viewed deep folder marker missing")
 assert(
@@ -654,9 +845,9 @@ assert(
 
 pr.mark_viewed("nested/other.txt", { silent = true })
 wait_for(function()
-  return pr.is_viewed_dir("nested")
+  return api.is_viewed_dir("nested")
 end, "viewed dir state did not cascade after all children were viewed")
-assert(pr.unviewed_count("nested") == 0, "unviewed folder count did not clear after children were viewed")
+assert(api.unviewed_count("nested") == 0, "unviewed folder count did not clear after children were viewed")
 dir_icons = decorator:icons(dir_node)
 assert(has_icon(dir_icons, comment_sign .. " 1"), "nvim-tree viewed folder comment marker missing")
 assert(has_icon(dir_icons, "✓"), "nvim-tree viewed folder marker missing")
@@ -664,11 +855,11 @@ assert(has_icon_hl(dir_icons, "✓", "ReviewModeTreeViewed"), "nvim-tree viewed 
 assert(decorator:highlight_group(dir_node) == "ReviewModeTreeViewed", "nvim-tree viewed folder highlight was wrong")
 
 -- a toggle must invalidate the rolled-up directory totals within the same turn
-local nested_unviewed = pr.unviewed_count("nested")
+local nested_unviewed = api.unviewed_count("nested")
 pr.toggle_viewed("nested/other.txt")
-assert(pr.unviewed_count("nested") == nested_unviewed + 1, "directory unviewed count was stale after toggle")
+assert(api.unviewed_count("nested") == nested_unviewed + 1, "directory unviewed count was stale after toggle")
 pr.toggle_viewed("nested/other.txt")
-assert(pr.unviewed_count("nested") == nested_unviewed, "directory unviewed count was stale after restoring toggle")
+assert(api.unviewed_count("nested") == nested_unviewed, "directory unviewed count was stale after restoring toggle")
 
 pr.config().nvim_tree.show_viewed = false
 icons = decorator:icons(tree_node)
@@ -690,20 +881,20 @@ pr.config().nvim_tree.show_comments = true
 vim.cmd.edit("file.txt")
 pr.toggle_comments()
 wait_for(function()
-  return pr.comment_count("file.txt") == 0 and #comment_marks() == 0
+  return api.comment_count("file.txt") == 0 and #comment_marks() == 0
 end, "comment toggle did not clear comment markers")
 pr.toggle_comments()
 wait_for(function()
-  return pr.comment_count("file.txt") == 2 and #comment_marks() == 2
+  return api.comment_count("file.txt") == 3 and #comment_marks() == 2
 end, "comment toggle did not restore comment markers")
 
 pr.toggle_viewed_feature()
 assert(not pr.config().viewed.enabled, "viewed feature toggle did not disable viewed tracking")
-assert(not pr.is_viewed_file("file.txt"), "viewed marker stayed active while viewed tracking disabled")
+assert(not api.is_viewed_file("file.txt"), "viewed marker stayed active while viewed tracking disabled")
 pr.toggle_viewed_feature()
 assert(pr.config().viewed.enabled, "viewed feature toggle did not enable viewed tracking")
 wait_for(function()
-  return pr.is_viewed_file("file.txt")
+  return api.is_viewed_file("file.txt")
 end, "viewed feature toggle did not restore viewed state")
 
 vim.api.nvim_win_set_cursor(0, { 1, 0 })
@@ -849,11 +1040,12 @@ wait_for(function()
   return vim.api.nvim_buf_get_name(0):find("new%.txt$", 1) ~= nil
 end, "added unified diff did not close")
 
+-- Switching layout with no diff open now shows the diff rather than silently
+-- changing a setting.
 pr.toggle_diff_layout()
-pr.old_toggle()
 wait_for(function()
   return #vim.api.nvim_list_wins() == 2
-end, "added file side-by-side diff did not open")
+end, "layout toggle did not open the diff when none was open")
 local added_base_lines = buffer_lines_matching("pr%-base://")
 assert(
   added_base_lines and #added_base_lines == 1 and added_base_lines[1] == "",
@@ -880,24 +1072,27 @@ vim.api.nvim_create_autocmd("User", {
 
 pr.start()
 wait_for(function()
-  return pr.is_changed_file("file.txt")
+  return api.is_changed_file("file.txt")
 end, "changed file map did not load for mode checks")
 vim.cmd.edit("file.txt")
 wait_for(function()
-  return pr.comment_count("file.txt") == 2 and #comment_marks() == 2
+  return api.comment_count("file.txt") == 3 and #comment_marks() == 2
 end, "comments did not load for mode checks")
 assert(pr.is_in_mode(), "review mode was not entered on start")
 assert(vim.g.review_mode == "mode", "review mode flag was wrong inside the mode")
+assert(pr.mode_text() == "REVIEW", "mode text did not report REVIEW inside the mode")
+assert(pr.mode_text({ label = "PR" }) == "PR", "mode text ignored a custom label")
 assert(vim.fn.maparg("]h", "n", false, true).desc == "review-mode ]h", "mode key was not installed")
 assert(has_value(mode_events, "ReviewModeStart"), "ReviewModeStart event did not fire")
 
 pr.leave()
 assert(not pr.is_in_mode(), "leaving did not clear the mode")
-assert(pr.is_active(), "leaving the mode must not end the review session")
-assert(pr.comment_count("file.txt") == 2, "leaving the mode dropped loaded comments")
+assert(api.is_active(), "leaving the mode must not end the review session")
+assert(api.comment_count("file.txt") == 3, "leaving the mode dropped loaded comments")
 assert(#comment_marks() == 2, "leaving the mode dropped comment signs")
 assert(vim.fn.maparg("]h", "n", false, true).desc == "user mapping", "the user's own mapping was not restored on leave")
 assert(vim.g.review_mode == "session", "review mode flag was wrong outside the mode")
+assert(pr.mode_text() == "NORMAL", "mode text did not fall back to the vim mode when stepped out")
 assert(pr.statusline():find("review", 1, true), "statusline lost the session while stepped out")
 assert(has_value(mode_events, "ReviewModeLeave"), "ReviewModeLeave event did not fire")
 
@@ -963,18 +1158,31 @@ package.preload["gitsigns"] = nil
 -- a commit made during the review has to join the review
 pr.start()
 wait_for(function()
-  return pr.is_changed_file("file.txt")
+  return api.is_changed_file("file.txt")
 end, "changed file map did not load for follow-HEAD checks")
 wait_for(function()
   return vim.g.review_mode ~= nil
 end, "review session did not start for follow-HEAD checks")
-assert(not pr.is_changed_file("followed.txt"), "follow-HEAD fixture file already existed")
+assert(not api.is_changed_file("followed.txt"), "follow-HEAD fixture file already existed")
 vim.fn.writefile({ "brand new" }, "followed.txt")
 vim.system({ "git", "add", "followed.txt" }, { text = true }):wait()
 vim.system({ "git", "commit", "-q", "-m", "followed" }, { text = true }):wait()
-assert(not pr.is_changed_file("followed.txt"), "review picked up the commit without being told HEAD moved")
+assert(not api.is_changed_file("followed.txt"), "review picked up the commit without being told HEAD moved")
 wait_for(function()
   vim.api.nvim_exec_autocmds("FocusGained", {})
-  return pr.is_changed_file("followed.txt")
+  return api.is_changed_file("followed.txt")
 end, "review did not follow a commit made during the review")
+
+-- Ending the session with the panel open must tear it down without re-entering
+-- the close path through WinClosed.
+vim.cmd.edit("file.txt")
+pr.toggle_panel()
+assert(pr.panel_is_open(), "panel did not open before stop")
 pr.stop()
+assert(not pr.panel_is_open(), "stopping the session left the panel open")
+for _, winid in ipairs(vim.api.nvim_list_wins()) do
+  assert(
+    vim.bo[vim.api.nvim_win_get_buf(winid)].filetype ~= "review-thread",
+    "stopping the session left a panel window behind"
+  )
+end

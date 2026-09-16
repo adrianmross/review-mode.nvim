@@ -1,4 +1,4 @@
-local state = require("review_mode")
+local api = require("review_mode.api")
 
 local Decorator = require("nvim-tree.renderer.decorator"):extend()
 
@@ -11,7 +11,7 @@ local function ensure_highlights()
 end
 
 local function comment_config()
-  local config = state.config()
+  local config = api.config()
   return config.comments or {}
 end
 
@@ -26,7 +26,7 @@ end
 local relpath_cache = setmetatable({}, { __mode = "k" })
 
 local function relpath(node)
-  local root = state.root()
+  local root = api.root()
   if not root or not node.absolute_path then
     return nil
   end
@@ -51,7 +51,7 @@ local function relpath(node)
 end
 
 function Decorator:changed_icon(rel, show_unviewed_count)
-  local count = show_unviewed_count and state.unviewed_count(rel) or 0
+  local count = show_unviewed_count and api.unviewed_count(rel) or 0
   local label = count > 0 and string.format("☐ %d", count) or "☐"
   return { str = label, hl = { changed_hl } }
 end
@@ -68,18 +68,18 @@ function Decorator:icons(node)
   ensure_highlights()
 
   local rel = relpath(node)
-  if not rel or not state.is_active() then
+  if not rel or not api.is_active() then
     return nil
   end
 
-  if state.is_changed_file(rel) then
-    local config = state.config()
+  if api.is_changed_file(rel) then
+    local config = api.config()
     local icons = {}
-    local comments = config.nvim_tree.show_comments and state.unresolved_comment_count(rel) or 0
+    local comments = config.nvim_tree.show_comments and api.unresolved_count(rel) or 0
     if comments > 0 then
       icons[#icons + 1] = self:comment_icon(comments)
     end
-    if config.nvim_tree.show_viewed and state.is_viewed_file(rel) then
+    if config.nvim_tree.show_viewed and api.is_viewed_file(rel) then
       icons[#icons + 1] = self.viewed_icon
     else
       icons[#icons + 1] = self:changed_icon(rel, config.nvim_tree.show_viewed)
@@ -87,18 +87,18 @@ function Decorator:icons(node)
     return icons
   end
 
-  if state.is_changed_dir(rel) then
+  if api.is_changed_dir(rel) then
     if node.open then
       return nil
     end
 
-    local config = state.config()
+    local config = api.config()
     local icons = {}
-    local comments = config.nvim_tree.show_comments and state.unresolved_comment_count(rel) or 0
+    local comments = config.nvim_tree.show_comments and api.unresolved_count(rel) or 0
     if comments > 0 then
       icons[#icons + 1] = self:comment_icon(comments)
     end
-    if config.nvim_tree.show_viewed and state.is_viewed_dir(rel) then
+    if config.nvim_tree.show_viewed and api.is_viewed_dir(rel) then
       icons[#icons + 1] = self.viewed_icon
       return icons
     end
@@ -113,21 +113,21 @@ function Decorator:highlight_group(node)
   ensure_highlights()
 
   local rel = relpath(node)
-  if not rel or not state.is_active() then
+  if not rel or not api.is_active() then
     return nil
   end
 
-  if state.is_changed_file(rel) then
-    local config = state.config()
-    if config.nvim_tree.show_viewed and state.is_viewed_file(rel) then
+  if api.is_changed_file(rel) then
+    local config = api.config()
+    if config.nvim_tree.show_viewed and api.is_viewed_file(rel) then
       return viewed_hl
     end
     return changed_hl
   end
 
-  if state.is_changed_dir(rel) then
-    local config = state.config()
-    if config.nvim_tree.show_viewed and state.is_viewed_dir(rel) then
+  if api.is_changed_dir(rel) then
+    local config = api.config()
+    if config.nvim_tree.show_viewed and api.is_viewed_dir(rel) then
       return viewed_hl
     end
     return changed_hl

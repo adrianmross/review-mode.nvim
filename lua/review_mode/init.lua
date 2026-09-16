@@ -1,256 +1,57 @@
 local M = {}
 
-local ns = vim.api.nvim_create_namespace("review_mode_normal")
-local diff_ns = vim.api.nvim_create_namespace("review_mode_diff")
-local picker_ns = vim.api.nvim_create_namespace("review_mode_picker")
-local cache_dir = vim.fs.joinpath(vim.fn.stdpath("cache"), "review-mode-comments")
-local default_comment_sign_text = ""
-local defaults = {
-  auto_open_first_change = true,
-  follow_head = true,
-  comments = {
-    enabled = true,
-    cache_ttl_seconds = 300,
-    sign_text = default_comment_sign_text,
-    sign_hl_group = "DiagnosticInfo",
-    virtual_text = true,
-  },
-  diff = {
-    fast_diffopt = "internal,filler,closeoff,indent-heuristic,linematch:0",
-    full_file = false,
-    layout = "side_by_side",
-    partial_line_highlights = true,
-    unified_context = 3,
-    use_fast_diffopt = true,
-  },
-  gitsigns = {
-    enabled = true,
-  },
-  nvim_tree = {
-    enabled = true,
-    show_comments = true,
-    show_viewed = true,
-  },
-  mode = {
-    enabled = true,
-    workspace = "inplace",
-    signs_when_out = true,
-    gitsigns_follows = true,
-    keys = {
-      ["]h"] = "next_hunk",
-      ["[h"] = "prev_hunk",
-      ["]c"] = "next_comment",
-      ["[c"] = "prev_comment",
-      ["]f"] = "next_file",
-      ["[f"] = "prev_file",
-      ["<Tab>"] = "mark_viewed_next",
-      ["<S-Tab>"] = "toggle_viewed",
-      ["<Esc>"] = "leave",
-    },
-  },
-  picker = {
-    provider = "auto",
-  },
-  viewed = {
-    enabled = true,
-    sync = false,
-    state_path = nil,
-  },
-  performance = {
-    ui_refresh_debounce_ms = 50,
-    hunk_prefetch = {
-      enabled = true,
-      count = 8,
-      concurrency = 2,
-      focused_delay_ms = 0,
-      gitsigns_delay_ms = 5,
-    },
-    background_hunk_scan = {
-      enabled = true,
-      max_files = 5000,
-      delay_ms = 250,
-    },
-  },
-  commands = true,
-}
+local comments_ui = require("review_mode.comments")
+local core = require("review_mode.state")
+local util = require("review_mode.util")
+local diff = require("review_mode.diff")
+local hooks = require("review_mode.hooks")
+local api = require("review_mode.api")
+local picker = require("review_mode.picker")
+local panel = require("review_mode.panel")
 
-local state = {
-  active = false,
-  config = vim.deepcopy(defaults),
-  repo = nil,
-  pr = nil,
-  base = nil,
-  head = nil,
-  root = nil,
-  files = {},
-  file_stats = {},
-  file_order = {},
-  file_index = {},
-  dirs = {},
-  hunks = {},
-  hunks_loaded = {},
-  hunks_loading = {},
-  hunk_callbacks = {},
-  prefetch_queue = {},
-  prefetch_seen = {},
-  prefetch_active = 0,
-  background_hunk_scan_loading = false,
-  comments = {},
-  comment_threads = {},
-  comments_loading = false,
-  viewed = {},
-  viewed_order = {},
-  viewed_sync_queue = {},
-  viewed_store = nil,
-  dir_totals = nil,
-  viewed_loading = false,
-  viewed_sync_loading = false,
-  pr_node_id = nil,
-  generation = 0,
-  maps_loaded = false,
-  maps_loading = false,
-  metadata_loaded = false,
-  ui_refresh_pending = false,
-  old_win = nil,
-  old_buf = nil,
-  old_target_win = nil,
-  old_target_buf = nil,
-  old_loading = false,
-  old_diffopt = nil,
-  old_fold_options = nil,
-  old_layout = nil,
-  old_path = nil,
-  old_closing = false,
-  gitsigns_base_applied = false,
-  in_mode = false,
-  head_log_path = nil,
-  head_log_stamp = nil,
-  saved_keys = {},
-  workspace_tab = nil,
-  return_tab = nil,
-}
+-- panel entry points stay on the module root so keymaps and commands keep working
+M.list_viewed = picker.list_viewed
+M.actions = function()
+  return picker.actions(M.action_items())
+end
+M.open_panel = panel.open_panel
+M.close_panel = panel.close_panel
+M.toggle_panel = panel.toggle_panel
+M.panel_is_open = panel.panel_is_open
+M.panel_win = panel.panel_win
+M.show_thread = panel.show_thread
+M.reply = panel.reply
+M.compose_comment = panel.compose_comment
+M.apply_suggestion = panel.apply_suggestion
+M.composer_submit = panel.composer_submit
+M.composer_cancel = panel.composer_cancel
+M.composer_reference = panel.composer_reference
+M.composer_suggest = panel.composer_suggest
+local viewed_state = require("review_mode.viewed")
+local github = require("review_mode.github")
+
+M.flush_viewed_sync = viewed_state.flush_viewed_sync
+
+local state = core.state
+local trim = util.trim
+local system_async = util.system_async
+local gh_json_async = util.gh_json_async
+local ensure_active = util.ensure_active
+local current_relpath = util.current_relpath
+local buf_relpath = util.buf_relpath
+local defaults = core.defaults
+
+local ns = vim.api.nvim_create_namespace("review_mode_normal")
+local picker_ns = vim.api.nvim_create_namespace("review_mode_picker")
+local panel_ns = vim.api.nvim_create_namespace("review_mode_panel")
 
 local setup_done = false
-local diff_text_hl = "ReviewModeDiffText"
-local diff_text_priority = 1000
-local close_old_view
-
-local function comment_sign_text()
-  local comments_config = state.config.comments or {}
-  return comments_config.sign_text or default_comment_sign_text
-end
-
-local function comment_count_label(count)
-  return string.format("%s %d", comment_sign_text(), count)
-end
-
-local function normalize_config(opts)
-  opts = opts or {}
-  local config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts)
-  if config.diff.layout ~= "side_by_side" and config.diff.layout ~= "unified" then
-    config.diff.layout = defaults.diff.layout
-  end
-  config.diff.unified_context = math.max(0, tonumber(config.diff.unified_context) or defaults.diff.unified_context)
-
-  local mode = config.mode or {}
-  if mode.workspace ~= "inplace" and mode.workspace ~= "tab" then
-    mode.workspace = defaults.mode.workspace
-  end
-  if type(mode.keys) ~= "table" then
-    mode.keys = {}
-  end
-  config.mode = mode
-
-  local picker = config.picker or {}
-  if
-    picker.provider ~= "auto"
-    and picker.provider ~= "native"
-    and picker.provider ~= "snacks"
-    and picker.provider ~= "telescope"
-  then
-    picker.provider = defaults.picker.provider
-  end
-  config.picker = picker
-
-  return config
-end
-
-local function env_value(name)
-  local value = vim.env[name]
-  if value and value ~= "" then
-    return value
-  end
-  return nil
-end
-
-local function trim(value)
-  return vim.trim(value or "")
-end
-
-local function system(args, opts)
-  opts = opts or {}
-  local result = vim.system(args, { text = true, cwd = opts.cwd or state.root or vim.uv.cwd() }):wait()
-  if result.code ~= 0 then
-    return nil, trim(result.stderr ~= "" and result.stderr or result.stdout)
-  end
-  if opts.raw then
-    return result.stdout
-  end
-  return trim(result.stdout)
-end
-
-local function system_async(args, opts, callback)
-  opts = opts or {}
-  vim.system(args, { text = true, cwd = opts.cwd or state.root or vim.uv.cwd() }, function(result)
-    vim.schedule(function()
-      if result.code ~= 0 then
-        callback(nil, trim(result.stderr ~= "" and result.stderr or result.stdout))
-        return
-      end
-      if opts.raw then
-        callback(result.stdout, nil)
-        return
-      end
-      callback(trim(result.stdout), nil)
-    end)
-  end)
-end
-
-local function gh_json_async(args, callback)
-  local full = vim.list_extend({ "gh" }, args)
-  system_async(full, {}, function(stdout, err)
-    if not stdout then
-      callback(nil, err)
-      return
-    end
-    local ok, decoded = pcall(vim.json.decode, stdout)
-    if not ok then
-      callback(nil, "Failed to decode gh JSON output")
-      return
-    end
-    callback(decoded, nil)
-  end)
-end
-
-local function open_lines_preview(lines, filetype, opts)
-  opts = opts or {}
-  local preview_filetype = filetype or "markdown"
-  local bufnr = vim.lsp.util.open_floating_preview(lines, preview_filetype, {
-    border = "rounded",
-    focusable = true,
-    max_width = opts.max_width or math.floor(vim.o.columns * 0.75),
-    max_height = opts.max_height or math.floor(vim.o.lines * 0.65),
-  })
-  if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
-    vim.bo[bufnr].filetype = preview_filetype
-  end
-end
 
 local function active_pr_arg()
   if state.pr and state.pr ~= "" then
     return tostring(state.pr)
   end
-  return env_value("GH_REVIEW_PR")
+  return util.env_value("GH_REVIEW_PR")
 end
 
 local function pr_url_async(callback)
@@ -263,17 +64,15 @@ local function pr_url_async(callback)
   system_async(vim.list_extend({ "gh" }, args), {}, callback)
 end
 
-local is_current
-
 local function repo_slug_async(generation, callback)
-  local repo = env_value("GH_REVIEW_REPO")
+  local repo = util.env_value("GH_REVIEW_REPO")
   if repo then
     callback(repo, nil)
     return
   end
 
   system_async({ "gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner" }, {}, function(slug, err)
-    if not is_current(generation) then
+    if not core.is_current(generation) then
       return
     end
     callback(slug, err)
@@ -286,7 +85,7 @@ local function pr_view_args()
     "view",
   }
 
-  local pr = env_value("GH_REVIEW_PR")
+  local pr = util.env_value("GH_REVIEW_PR")
   if pr then
     args[#args + 1] = pr
   end
@@ -300,339 +99,11 @@ end
 
 local function pr_meta_async(generation, callback)
   gh_json_async(pr_view_args(), function(meta, err)
-    if not is_current(generation) then
+    if not core.is_current(generation) then
       return
     end
     callback(meta, err)
   end)
-end
-
-local function repo_root()
-  local cwd = vim.uv.cwd()
-  if vim.fs.root then
-    local root = vim.fs.root(cwd, ".git")
-    if root then
-      return root
-    end
-  end
-  return system({ "git", "rev-parse", "--show-toplevel" }, { cwd = cwd })
-end
-
-local function base_ref()
-  local base = state.base or "main"
-  if base:match("^origin/") or base:match("^refs/") or base:match("^%x%x%x%x%x%x%x+") then
-    return base
-  end
-  return "origin/" .. base
-end
-
-local function cache_key()
-  if not state.repo or not state.pr then
-    return nil
-  end
-  return string.format("%s#%s", state.repo, state.pr)
-end
-
-local function next_generation()
-  state.generation = state.generation + 1
-  return state.generation
-end
-
-is_current = function(generation)
-  return state.active and state.generation == generation
-end
-
-local function reset_changed_data()
-  state.files = {}
-  state.file_stats = {}
-  state.file_order = {}
-  state.file_index = {}
-  state.dirs = {}
-  state.hunks = {}
-  state.hunks_loaded = {}
-  state.hunks_loading = {}
-  state.hunk_callbacks = {}
-  state.prefetch_queue = {}
-  state.prefetch_seen = {}
-  state.prefetch_active = 0
-  state.background_hunk_scan_loading = false
-  state.maps_loaded = false
-  state.maps_loading = false
-end
-
-local function reset_review_data()
-  reset_changed_data()
-  state.comments = {}
-  state.comment_threads = {}
-  state.comments_loading = false
-  state.viewed = {}
-  state.viewed_order = {}
-  state.viewed_sync_queue = {}
-  state.viewed_loading = false
-  state.viewed_sync_loading = false
-  state.pr_node_id = nil
-end
-
-local function split_blob_lines(content)
-  local lines = vim.split(content or "", "\n", { plain = true })
-  if #lines > 1 and lines[#lines] == "" then
-    table.remove(lines, #lines)
-  end
-  return lines
-end
-
-local function read_json_file(path)
-  local fd = vim.uv.fs_open(path, "r", 420)
-  if not fd then
-    return nil
-  end
-
-  local stat = vim.uv.fs_fstat(fd)
-  local content = stat and vim.uv.fs_read(fd, stat.size, 0) or nil
-  vim.uv.fs_close(fd)
-
-  if not content or content == "" then
-    return nil
-  end
-
-  local ok, decoded = pcall(vim.json.decode, content)
-  if not ok or type(decoded) ~= "table" then
-    return nil
-  end
-
-  return decoded
-end
-
-local function write_json_file(path, value)
-  local dir = vim.fs.dirname(path)
-  if dir then
-    vim.fn.mkdir(dir, "p")
-  end
-  vim.fn.writefile({ vim.json.encode(value) }, path)
-end
-
-local function cache_path(key)
-  return vim.fs.joinpath(cache_dir, key:gsub("[^%w_.-]", "_") .. ".json")
-end
-
-local function read_comment_cache(key)
-  return read_json_file(cache_path(key))
-end
-
--- one file per PR is written forever otherwise, and each one holds every review
--- comment body for that PR
-local comment_cache_max_age_seconds = 30 * 24 * 60 * 60
-local comment_cache_pruned = false
-
-local function prune_comment_cache()
-  local cutoff = os.time() - comment_cache_max_age_seconds
-  for name, kind in vim.fs.dir(cache_dir) do
-    if kind == "file" and name:match("%.json$") then
-      local path = vim.fs.joinpath(cache_dir, name)
-      local stat = vim.uv.fs_stat(path)
-      if stat and stat.mtime and stat.mtime.sec < cutoff then
-        vim.uv.fs_unlink(path)
-      end
-    end
-  end
-end
-
-local function write_comment_cache_entry(key, grouped, threads)
-  pcall(write_json_file, cache_path(key), { fetched_at = os.time(), grouped = grouped, threads = threads or {} })
-
-  if comment_cache_pruned then
-    return
-  end
-
-  -- one attempt per session either way: a scan that fails once will fail again,
-  -- and it must not take the cache write down with it
-  comment_cache_pruned = true
-  pcall(prune_comment_cache)
-end
-
-local function group_comments(comments)
-  local grouped = {}
-  for _, comment in ipairs(comments or {}) do
-    if comment.path then
-      grouped[comment.path] = grouped[comment.path] or {}
-      table.insert(grouped[comment.path], comment)
-    end
-  end
-  return grouped
-end
-
-local function normalize_thread_comment(thread, comment)
-  local path = comment.path or thread.path
-  if not path then
-    return nil
-  end
-
-  return {
-    id = comment.databaseId or comment.fullDatabaseId or comment.id,
-    node_id = comment.id,
-    thread_id = thread.id,
-    path = path,
-    line = comment.line or thread.line,
-    original_line = comment.originalLine or thread.originalLine,
-    start_line = comment.startLine or thread.startLine,
-    body = comment.body,
-    user = comment.author and { login = comment.author.login } or nil,
-    is_resolved = thread.isResolved == true,
-    is_outdated = thread.isOutdated == true,
-  }
-end
-
-local function group_review_threads(threads)
-  local grouped = {}
-  local by_path = {}
-  for _, thread in ipairs(threads or {}) do
-    if thread.path then
-      by_path[thread.path] = by_path[thread.path] or {}
-      by_path[thread.path][#by_path[thread.path] + 1] = thread
-    end
-
-    local comments = thread.comments and thread.comments.nodes or {}
-    for _, comment in ipairs(comments) do
-      local normalized = normalize_thread_comment(thread, comment)
-      if normalized then
-        grouped[normalized.path] = grouped[normalized.path] or {}
-        grouped[normalized.path][#grouped[normalized.path] + 1] = normalized
-      end
-    end
-  end
-
-  return grouped, by_path
-end
-
-local function hydrate_comments()
-  local key = cache_key()
-  if not key then
-    return false
-  end
-
-  local cached = read_comment_cache(key)
-  if not cached or type(cached.grouped) ~= "table" then
-    return false
-  end
-
-  state.comments = cached.grouped
-  state.comment_threads = cached.threads or {}
-  return (os.time() - tonumber(cached.fetched_at or 0)) < state.config.comments.cache_ttl_seconds
-end
-
-local function viewed_state_path()
-  return state.config.viewed.state_path or vim.fs.joinpath(vim.fn.stdpath("state"), "review-mode-state.json")
-end
-
-local function load_viewed_store()
-  if state.viewed_store then
-    return state.viewed_store
-  end
-
-  state.viewed_store = read_json_file(viewed_state_path()) or {}
-  return state.viewed_store
-end
-
-local function viewed_state_entry()
-  local key = cache_key()
-  if not key then
-    return nil
-  end
-
-  local store = load_viewed_store()
-  store[key] = store[key] or { viewed = {}, order = {}, sync_queue = {} }
-  store[key].viewed = store[key].viewed or {}
-  store[key].order = store[key].order or {}
-  store[key].sync_queue = store[key].sync_queue or {}
-  return store[key]
-end
-
-local function add_viewed_order(path)
-  if vim.tbl_contains(state.viewed_order, path) then
-    return
-  end
-  state.viewed_order[#state.viewed_order + 1] = path
-end
-
-local function remove_viewed_order(path)
-  for index, item in ipairs(state.viewed_order) do
-    if item == path then
-      table.remove(state.viewed_order, index)
-      return
-    end
-  end
-end
-
-local function persist_viewed_state()
-  if not state.config.viewed.enabled then
-    return
-  end
-
-  local entry = viewed_state_entry()
-  if not entry then
-    return
-  end
-
-  entry.viewed = state.viewed
-  entry.order = state.viewed_order
-  entry.sync_queue = state.viewed_sync_queue
-  local ok, err = pcall(write_json_file, viewed_state_path(), load_viewed_store())
-  if not ok then
-    vim.notify("Review Mode viewed state: " .. tostring(err), vim.log.levels.WARN)
-  end
-end
-
-local function load_viewed_state()
-  state.viewed = {}
-  state.viewed_order = {}
-
-  if not state.config.viewed.enabled then
-    return
-  end
-
-  local entry = viewed_state_entry()
-  if not entry then
-    return
-  end
-
-  state.viewed = vim.deepcopy(entry.viewed or {})
-  state.viewed_order = vim.deepcopy(entry.order or {})
-  state.viewed_sync_queue = vim.deepcopy(entry.sync_queue or {})
-end
-
-local function set_viewed_path(path, viewed)
-  if not path or not state.config.viewed.enabled then
-    return false
-  end
-
-  state.dir_totals = nil
-
-  if viewed then
-    state.viewed[path] = true
-    add_viewed_order(path)
-    return true
-  end
-
-  state.viewed[path] = nil
-  remove_viewed_order(path)
-  return false
-end
-
-local function buf_relpath(bufnr)
-  bufnr = bufnr or 0
-  if bufnr ~= 0 and not vim.api.nvim_buf_is_valid(bufnr) then
-    return nil
-  end
-
-  local name = vim.api.nvim_buf_get_name(bufnr or 0)
-  if name == "" or not state.root then
-    return nil
-  end
-  return vim.fs.relpath(state.root, name)
-end
-
-local function current_relpath()
-  return buf_relpath(0)
 end
 
 local function current_file_index(path)
@@ -641,11 +112,6 @@ local function current_file_index(path)
     return nil
   end
   return state.file_index[path]
-end
-
-local function clamp_line(line)
-  local max_line = math.max(vim.api.nvim_buf_line_count(0), 1)
-  return math.max(1, math.min(line or 1, max_line))
 end
 
 local function jump_to_path(path, line)
@@ -658,7 +124,7 @@ local function jump_to_path(path, line)
     if target_win and vim.api.nvim_win_is_valid(target_win) then
       vim.api.nvim_set_current_win(target_win)
     end
-    close_old_view()
+    diff.close_old_view()
   end
 
   local full_path = vim.fs.joinpath(state.root, path)
@@ -668,7 +134,7 @@ local function jump_to_path(path, line)
     vim.cmd.edit(vim.fn.fnameescape(path))
   end
 
-  vim.api.nvim_win_set_cursor(0, { clamp_line(line), 0 })
+  vim.api.nvim_win_set_cursor(0, { util.clamp_line(line), 0 })
   vim.cmd("normal! zz")
   return true
 end
@@ -715,17 +181,6 @@ local function comment_positions()
   return positions
 end
 
-local function comment_summary(comment)
-  local body = trim((comment.body or ""):match("([^\n\r]+)") or "")
-  if body == "" then
-    body = "comment"
-  elseif #body > 80 then
-    body = body:sub(1, 77) .. "..."
-  end
-  local author = comment.user and comment.user.login or "reviewer"
-  return string.format("%s: %s", author, body)
-end
-
 local function clear_buffer_marks(bufnr)
   if vim.api.nvim_buf_is_valid(bufnr) then
     vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
@@ -751,25 +206,44 @@ local function annotate_buffer(bufnr)
     return
   end
 
+  api.ensure_highlights()
+
   local grouped = {}
-  for _, comment in ipairs(comments) do
-    local line = tonumber(comment.line) or tonumber(comment.original_line)
+  for _, thread in ipairs(comments_ui.threads(comments, path)) do
+    local line = thread.line
     if line then
       grouped[line] = grouped[line] or {}
-      table.insert(grouped[line], comment)
+      table.insert(grouped[line], thread)
     end
   end
 
-  for line, line_comments in pairs(grouped) do
-    local sign_hl = state.config.comments.sign_hl_group or "DiagnosticInfo"
-    vim.api.nvim_buf_set_extmark(bufnr, ns, line - 1, 0, {
-      sign_text = comment_sign_text(),
-      sign_hl_group = sign_hl,
-      virt_text = state.config.comments.virtual_text and {
+  local default_sign_hl = state.config.comments.sign_hl_group or "DiagnosticInfo"
+  for line, line_threads in pairs(grouped) do
+    local thread = line_threads[#line_threads]
+    local sign_hl = default_sign_hl
+    if thread.is_resolved then
+      sign_hl = "ReviewModeResolved"
+    elseif thread.is_outdated then
+      sign_hl = "ReviewModeOutdated"
+    end
+
+    local virt_text
+    if state.config.comments.virtual_text then
+      local summary, badges = comments_ui.virtual_text(thread, { max_width = 72 })
+      virt_text = {
         { "\t", "NonText" },
         { "■", sign_hl },
-        { " " .. comment_summary(line_comments[#line_comments]), "DiagnosticVirtualTextInfo" },
-      } or nil,
+        { " " .. summary, "DiagnosticVirtualTextInfo" },
+      }
+      if badges then
+        virt_text[#virt_text + 1] = { badges, "ReviewModeReaction" }
+      end
+    end
+
+    vim.api.nvim_buf_set_extmark(bufnr, ns, line - 1, 0, {
+      sign_text = api.comment_sign(),
+      sign_hl_group = sign_hl,
+      virt_text = virt_text,
       virt_text_pos = "eol",
       priority = 160,
     })
@@ -797,6 +271,7 @@ end
 local function refresh_comments_ui()
   annotate_open_buffers()
   refresh_tree()
+  panel.schedule_refresh()
 end
 
 local function schedule_comments_ui_refresh()
@@ -811,485 +286,16 @@ local function schedule_comments_ui_refresh()
   end, state.config.performance.ui_refresh_debounce_ms)
 end
 
-local function repo_parts()
-  local owner, name = tostring(state.repo or ""):match("^([^/]+)/(.+)$")
-  return owner, name
-end
-
-local function rest_comments_async(generation, page, comments, callback)
-  if not state.repo or not state.pr then
-    callback(nil, "could not determine GitHub repository or PR")
-    return
-  end
-
-  gh_json_async({
-    "api",
-    string.format("repos/%s/pulls/%s/comments?per_page=100&page=%d", state.repo, state.pr, page),
-  }, function(result, err)
-    if not is_current(generation) then
-      return
-    end
-
-    if not result then
-      callback(nil, err)
-      return
-    end
-
-    vim.list_extend(comments, result)
-    if #result == 100 then
-      rest_comments_async(generation, page + 1, comments, callback)
-      return
-    end
-
-    callback(comments, nil)
-  end)
-end
-
-local function review_threads_async(generation, after, threads, callback)
-  local owner, name = repo_parts()
-  if not owner or not name or not state.pr then
-    callback(nil, "could not determine GitHub repository or PR")
-    return
-  end
-
-  local query = [[
-query($owner: String!, $name: String!, $number: Int!, $after: String) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
-      reviewThreads(first: 50, after: $after) {
-        pageInfo {
-          hasNextPage
-          endCursor
-        }
-        nodes {
-          id
-          path
-          line
-          originalLine
-          startLine
-          isResolved
-          isOutdated
-          comments(first: 100) {
-            nodes {
-              id
-              databaseId
-              body
-              path
-              line
-              originalLine
-              startLine
-              author {
-                login
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-}
-]]
-
-  local args = {
-    "api",
-    "graphql",
-    "-f",
-    "query=" .. query,
-    "-F",
-    "owner=" .. owner,
-    "-F",
-    "name=" .. name,
-    "-F",
-    "number=" .. tostring(state.pr),
-  }
-
-  if after then
-    vim.list_extend(args, { "-F", "after=" .. after })
-  end
-
-  gh_json_async(args, function(result, err)
-    if not is_current(generation) then
-      return
-    end
-
-    if not result then
-      callback(nil, err)
-      return
-    end
-
-    local pr = result.data and result.data.repository and result.data.repository.pullRequest
-    local review_threads = pr and pr.reviewThreads
-    if not review_threads then
-      callback(nil, "GitHub review thread query returned no review threads")
-      return
-    end
-
-    vim.list_extend(threads, review_threads.nodes or {})
-    local page_info = review_threads.pageInfo or {}
-    if page_info.hasNextPage and page_info.endCursor then
-      review_threads_async(generation, page_info.endCursor, threads, callback)
-      return
-    end
-
-    callback(threads, nil)
-  end)
-end
-
-local function load_comments_from_rest_async(generation)
-  rest_comments_async(generation, 1, {}, function(comments, err)
-    if not is_current(generation) then
-      return
-    end
-
-    state.comments_loading = false
-    if not comments then
-      vim.notify("Failed to load PR comments: " .. tostring(err or "unknown error"), vim.log.levels.WARN)
-      return
-    end
-
-    state.comments = group_comments(comments)
-    state.comment_threads = {}
-    local key = cache_key()
-    if key then
-      write_comment_cache_entry(key, state.comments, state.comment_threads)
-    end
-    schedule_comments_ui_refresh()
-  end)
-end
-
-local function load_comments_async(opts)
-  opts = opts or {}
-  if
-    not state.config.comments.enabled
-    or not state.active
-    or state.comments_loading
-    or not state.repo
-    or not state.pr
-  then
-    return
-  end
-
-  local generation = state.generation
-  -- after a write the cache is stale by definition, so never serve it back
-  local fresh = not opts.force and hydrate_comments()
+-- The feature modules announce changes instead of reaching into the UI, so the
+-- redraw is wired up here, once. Registered after the function it calls, or the
+-- closure would capture a global instead of the local.
+hooks.on("viewed_changed", function()
   schedule_comments_ui_refresh()
-  if fresh then
-    return
-  end
+end)
 
-  state.comments_loading = true
-  review_threads_async(generation, nil, {}, function(threads, err)
-    if not is_current(generation) then
-      return
-    end
-
-    if not threads then
-      load_comments_from_rest_async(generation)
-      return
-    end
-
-    state.comments, state.comment_threads = group_review_threads(threads)
-    local key = cache_key()
-    if key then
-      write_comment_cache_entry(key, state.comments, state.comment_threads)
-    end
-    state.comments_loading = false
-    schedule_comments_ui_refresh()
-  end)
-end
-
-local function github_viewed_files_async(generation, after, viewed, callback)
-  local owner, name = repo_parts()
-  if not owner or not name or not state.pr then
-    callback(nil, "could not determine GitHub repository or PR")
-    return
-  end
-
-  local query = [[
-query($owner: String!, $name: String!, $number: Int!, $after: String) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
-      id
-      files(first: 100, after: $after) {
-        pageInfo {
-          hasNextPage
-          endCursor
-        }
-        nodes {
-          path
-          viewerViewedState
-        }
-      }
-    }
-  }
-}
-]]
-
-  local args = {
-    "api",
-    "graphql",
-    "-f",
-    "query=" .. query,
-    "-F",
-    "owner=" .. owner,
-    "-F",
-    "name=" .. name,
-    "-F",
-    "number=" .. tostring(state.pr),
-  }
-
-  if after then
-    vim.list_extend(args, { "-F", "after=" .. after })
-  end
-
-  gh_json_async(args, function(result, err)
-    if not is_current(generation) then
-      return
-    end
-
-    if not result then
-      callback(nil, err or "GitHub viewed state query failed")
-      return
-    end
-
-    local pr = result.data and result.data.repository and result.data.repository.pullRequest
-    local files = pr and pr.files
-    if not pr or not files then
-      callback(nil, "GitHub viewed state query returned no PR files")
-      return
-    end
-
-    state.pr_node_id = pr.id
-    for _, file in ipairs(files.nodes or {}) do
-      if file.path and file.viewerViewedState == "VIEWED" then
-        viewed[file.path] = true
-      end
-    end
-
-    local page_info = files.pageInfo or {}
-    if page_info.hasNextPage and page_info.endCursor then
-      github_viewed_files_async(generation, page_info.endCursor, viewed, callback)
-      return
-    end
-
-    callback(viewed, nil)
-  end)
-end
-
-local function refresh_viewed_order()
-  local ordered = {}
-  for _, path in ipairs(state.file_order) do
-    if state.viewed[path] then
-      ordered[#ordered + 1] = path
-    end
-  end
-  state.viewed_order = ordered
-end
-
-local function apply_queued_viewed_changes()
-  for path, viewed in pairs(state.viewed_sync_queue or {}) do
-    set_viewed_path(path, viewed == true)
-  end
-end
-
-local function sync_viewed_from_github_async(generation, force)
-  if
-    not state.config.viewed.enabled
-    or (not force and not state.config.viewed.sync)
-    or state.viewed_loading
-    or not state.repo
-    or not state.pr
-  then
-    return
-  end
-
-  state.viewed_loading = true
-  github_viewed_files_async(generation, nil, {}, function(viewed, err)
-    state.viewed_loading = false
-    if not is_current(generation) then
-      return
-    end
-
-    if not viewed then
-      vim.notify("Review Mode viewed sync failed: " .. tostring(err or "unknown error"), vim.log.levels.WARN)
-      return
-    end
-
-    state.viewed = viewed
-    apply_queued_viewed_changes()
-    refresh_viewed_order()
-    persist_viewed_state()
-    schedule_comments_ui_refresh()
-    vim.schedule(function()
-      M.flush_viewed_sync()
-    end)
-  end)
-end
-
-local function github_pr_node_id_async(generation, callback)
-  if state.pr_node_id then
-    callback(state.pr_node_id, nil)
-    return
-  end
-
-  local owner, name = repo_parts()
-  if not owner or not name or not state.pr then
-    callback(nil, "could not determine GitHub repository or PR")
-    return
-  end
-
-  local query = [[
-query($owner: String!, $name: String!, $number: Int!) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
-      id
-    }
-  }
-}
-]]
-
-  gh_json_async({
-    "api",
-    "graphql",
-    "-f",
-    "query=" .. query,
-    "-F",
-    "owner=" .. owner,
-    "-F",
-    "name=" .. name,
-    "-F",
-    "number=" .. tostring(state.pr),
-  }, function(result, err)
-    if not is_current(generation) then
-      return
-    end
-
-    local pr_id = result
-      and result.data
-      and result.data.repository
-      and result.data.repository.pullRequest
-      and result.data.repository.pullRequest.id
-    state.pr_node_id = pr_id
-    callback(pr_id, pr_id and nil or err or "GitHub PR id query failed")
-  end)
-end
-
-local function queue_viewed_sync(path, viewed)
-  if not path then
-    return
-  end
-
-  state.viewed_sync_queue[path] = viewed == true
-  persist_viewed_state()
-end
-
-local function clear_queued_viewed_sync(path)
-  if not path or state.viewed_sync_queue[path] == nil then
-    return
-  end
-
-  state.viewed_sync_queue[path] = nil
-  persist_viewed_state()
-end
-
-local function sync_viewed_path_to_github_async(path, viewed, opts)
-  opts = opts or {}
-  local function done(ok)
-    if opts.on_done then
-      opts.on_done(ok)
-    end
-  end
-
-  if not state.config.viewed.enabled or not state.config.viewed.sync or not path then
-    done(false)
-    return
-  end
-
-  local generation = state.generation
-  github_pr_node_id_async(generation, function(pr_id, err)
-    if not pr_id then
-      queue_viewed_sync(path, viewed)
-      vim.notify("Review Mode viewed sync queued: " .. tostring(err or "unknown error"), vim.log.levels.WARN)
-      done(false)
-      return
-    end
-
-    local field = viewed and "markFileAsViewed" or "unmarkFileAsViewed"
-    local mutation = string.format(
-      [[
-mutation($pullRequestId: ID!, $path: String!) {
-  %s(input: {pullRequestId: $pullRequestId, path: $path}) {
-    clientMutationId
-  }
-}
-]],
-      field
-    )
-
-    gh_json_async({
-      "api",
-      "graphql",
-      "-f",
-      "query=" .. mutation,
-      "-F",
-      "pullRequestId=" .. pr_id,
-      "-F",
-      "path=" .. path,
-    }, function(result, mutation_err)
-      if not is_current(generation) then
-        return
-      end
-
-      if not result then
-        queue_viewed_sync(path, viewed)
-        vim.notify("Review Mode viewed sync queued: " .. tostring(mutation_err or "unknown error"), vim.log.levels.WARN)
-        done(false)
-        return
-      end
-
-      clear_queued_viewed_sync(path)
-      done(true)
-    end)
-  end)
-end
-
--- The guard holds the generation that owns the in-flight write rather than a
--- bare flag. Stale callbacks bail on is_current() without reaching on_done, and
--- M.refresh() bumps the generation without resetting state, so a boolean would
--- stay set forever and wedge every later flush. Stamping it means a new
--- generation simply does not match, and a late callback cannot clear a guard
--- that a newer flush now owns.
-function M.flush_viewed_sync()
-  if
-    not state.config.viewed.enabled
-    or not state.config.viewed.sync
-    or state.viewed_sync_loading == state.generation
-    or vim.tbl_isempty(state.viewed_sync_queue)
-  then
-    return
-  end
-
-  local path, viewed = next(state.viewed_sync_queue)
-  if not path then
-    return
-  end
-
-  local generation = state.generation
-  state.viewed_sync_loading = generation
-  sync_viewed_path_to_github_async(path, viewed, {
-    on_done = function(ok)
-      if state.viewed_sync_loading ~= generation then
-        return
-      end
-
-      state.viewed_sync_loading = nil
-      -- a failed entry stays queued for the next sync rather than spinning here
-      if ok and not vim.tbl_isempty(state.viewed_sync_queue) then
-        M.flush_viewed_sync()
-      end
-    end,
-  })
-end
+hooks.on("comments_loaded", function()
+  schedule_comments_ui_refresh()
+end)
 
 local function parse_changed_files(output)
   state.files = {}
@@ -1372,13 +378,13 @@ local function parse_hunks_by_path(patch)
 end
 
 local function build_changed_maps_async(generation, callback)
-  reset_changed_data()
+  core.reset_changed_data()
   state.maps_loading = true
   system_async(
-    { "git", "diff", "--name-status", "--find-renames", "--no-ext-diff", "--no-color", base_ref() .. "...HEAD" },
+    { "git", "diff", "--name-status", "--find-renames", "--no-ext-diff", "--no-color", core.base_ref() .. "...HEAD" },
     { cwd = state.root },
     function(output, err)
-      if not is_current(generation) then
+      if not core.is_current(generation) then
         return
       end
 
@@ -1391,10 +397,10 @@ local function build_changed_maps_async(generation, callback)
 
       parse_changed_files(output)
       system_async(
-        { "git", "diff", "--numstat", "--find-renames", "--no-ext-diff", "--no-color", base_ref() .. "...HEAD" },
+        { "git", "diff", "--numstat", "--find-renames", "--no-ext-diff", "--no-color", core.base_ref() .. "...HEAD" },
         { cwd = state.root },
         function(numstat)
-          if not is_current(generation) then
+          if not core.is_current(generation) then
             return
           end
 
@@ -1518,7 +524,7 @@ local function load_hunks_for_paths(paths, on_done)
     "--diff-filter=ACMRT",
     "--no-ext-diff",
     "--no-color",
-    base_ref() .. "...HEAD",
+    core.base_ref() .. "...HEAD",
     "--",
   }
   if needs_rename_detection then
@@ -1529,7 +535,7 @@ local function load_hunks_for_paths(paths, on_done)
   vim.list_extend(args, pending_paths)
 
   system_async(args, { cwd = state.root }, function(patch)
-    if not is_current(generation) then
+    if not core.is_current(generation) then
       return
     end
 
@@ -1668,7 +674,7 @@ local function prefetch_focused_path(path, bufnr)
     local generation = state.generation
     local delay = tonumber(state.config.performance.hunk_prefetch.gitsigns_delay_ms or 0) or 0
     vim.defer_fn(function()
-      if not is_current(generation) then
+      if not core.is_current(generation) then
         return
       end
 
@@ -1725,7 +731,7 @@ local function start_background_hunk_scan()
   state.background_hunk_scan_loading = true
   local generation = state.generation
   vim.defer_fn(function()
-    if not is_current(generation) or not state.maps_loaded then
+    if not core.is_current(generation) or not state.maps_loaded then
       state.background_hunk_scan_loading = false
       return
     end
@@ -1738,9 +744,9 @@ local function start_background_hunk_scan()
       "--diff-filter=ACMRT",
       "--no-ext-diff",
       "--no-color",
-      base_ref() .. "...HEAD",
+      core.base_ref() .. "...HEAD",
     }, { cwd = state.root }, function(patch)
-      if not is_current(generation) then
+      if not core.is_current(generation) then
         state.background_hunk_scan_loading = false
         return
       end
@@ -1783,7 +789,7 @@ function head_watch.start(generation)
   state.head_log_path = nil
   state.head_log_stamp = nil
   system_async({ "git", "rev-parse", "--git-path", "logs/HEAD" }, { cwd = state.root }, function(path)
-    if not is_current(generation) or not path or path == "" then
+    if not core.is_current(generation) or not path or path == "" then
       return
     end
 
@@ -1798,7 +804,7 @@ end
 function head_watch.reload()
   local generation = state.generation
   build_changed_maps_async(generation, function(err)
-    if not is_current(generation) then
+    if not core.is_current(generation) then
       return
     end
 
@@ -1807,7 +813,7 @@ function head_watch.reload()
       return
     end
 
-    refresh_viewed_order()
+    viewed_state.refresh_viewed_order()
     annotate_open_buffers()
     refresh_tree()
     prefetch_current_buffer()
@@ -1818,7 +824,7 @@ function head_watch.reload()
   -- new comments must anchor to a commit GitHub knows about, not the SHA we
   -- captured when the review started
   pr_meta_async(generation, function(meta)
-    if not is_current(generation) or not meta then
+    if not core.is_current(generation) or not meta then
       return
     end
     state.head = meta.headRefOid or state.head
@@ -1855,11 +861,19 @@ local function open_initial_change()
   end
 end
 
+-- event is the bare name ("start", "enter"); hooks.emit turns it into the
+-- ReviewModeStart / ReviewModeEnter autocommand pattern callers already use.
 local function announce(event)
   vim.g.review_mode = state.in_mode and "mode" or (state.active and "session" or nil)
-  pcall(vim.api.nvim_exec_autocmds, "User", { pattern = event, modeline = false })
-  pcall(vim.cmd, "redrawstatus")
-  pcall(vim.cmd, "redrawtabline")
+  hooks.emit(event, {
+    repo = state.repo,
+    pr = state.pr,
+    base = state.base,
+    root = state.root,
+    in_mode = state.in_mode,
+    active = state.active,
+  })
+  util.redraw_status()
 end
 
 local function mode_action(action)
@@ -1936,15 +950,6 @@ local function leave_workspace()
   if state.return_tab and vim.api.nvim_tabpage_is_valid(state.return_tab) then
     pcall(vim.api.nvim_set_current_tabpage, state.return_tab)
   end
-end
-
-local function ensure_active()
-  if state.active then
-    return true
-  end
-
-  vim.notify("Review Mode is not active", vim.log.levels.WARN)
-  return false
 end
 
 local function jump_changed_file(delta)
@@ -2032,8 +1037,8 @@ local function jump_comment(delta)
   end
 
   if vim.tbl_isempty(state.comments) then
-    hydrate_comments()
-    load_comments_async()
+    github.hydrate_comments()
+    github.load_comments_async()
   end
 
   local positions = comment_positions()
@@ -2083,14 +1088,14 @@ local function set_gitsigns_base()
   vim.schedule(function()
     local ok, gitsigns = pcall(require, "gitsigns")
     if ok and gitsigns.change_base then
-      gitsigns.change_base(base_ref(), true, function()
+      gitsigns.change_base(core.base_ref(), true, function()
         if state.active then
           prefetch_current_buffer(0)
         end
       end)
       return
     end
-    pcall(vim.cmd, "Gitsigns change_base " .. base_ref() .. " --global")
+    pcall(vim.cmd, "Gitsigns change_base " .. core.base_ref() .. " --global")
   end)
 end
 
@@ -2110,143 +1115,10 @@ local function reset_gitsigns_base()
   end)
 end
 
-local function restore_old_diffopt()
-  if state.old_diffopt then
-    vim.o.diffopt = state.old_diffopt
-    state.old_diffopt = nil
-  end
-end
-
-local function apply_old_diffopt()
-  if not state.config.diff.use_fast_diffopt then
-    return
-  end
-
-  state.old_diffopt = vim.o.diffopt
-  local ok = pcall(function()
-    vim.o.diffopt = state.config.diff.fast_diffopt
-  end)
-  if ok then
-    return
-  end
-
-  vim.o.diffopt = state.old_diffopt
-  state.old_diffopt = nil
-end
-
-local function disable_diff_for_window(win)
-  if win and vim.api.nvim_win_is_valid(win) then
-    pcall(function()
-      vim.wo[win].diff = false
-    end)
-  end
-end
-
-local function capture_fold_options(win)
-  if not win or not vim.api.nvim_win_is_valid(win) then
-    return
-  end
-
-  state.old_fold_options = state.old_fold_options or {}
-  if state.old_fold_options[win] then
-    return
-  end
-
-  state.old_fold_options[win] = {
-    foldenable = vim.wo[win].foldenable,
-    foldlevel = vim.wo[win].foldlevel,
-    foldmethod = vim.wo[win].foldmethod,
-  }
-end
-
-local function restore_fold_options()
-  for win, options in pairs(state.old_fold_options or {}) do
-    if vim.api.nvim_win_is_valid(win) then
-      pcall(function()
-        vim.wo[win].foldmethod = options.foldmethod
-        vim.wo[win].foldlevel = options.foldlevel
-        vim.wo[win].foldenable = options.foldenable
-      end)
-    end
-  end
-  state.old_fold_options = nil
-end
-
-local function clear_old_diff_highlights()
-  for _, bufnr in ipairs({ state.old_buf, state.old_target_buf }) do
-    if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
-      vim.api.nvim_buf_clear_namespace(bufnr, diff_ns, 0, -1)
-    end
-  end
-end
-
-local function apply_side_by_side_context()
-  local condensed = not state.config.diff.full_file
-  local previous_win = vim.api.nvim_get_current_win()
-  for _, win in ipairs({ state.old_target_win, state.old_win }) do
-    if win and vim.api.nvim_win_is_valid(win) then
-      capture_fold_options(win)
-      pcall(function()
-        vim.wo[win].foldmethod = "diff"
-        vim.wo[win].foldenable = condensed
-        if condensed then
-          vim.api.nvim_set_current_win(win)
-          vim.cmd("silent! normal! zM")
-        else
-          vim.wo[win].foldlevel = 99
-          vim.api.nvim_set_current_win(win)
-          vim.cmd("silent! normal! zR")
-        end
-      end)
-    end
-  end
-  if vim.api.nvim_win_is_valid(previous_win) then
-    vim.api.nvim_set_current_win(previous_win)
-  end
-end
-
-close_old_view = function()
-  if state.old_closing then
-    return
-  end
-
-  state.old_closing = true
-  disable_diff_for_window(state.old_target_win)
-  disable_diff_for_window(state.old_win)
-  restore_fold_options()
-  clear_old_diff_highlights()
-
-  if
-    state.old_layout == "unified"
-    and state.old_target_win
-    and vim.api.nvim_win_is_valid(state.old_target_win)
-    and state.old_target_buf
-    and vim.api.nvim_buf_is_valid(state.old_target_buf)
-  then
-    pcall(vim.api.nvim_win_set_buf, state.old_target_win, state.old_target_buf)
-  elseif state.old_win and vim.api.nvim_win_is_valid(state.old_win) then
-    vim.api.nvim_win_close(state.old_win, true)
-  end
-
-  if state.old_buf and vim.api.nvim_buf_is_valid(state.old_buf) then
-    pcall(vim.api.nvim_buf_delete, state.old_buf, { force = true })
-  end
-
-  state.old_win = nil
-  state.old_buf = nil
-  state.old_target_win = nil
-  state.old_target_buf = nil
-  state.old_loading = false
-  state.old_layout = nil
-  state.old_path = nil
-  state.old_closing = false
-  restore_old_diffopt()
-end
-
 local function load_review_async(generation, opts)
   opts = opts or {}
   build_changed_maps_async(generation, function(err)
-    if not is_current(generation) then
+    if not core.is_current(generation) then
       return
     end
 
@@ -2255,10 +1127,10 @@ local function load_review_async(generation, opts)
       return
     end
 
-    load_viewed_state()
+    viewed_state.load_viewed_state()
     refresh_tree()
     annotate_open_buffers()
-    sync_viewed_from_github_async(generation)
+    viewed_state.sync_viewed_from_github_async(generation)
     prefetch_current_buffer()
     prefetch_near_path(state.file_order[1])
     start_background_hunk_scan()
@@ -2286,7 +1158,7 @@ local function load_metadata_async(generation, callback)
 
   local function done()
     pending = pending - 1
-    if pending > 0 or not is_current(generation) then
+    if pending > 0 or not core.is_current(generation) then
       return
     end
 
@@ -2316,7 +1188,7 @@ local function load_metadata_async(generation, callback)
 end
 
 function M.start()
-  local root, root_err = repo_root()
+  local root, root_err = util.repo_root()
   if not root then
     vim.notify("Review Mode: " .. tostring(root_err or "not in a git repo"), vim.log.levels.ERROR)
     return
@@ -2328,32 +1200,32 @@ function M.start()
   clear_mode_keys()
   state.in_mode = state.config.mode.enabled
   state.metadata_loaded = false
-  state.repo = env_value("GH_REVIEW_REPO")
-  state.pr = env_value("GH_REVIEW_PR")
-  state.base = env_value("GH_REVIEW_BASE")
-  state.head = env_value("GH_REVIEW_HEAD")
-  local generation = next_generation()
-  reset_review_data()
-  close_old_view()
+  state.repo = util.env_value("GH_REVIEW_REPO")
+  state.pr = util.env_value("GH_REVIEW_PR")
+  state.base = util.env_value("GH_REVIEW_BASE")
+  state.head = util.env_value("GH_REVIEW_HEAD")
+  local generation = core.next_generation()
+  core.reset_review_data()
+  diff.close_old_view()
   if state.in_mode then
     apply_mode_keys()
   end
   focus_workspace()
   head_watch.start(generation)
-  announce("ReviewModeStart")
+  announce("start")
 
   local review_loading_started = false
   if state.base then
     review_loading_started = true
     set_gitsigns_base()
-    load_comments_async()
+    github.load_comments_async()
     load_review_async(generation, { open_initial = true })
   else
     vim.notify("Review Mode: loading PR metadata")
   end
 
   load_metadata_async(generation, function(result, err)
-    if not is_current(generation) then
+    if not core.is_current(generation) then
       return
     end
 
@@ -2373,15 +1245,15 @@ function M.start()
 
     local meta = result.meta or {}
     state.repo = state.repo or result.repo
-    state.pr = state.pr or tostring(meta.number or env_value("GH_REVIEW_PR") or "")
+    state.pr = state.pr or tostring(meta.number or util.env_value("GH_REVIEW_PR") or "")
     state.base = state.base or meta.baseRefName or "main"
     state.head = state.head or meta.headRefOid
     state.metadata_loaded = true
 
-    load_viewed_state()
+    viewed_state.load_viewed_state()
     schedule_comments_ui_refresh()
-    sync_viewed_from_github_async(generation)
-    load_comments_async()
+    viewed_state.sync_viewed_from_github_async(generation)
+    github.load_comments_async()
     if not review_loading_started then
       set_gitsigns_base()
       load_review_async(generation, { open_initial = true })
@@ -2410,7 +1282,10 @@ function M.enter()
   if not state.config.mode.signs_when_out then
     annotate_open_buffers()
   end
-  announce("ReviewModeEnter")
+  if state.config.panel.auto_open then
+    panel.open_panel()
+  end
+  announce("enter")
 end
 
 function M.leave()
@@ -2430,7 +1305,7 @@ function M.leave()
     end
     refresh_tree()
   end
-  announce("ReviewModeLeave")
+  announce("leave")
 end
 
 function M.toggle()
@@ -2473,10 +1348,49 @@ function M.statusline()
   )
 end
 
+local mode_names = {
+  n = "NORMAL",
+  no = "O-PENDING",
+  v = "VISUAL",
+  V = "V-LINE",
+  ["\22"] = "V-BLOCK",
+  s = "SELECT",
+  S = "S-LINE",
+  ["\19"] = "S-BLOCK",
+  i = "INSERT",
+  R = "REPLACE",
+  c = "COMMAND",
+  r = "PROMPT",
+  ["!"] = "SHELL",
+  t = "TERMINAL",
+}
+
+--- Text for a statusline mode slot.
+---
+--- The review layer sits on top of normal mode rather than replacing it, so
+--- this reads "REVIEW" while the layer is live and you are in normal mode, and
+--- "REVIEW INSERT" once you step into another mode, keeping both contexts
+--- visible. Outside the mode it is just the usual mode name, so it can stand in
+--- for a statusline's own mode component.
+function M.mode_text(opts)
+  opts = opts or {}
+  local mode = vim.fn.mode()
+  local name = mode_names[mode] or mode_names[mode:sub(1, 1)] or mode:upper()
+  if vim.g.review_mode ~= "mode" then
+    return name
+  end
+
+  local label = opts.label or "REVIEW"
+  if mode == "n" then
+    return label
+  end
+  return label .. (opts.separator or " ") .. name
+end
+
 function M.stop()
   M.leave()
   close_workspace()
-  next_generation()
+  core.next_generation()
   reset_gitsigns_base()
   state.active = false
   state.metadata_loaded = false
@@ -2486,11 +1400,12 @@ function M.stop()
   state.head = nil
   state.head_log_path = nil
   state.head_log_stamp = nil
-  reset_review_data()
-  close_old_view()
+  core.reset_review_data()
+  diff.close_old_view()
+  panel.close_panel()
   annotate_open_buffers()
   refresh_tree()
-  announce("ReviewModeStop")
+  announce("stop")
   vim.notify("Review Mode stopped")
 end
 
@@ -2505,463 +1420,18 @@ function M.refresh()
     return
   end
 
-  local generation = next_generation()
+  local generation = core.next_generation()
   state.comments = {}
   state.comment_threads = {}
   state.comments_loading = false
-  close_old_view()
-  load_comments_async()
+  diff.close_old_view()
+  github.load_comments_async()
   load_review_async(generation, { open_initial = false })
 end
 
-local function diff_context_lines()
-  if state.config.diff.full_file then
-    return 1000000
-  end
-  return state.config.diff.unified_context
-end
-
-local function write_temp_diff_file(tmpdir, side, path, lines)
-  local rel = vim.fs.joinpath(side, path)
-  local file = vim.fs.joinpath(tmpdir, rel)
-  local dir = vim.fs.dirname(file)
-  if dir then
-    vim.fn.mkdir(dir, "p")
-  end
-  vim.fn.writefile(lines, file, "b")
-  return rel
-end
-
-local function unified_diff_lines(diff, path)
-  local lines = split_blob_lines(diff)
-  if #lines == 0 then
-    return { "No differences: " .. path }
-  end
-
-  for index, line in ipairs(lines) do
-    if line:find("^diff %-%-git ") then
-      lines[index] = "diff --git base/" .. path .. " head/" .. path
-    elseif line:find("^%-%-%- ") and line ~= "--- /dev/null" then
-      lines[index] = "--- base/" .. path
-    elseif line:find("^%+%+%+ ") and line ~= "+++ /dev/null" then
-      lines[index] = "+++ head/" .. path
-    end
-  end
-
-  return lines
-end
-
-local function ensure_diff_highlights()
-  pcall(vim.api.nvim_set_hl, 0, diff_text_hl, { default = true, link = "DiffText" })
-end
-
--- Only meaningful inside a hunk body. File headers ("--- a/x", "+++ b/x") live
--- before the first @@, and a changed line can itself start with "--" or "++".
-local function is_deleted_diff_line(line)
-  return line:sub(1, 1) == "-"
-end
-
-local function is_added_diff_line(line)
-  return line:sub(1, 1) == "+"
-end
-
-local function changed_line_ranges(old_text, new_text)
-  local old_len = #old_text
-  local new_len = #new_text
-  local prefix = 0
-  local min_len = math.min(old_len, new_len)
-
-  while prefix < min_len and old_text:byte(prefix + 1) == new_text:byte(prefix + 1) do
-    prefix = prefix + 1
-  end
-
-  local suffix = 0
-  while suffix < min_len - prefix and old_text:byte(old_len - suffix) == new_text:byte(new_len - suffix) do
-    suffix = suffix + 1
-  end
-
-  return prefix, old_len - suffix, new_len - suffix
-end
-
-local function highlight_changed_range(bufnr, row, start_col, end_col)
-  if start_col >= end_col then
-    return
-  end
-
-  vim.api.nvim_buf_set_extmark(bufnr, diff_ns, row, start_col, {
-    end_col = end_col,
-    hl_group = diff_text_hl,
-    hl_mode = "replace",
-    priority = diff_text_priority,
-  })
-end
-
-local function highlight_partial_line_pair(old_buf, old_row, old_line, new_buf, new_row, new_line, col_offset)
-  local prefix, old_end, new_end = changed_line_ranges(old_line, new_line)
-  highlight_changed_range(old_buf, old_row, prefix + col_offset, old_end + col_offset)
-  highlight_changed_range(new_buf, new_row, prefix + col_offset, new_end + col_offset)
-end
-
-local function highlight_partial_diff_pair(bufnr, old_row, old_line, new_row, new_line)
-  highlight_partial_line_pair(bufnr, old_row, old_line:sub(2), bufnr, new_row, new_line:sub(2), 1)
-end
-
-local function apply_partial_diff_highlights(bufnr)
-  if not state.config.diff.partial_line_highlights then
-    return
-  end
-
-  ensure_diff_highlights()
-  vim.api.nvim_buf_clear_namespace(bufnr, diff_ns, 0, -1)
-
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  local index = 1
-  while index <= #lines and not lines[index]:match("^@@") do
-    index = index + 1
-  end
-
-  while index <= #lines do
-    if is_deleted_diff_line(lines[index]) then
-      local deleted = {}
-      while index <= #lines and is_deleted_diff_line(lines[index]) do
-        deleted[#deleted + 1] = { row = index - 1, line = lines[index] }
-        index = index + 1
-      end
-
-      local added = {}
-      while index <= #lines and is_added_diff_line(lines[index]) do
-        added[#added + 1] = { row = index - 1, line = lines[index] }
-        index = index + 1
-      end
-
-      for pair_index = 1, math.min(#deleted, #added) do
-        highlight_partial_diff_pair(
-          bufnr,
-          deleted[pair_index].row,
-          deleted[pair_index].line,
-          added[pair_index].row,
-          added[pair_index].line
-        )
-      end
-    else
-      index = index + 1
-    end
-  end
-end
-
-local function buffer_text(lines)
-  if #lines == 0 then
-    return ""
-  end
-  return table.concat(lines, "\n") .. "\n"
-end
-
-local function apply_side_by_side_partial_diff_highlights(old_buf, old_lines, new_buf, new_lines)
-  if not state.config.diff.partial_line_highlights then
-    return
-  end
-
-  ensure_diff_highlights()
-  vim.api.nvim_buf_clear_namespace(old_buf, diff_ns, 0, -1)
-  vim.api.nvim_buf_clear_namespace(new_buf, diff_ns, 0, -1)
-
-  local hunks = vim.diff(buffer_text(old_lines), buffer_text(new_lines), {
-    result_type = "indices",
-    ctxlen = 0,
-  })
-
-  for _, hunk in ipairs(hunks or {}) do
-    local old_start, old_count, new_start, new_count = hunk[1], hunk[2], hunk[3], hunk[4]
-    for offset = 0, math.min(old_count, new_count) - 1 do
-      highlight_partial_line_pair(
-        old_buf,
-        old_start + offset - 1,
-        old_lines[old_start + offset],
-        new_buf,
-        new_start + offset - 1,
-        new_lines[new_start + offset],
-        0
-      )
-    end
-  end
-end
-
-local function open_old_side_by_side(path, current_win, current_buf, current_filetype, base_content, base_missing)
-  close_old_view()
-
-  vim.api.nvim_set_current_win(current_win)
-  vim.cmd("vsplit")
-  state.old_win = vim.api.nvim_get_current_win()
-  state.old_target_win = current_win
-  state.old_target_buf = current_buf
-  state.old_buf = vim.api.nvim_create_buf(false, true)
-  state.old_layout = "side_by_side"
-  state.old_path = path
-  vim.api.nvim_win_set_buf(state.old_win, state.old_buf)
-  vim.api.nvim_buf_set_name(state.old_buf, "pr-base://" .. base_ref() .. "/" .. path)
-  local base_lines = base_missing and {} or split_blob_lines(base_content)
-  vim.api.nvim_buf_set_lines(state.old_buf, 0, -1, false, base_lines)
-  vim.bo[state.old_buf].buftype = "nofile"
-  vim.bo[state.old_buf].bufhidden = "wipe"
-  vim.bo[state.old_buf].modifiable = false
-  vim.bo[state.old_buf].readonly = true
-  vim.bo[state.old_buf].filetype = current_filetype
-
-  apply_old_diffopt()
-
-  vim.cmd("diffthis")
-  vim.api.nvim_set_current_win(current_win)
-  vim.cmd("diffthis")
-  apply_side_by_side_partial_diff_highlights(
-    state.old_buf,
-    base_lines,
-    current_buf,
-    vim.api.nvim_buf_get_lines(current_buf, 0, -1, false)
-  )
-  apply_side_by_side_context()
-  vim.api.nvim_set_current_win(current_win)
-end
-
-local function is_added_file(path)
-  return (state.files[path] or ""):match("^A") ~= nil
-end
-
-local function open_old_unified(path, current_win, current_buf, base_content, generation, base_missing)
-  local tmpdir = vim.fn.tempname()
-  local head_rel = write_temp_diff_file(tmpdir, "head", path, vim.api.nvim_buf_get_lines(current_buf, 0, -1, false))
-  local base_rel = base_missing and "/dev/null"
-    or write_temp_diff_file(tmpdir, "base", path, split_blob_lines(base_content))
-  local context = diff_context_lines()
-
-  vim.system(
-    { "git", "diff", "--no-index", "--no-color", "--unified=" .. tostring(context), "--", base_rel, head_rel },
-    { text = true, cwd = tmpdir },
-    function(result)
-      vim.schedule(function()
-        pcall(vim.fn.delete, tmpdir, "rf")
-        if not is_current(generation) then
-          return
-        end
-
-        state.old_loading = false
-        if result.code ~= 0 and result.code ~= 1 then
-          vim.notify(
-            "Review Mode unified diff: " .. trim(result.stderr ~= "" and result.stderr or result.stdout),
-            vim.log.levels.WARN
-          )
-          return
-        end
-
-        if not vim.api.nvim_win_is_valid(current_win) or not vim.api.nvim_buf_is_valid(current_buf) then
-          vim.notify("Review Mode unified diff: target window is no longer valid", vim.log.levels.WARN)
-          return
-        end
-
-        close_old_view()
-
-        vim.api.nvim_set_current_win(current_win)
-        state.old_target_win = current_win
-        state.old_target_buf = current_buf
-        state.old_buf = vim.api.nvim_create_buf(false, true)
-        state.old_layout = "unified"
-        state.old_path = path
-        vim.api.nvim_win_set_buf(current_win, state.old_buf)
-        vim.api.nvim_buf_set_name(state.old_buf, "pr-diff://" .. base_ref() .. "/" .. path)
-        vim.api.nvim_buf_set_lines(state.old_buf, 0, -1, false, unified_diff_lines(result.stdout or "", path))
-        apply_partial_diff_highlights(state.old_buf)
-        vim.bo[state.old_buf].buftype = "nofile"
-        vim.bo[state.old_buf].bufhidden = "wipe"
-        vim.bo[state.old_buf].modifiable = false
-        vim.bo[state.old_buf].readonly = true
-        vim.bo[state.old_buf].filetype = "diff"
-        vim.api.nvim_set_current_win(current_win)
-      end)
-    end
-  )
-end
-
-local function open_old_view(path, current_win, current_buf)
-  local current_filetype = vim.bo[current_buf].filetype
-  local generation = state.generation
-  state.old_loading = true
-
-  system_async({ "git", "show", base_ref() .. ":" .. path }, { cwd = state.root, raw = true }, function(content, err)
-    if not is_current(generation) then
-      return
-    end
-
-    local base_missing = false
-    if content == nil then
-      if is_added_file(path) then
-        content = ""
-        base_missing = true
-      else
-        state.old_loading = false
-        vim.notify("Review Mode old version: " .. tostring(err or "file not present at base"), vim.log.levels.WARN)
-        return
-      end
-    end
-
-    if not vim.api.nvim_win_is_valid(current_win) or not vim.api.nvim_buf_is_valid(current_buf) then
-      state.old_loading = false
-      vim.notify("Review Mode old version: target window is no longer valid", vim.log.levels.WARN)
-      return
-    end
-
-    if state.config.diff.layout == "unified" then
-      open_old_unified(path, current_win, current_buf, content, generation, base_missing)
-      return
-    end
-
-    state.old_loading = false
-    open_old_side_by_side(path, current_win, current_buf, current_filetype, content, base_missing)
-  end)
-end
-
-local function refresh_old_view()
-  if state.old_layout == "side_by_side" and not (state.old_win and vim.api.nvim_win_is_valid(state.old_win)) then
-    return false
-  end
-  if
-    state.old_layout == "unified" and not (state.old_target_win and vim.api.nvim_win_is_valid(state.old_target_win))
-  then
-    return false
-  end
-
-  local path = state.old_path
-  local target_win = state.old_target_win
-  if not path or not target_win or not vim.api.nvim_win_is_valid(target_win) then
-    return false
-  end
-
-  local target_buf = state.old_target_buf
-  if not target_buf or not vim.api.nvim_buf_is_valid(target_buf) then
-    target_buf = vim.api.nvim_win_get_buf(target_win)
-  end
-  close_old_view()
-  open_old_view(path, target_win, target_buf)
-  return true
-end
-
-local function old_view_is_open()
-  if state.old_layout == "side_by_side" then
-    return state.old_win and vim.api.nvim_win_is_valid(state.old_win)
-  end
-  if state.old_layout == "unified" then
-    return state.old_target_win and vim.api.nvim_win_is_valid(state.old_target_win)
-  end
-  return false
-end
-
-local function close_side_by_side_pair_for_buffer(bufnr)
-  if state.old_closing or state.old_layout ~= "side_by_side" then
-    return
-  end
-
-  if bufnr ~= state.old_buf and bufnr ~= state.old_target_buf then
-    return
-  end
-
-  vim.schedule(function()
-    if state.old_closing or state.old_layout ~= "side_by_side" then
-      return
-    end
-    if bufnr == state.old_buf or bufnr == state.old_target_buf then
-      close_old_view()
-    end
-  end)
-end
-
-local function close_side_by_side_pair_for_window(winid)
-  if state.old_closing or state.old_layout ~= "side_by_side" then
-    return
-  end
-
-  if winid ~= state.old_win and winid ~= state.old_target_win then
-    return
-  end
-
-  vim.schedule(function()
-    if state.old_closing or state.old_layout ~= "side_by_side" then
-      return
-    end
-    close_old_view()
-  end)
-end
-
-local function close_stale_side_by_side_pair()
-  if state.old_closing or state.old_layout ~= "side_by_side" then
-    return
-  end
-
-  if not state.old_target_win or not vim.api.nvim_win_is_valid(state.old_target_win) then
-    close_old_view()
-    return
-  end
-
-  local target_buf = vim.api.nvim_win_get_buf(state.old_target_win)
-  if target_buf == state.old_target_buf then
-    return
-  end
-
-  vim.schedule(function()
-    if state.old_closing or state.old_layout ~= "side_by_side" then
-      return
-    end
-    if
-      state.old_target_win
-      and vim.api.nvim_win_is_valid(state.old_target_win)
-      and vim.api.nvim_win_get_buf(state.old_target_win) ~= state.old_target_buf
-    then
-      close_old_view()
-    end
-  end)
-end
-
-function M.old_toggle()
-  if not ensure_active() then
-    return
-  end
-
-  if old_view_is_open() then
-    close_old_view()
-    return
-  end
-
-  local path = current_relpath()
-  if not path then
-    vim.notify("Review Mode old version: current buffer is not under repo root", vim.log.levels.WARN)
-    return
-  end
-
-  if state.old_loading then
-    vim.notify("Review Mode old version: base file is still loading", vim.log.levels.INFO)
-    return
-  end
-
-  local current_win = vim.api.nvim_get_current_win()
-  local current_buf = vim.api.nvim_get_current_buf()
-  open_old_view(path, current_win, current_buf)
-end
-
-function M.toggle_diff_layout()
-  state.config.diff.layout = state.config.diff.layout == "side_by_side" and "unified" or "side_by_side"
-  vim.notify("Review Mode diff layout: " .. (state.config.diff.layout == "unified" and "unified" or "side-by-side"))
-  refresh_old_view()
-  vim.cmd("redrawtabline")
-end
-
-function M.toggle_diff_full_file()
-  state.config.diff.full_file = not state.config.diff.full_file
-  vim.notify("Review Mode diff context: " .. (state.config.diff.full_file and "full file" or "condensed"))
-  if state.old_layout == "side_by_side" and old_view_is_open() then
-    apply_side_by_side_context()
-    vim.cmd("redrawtabline")
-    return
-  end
-  refresh_old_view()
-  vim.cmd("redrawtabline")
-end
+M.old_toggle = diff.old_toggle
+M.toggle_diff_layout = diff.toggle_diff_layout
+M.toggle_diff_full_file = diff.toggle_diff_full_file
 
 function M.next_hunk()
   jump_hunk(1)
@@ -2990,6 +1460,24 @@ function M.prev_file()
   jump_changed_file(-1)
 end
 
+function M.set_viewed(path, viewed)
+  if not ensure_active() or not state.config.viewed.enabled then
+    return false
+  end
+
+  path = path or current_relpath()
+  if not path or not state.files[path] then
+    return false
+  end
+
+  viewed = viewed ~= false
+  viewed_state.set_viewed_path(path, viewed)
+  viewed_state.persist_viewed_state()
+  viewed_state.sync_viewed_path_to_github_async(path, viewed)
+  schedule_comments_ui_refresh()
+  return true
+end
+
 function M.toggle_viewed(path)
   if not ensure_active() then
     return
@@ -3007,9 +1495,9 @@ function M.toggle_viewed(path)
   end
 
   local viewed = not state.viewed[path]
-  set_viewed_path(path, viewed)
-  persist_viewed_state()
-  sync_viewed_path_to_github_async(path, viewed)
+  viewed_state.set_viewed_path(path, viewed)
+  viewed_state.persist_viewed_state()
+  viewed_state.sync_viewed_path_to_github_async(path, viewed)
   schedule_comments_ui_refresh()
   vim.notify((viewed and "Marked viewed: " or "Marked unviewed: ") .. path, vim.log.levels.INFO)
 end
@@ -3031,9 +1519,9 @@ function M.mark_viewed(path, opts)
     return false
   end
 
-  set_viewed_path(path, true)
-  persist_viewed_state()
-  sync_viewed_path_to_github_async(path, true)
+  viewed_state.set_viewed_path(path, true)
+  viewed_state.persist_viewed_state()
+  viewed_state.sync_viewed_path_to_github_async(path, true)
   schedule_comments_ui_refresh()
   if not opts.silent then
     vim.notify("Marked viewed: " .. path, vim.log.levels.INFO)
@@ -3079,7 +1567,7 @@ function M.clear_viewed()
   state.viewed = {}
   state.viewed_order = {}
   state.viewed_sync_queue = {}
-  persist_viewed_state()
+  viewed_state.persist_viewed_state()
   schedule_comments_ui_refresh()
   vim.notify("Cleared PR viewed state")
 end
@@ -3094,15 +1582,15 @@ function M.sync_viewed()
     return
   end
 
-  sync_viewed_from_github_async(state.generation, true)
-  M.flush_viewed_sync()
+  viewed_state.sync_viewed_from_github_async(state.generation, true)
+  viewed_state.flush_viewed_sync()
 end
 
 function M.toggle_viewed_sync()
   state.config.viewed.sync = not state.config.viewed.sync
   vim.notify("Review Mode GitHub viewed sync " .. (state.config.viewed.sync and "enabled" or "disabled"))
   if state.config.viewed.sync and state.active then
-    sync_viewed_from_github_async(state.generation)
+    viewed_state.sync_viewed_from_github_async(state.generation)
   end
 end
 
@@ -3110,8 +1598,8 @@ function M.toggle_viewed_feature()
   state.config.viewed.enabled = not state.config.viewed.enabled
   if state.config.viewed.enabled then
     if state.active then
-      load_viewed_state()
-      sync_viewed_from_github_async(state.generation)
+      viewed_state.load_viewed_state()
+      viewed_state.sync_viewed_from_github_async(state.generation)
     end
   else
     state.viewed = {}
@@ -3127,441 +1615,11 @@ function M.toggle_comments()
   state.comments = {}
 
   if state.config.comments.enabled then
-    load_comments_async()
+    github.load_comments_async()
   end
 
   schedule_comments_ui_refresh()
   vim.notify("Review Mode comments " .. (state.config.comments.enabled and "enabled" or "disabled"))
-end
-
-local function configured_picker_provider()
-  return ((state.config.picker or {}).provider or "auto")
-end
-
-local function picker_provider_order()
-  local provider = configured_picker_provider()
-  if provider == "auto" then
-    return { "snacks", "telescope", "native" }
-  end
-  if provider == "native" then
-    return { "native" }
-  end
-  return { provider, "native" }
-end
-
-local function notify_picker_error(provider, err)
-  if configured_picker_provider() == provider then
-    vim.notify(
-      string.format("Review Mode picker: %s failed, using native picker: %s", provider, tostring(err)),
-      vim.log.levels.WARN
-    )
-  end
-end
-
-local function get_snacks_picker()
-  local snacks = rawget(_G, "Snacks")
-  if snacks and snacks.picker and snacks.picker.pick then
-    return snacks.picker
-  end
-
-  local ok, mod = pcall(require, "snacks")
-  if ok and mod and mod.picker and mod.picker.pick then
-    return mod.picker
-  end
-  return nil
-end
-
-local function close_picker_object(picker)
-  if picker and type(picker.close) == "function" then
-    pcall(function()
-      picker:close()
-    end)
-  end
-end
-
-local picker_hls = {
-  add = "ReviewModePickerAdd",
-  delete = "ReviewModePickerDelete",
-  prompt = "ReviewModePickerPrompt",
-  viewed = "ReviewModePickerViewed",
-  unviewed = "ReviewModePickerUnviewed",
-}
-
-local function ensure_viewed_picker_highlights()
-  pcall(vim.api.nvim_set_hl, 0, picker_hls.add, { default = true, fg = "#22C55E" })
-  pcall(vim.api.nvim_set_hl, 0, picker_hls.delete, { default = true, fg = "#EF4444" })
-  pcall(vim.api.nvim_set_hl, 0, picker_hls.prompt, { default = true, fg = "#38BDF8", bold = true })
-  pcall(vim.api.nvim_set_hl, 0, picker_hls.viewed, { default = true, fg = "#22C55E" })
-  pcall(vim.api.nvim_set_hl, 0, picker_hls.unviewed, { default = true, fg = "#F59E0B" })
-end
-
-local function normalize_viewed_filter(filter)
-  filter = filter or "all"
-  if filter == "viewed" or filter == "unviewed" then
-    return filter
-  end
-  return "all"
-end
-
-local function file_stats(path)
-  return state.file_stats[path] or { additions = 0, deletions = 0 }
-end
-
-local function stat_text(value, prefix)
-  if value == nil then
-    return prefix .. "-"
-  end
-  return prefix .. tostring(value)
-end
-
-local function viewed_picker_status(viewed, unviewed)
-  if viewed then
-    return "✓"
-  end
-  return string.format("☐ %d", unviewed)
-end
-
-local function viewed_picker_item(path)
-  local viewed = state.viewed[path] == true
-  local unviewed = M.unviewed_count(path)
-  local comments = M.unresolved_comment_count(path)
-  local stats = file_stats(path)
-  local review_icon = viewed_picker_status(viewed, unviewed)
-  local comment_icon = comments > 0 and comment_count_label(comments) or ""
-  local additions = stat_text(stats.additions, "+")
-  local deletions = stat_text(stats.deletions, "-")
-  local label = vim.trim(string.format("%-4s %5s %5s %-4s %s", review_icon, additions, deletions, comment_icon, path))
-
-  return {
-    path = path,
-    viewed = viewed,
-    unviewed = unviewed,
-    comments = comments,
-    additions = stats.additions,
-    deletions = stats.deletions,
-    review_icon = review_icon,
-    comment_icon = comment_icon,
-    label = label,
-    search = table.concat({
-      path,
-      viewed and "viewed" or "unviewed",
-      comments > 0 and "comments unresolved" or "",
-    }, " "),
-  }
-end
-
-local function viewed_picker_items(filter)
-  local items = {}
-  for _, path in ipairs(state.file_order) do
-    local viewed = state.viewed[path] == true
-    if filter == "all" or (filter == "viewed" and viewed) or (filter == "unviewed" and not viewed) then
-      items[#items + 1] = viewed_picker_item(path)
-    end
-  end
-  return items
-end
-
-local function viewed_picker_preview_lines(item, preview_cache)
-  if not item then
-    return { "No matching PR files" }
-  end
-
-  local stats = file_stats(item.path)
-  local lines = {
-    item.path,
-    string.format(
-      "%s  %s  %s",
-      item.viewed and "viewed" or "unviewed",
-      stat_text(stats.additions, "+"),
-      stat_text(stats.deletions, "-")
-    ),
-    "",
-  }
-
-  preview_cache = preview_cache or {}
-  preview_cache[item.path] = preview_cache[item.path]
-    or system({
-      "git",
-      "diff",
-      "--find-renames",
-      "--no-ext-diff",
-      "--no-color",
-      "--unified=80",
-      base_ref() .. "...HEAD",
-      "--",
-      item.path,
-    }, { cwd = state.root, raw = true })
-
-  local diff = preview_cache[item.path] or ""
-  if diff == "" then
-    lines[#lines + 1] = "No diff preview available"
-    return lines
-  end
-
-  for line in diff:gmatch("[^\n]+") do
-    lines[#lines + 1] = line
-    if #lines >= math.max(20, vim.o.lines - 8) then
-      lines[#lines + 1] = "..."
-      break
-    end
-  end
-
-  return lines
-end
-
-local function highlight_diff_preview(bufnr)
-  if not vim.api.nvim_buf_is_valid(bufnr) then
-    return
-  end
-
-  vim.api.nvim_buf_clear_namespace(bufnr, picker_ns, 0, -1)
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  for index, line in ipairs(lines) do
-    local hl = nil
-    if line:match("^%+") and not line:match("^%+%+%+") then
-      hl = "DiffAdd"
-    elseif line:match("^%-") and not line:match("^%-%-%-") then
-      hl = "DiffDelete"
-    elseif line:match("^@@") then
-      hl = "DiffText"
-    end
-    if hl then
-      vim.api.nvim_buf_set_extmark(bufnr, picker_ns, index - 1, 0, {
-        end_col = #line,
-        hl_group = hl,
-      })
-    end
-  end
-end
-
-local function viewed_picker_items_for_provider(filter)
-  return viewed_picker_items(normalize_viewed_filter(filter))
-end
-
-local function open_native_viewed_picker(filter)
-  filter = normalize_viewed_filter(filter)
-  local items = viewed_picker_items_for_provider(filter)
-  if #items == 0 then
-    local message = filter == "all" and "Review Mode: no changed PR files"
-      or string.format("Review Mode: no %s PR files", filter)
-    vim.notify(message, vim.log.levels.INFO)
-    return
-  end
-
-  vim.ui.select(items, {
-    prompt = string.format("Review Mode files [%s]", filter),
-    format_item = function(item)
-      return item.label
-    end,
-  }, function(item)
-    if item then
-      jump_to_path(item.path, 1)
-    end
-  end)
-end
-
-local function open_snacks_viewed_picker(filter)
-  local picker = get_snacks_picker()
-  if not picker then
-    return false
-  end
-
-  filter = normalize_viewed_filter(filter)
-  local preview_cache = {}
-  local snacks_items = vim.tbl_map(function(item)
-    return {
-      text = item.label,
-      item = item,
-      file = item.path,
-    }
-  end, viewed_picker_items_for_provider(filter))
-
-  picker.pick({
-    source = "review_mode_files",
-    title = string.format("Review Mode files [%s]", filter),
-    items = snacks_items,
-    -- built per selection: each preview shells out to git diff for that file
-    preview = function(ctx)
-      local item = ctx.item and (ctx.item.item or ctx.item)
-      ctx.preview:reset()
-      ctx.preview:set_lines(viewed_picker_preview_lines(item, preview_cache))
-      ctx.preview:highlight({ ft = "diff" })
-      return true
-    end,
-    confirm = function(instance, selected)
-      local item = selected and (selected.item or selected)
-      if not item then
-        return
-      end
-      close_picker_object(instance)
-      jump_to_path(item.path, 1)
-    end,
-    actions = {
-      toggle_viewed = function(instance, selected)
-        local item = selected and (selected.item or selected)
-        if not item then
-          return
-        end
-        close_picker_object(instance)
-        M.toggle_viewed(item.path)
-        vim.schedule(function()
-          M.list_viewed(filter)
-        end)
-      end,
-      filter_all = function(instance)
-        close_picker_object(instance)
-        vim.schedule(function()
-          M.list_viewed("all")
-        end)
-      end,
-      filter_viewed = function(instance)
-        close_picker_object(instance)
-        vim.schedule(function()
-          M.list_viewed("viewed")
-        end)
-      end,
-      filter_unviewed = function(instance)
-        close_picker_object(instance)
-        vim.schedule(function()
-          M.list_viewed("unviewed")
-        end)
-      end,
-    },
-    win = {
-      input = {
-        keys = {
-          ["<C-t>"] = { "toggle_viewed", mode = { "i", "n" } },
-          ["<Tab>"] = { "toggle_viewed", mode = { "i", "n" } },
-          ["<C-a>"] = { "filter_all", mode = { "i", "n" } },
-          ["<C-v>"] = { "filter_viewed", mode = { "i", "n" } },
-          ["<C-u>"] = { "filter_unviewed", mode = { "i", "n" } },
-        },
-      },
-      list = {
-        keys = {
-          ["<C-t>"] = "toggle_viewed",
-          ["<Tab>"] = "toggle_viewed",
-          a = "filter_all",
-          v = "filter_viewed",
-          u = "filter_unviewed",
-        },
-      },
-    },
-  })
-  return true
-end
-
-local function open_telescope_viewed_picker(filter)
-  local ok_pickers, pickers = pcall(require, "telescope.pickers")
-  local ok_finders, finders = pcall(require, "telescope.finders")
-  local ok_previewers, previewers = pcall(require, "telescope.previewers")
-  local ok_conf, conf = pcall(require, "telescope.config")
-  local ok_actions, actions = pcall(require, "telescope.actions")
-  local ok_state, action_state = pcall(require, "telescope.actions.state")
-  if not (ok_pickers and ok_finders and ok_previewers and ok_conf and ok_actions and ok_state) then
-    return false
-  end
-
-  filter = normalize_viewed_filter(filter)
-  local preview_cache = {}
-  local items = viewed_picker_items_for_provider(filter)
-  local function refresh_filter(prompt_bufnr, next_filter)
-    actions.close(prompt_bufnr)
-    vim.schedule(function()
-      M.list_viewed(next_filter)
-    end)
-  end
-
-  pickers
-    .new({}, {
-      prompt_title = string.format("Review Mode files [%s]", filter),
-      finder = finders.new_table({
-        results = items,
-        entry_maker = function(item)
-          return {
-            value = item,
-            display = item.label,
-            ordinal = item.search,
-            path = item.path,
-          }
-        end,
-      }),
-      sorter = conf.values.generic_sorter({}),
-      previewer = previewers.new_buffer_previewer({
-        title = "Preview",
-        define_preview = function(self, entry)
-          local item = entry and entry.value
-          vim.bo[self.state.bufnr].filetype = "diff"
-          vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, viewed_picker_preview_lines(item, preview_cache))
-          highlight_diff_preview(self.state.bufnr)
-        end,
-      }),
-      attach_mappings = function(prompt_bufnr, map)
-        actions.select_default:replace(function()
-          local selection = action_state.get_selected_entry()
-          actions.close(prompt_bufnr)
-          if selection and selection.value then
-            jump_to_path(selection.value.path, 1)
-          end
-        end)
-        local function toggle_selected()
-          local selection = action_state.get_selected_entry()
-          actions.close(prompt_bufnr)
-          if selection and selection.value then
-            M.toggle_viewed(selection.value.path)
-            vim.schedule(function()
-              M.list_viewed(filter)
-            end)
-          end
-        end
-        map({ "i", "n" }, "<C-t>", toggle_selected)
-        map({ "i", "n" }, "<Tab>", toggle_selected)
-        map({ "i", "n" }, "<C-a>", function()
-          refresh_filter(prompt_bufnr, "all")
-        end)
-        map({ "i", "n" }, "<C-v>", function()
-          refresh_filter(prompt_bufnr, "viewed")
-        end)
-        map({ "i", "n" }, "<C-u>", function()
-          refresh_filter(prompt_bufnr, "unviewed")
-        end)
-        return true
-      end,
-    })
-    :find()
-  return true
-end
-
-local function open_viewed_picker(filter)
-  for _, provider in ipairs(picker_provider_order()) do
-    if provider == "native" then
-      open_native_viewed_picker(filter)
-      return
-    end
-
-    local ok, opened = pcall(function()
-      if provider == "snacks" then
-        return open_snacks_viewed_picker(filter)
-      elseif provider == "telescope" then
-        return open_telescope_viewed_picker(filter)
-      end
-      return false
-    end)
-    if ok and opened then
-      return
-    end
-    if not ok then
-      notify_picker_error(provider, opened)
-    end
-  end
-end
-
-function M.list_viewed(filter)
-  if not ensure_active() then
-    return
-  end
-
-  open_viewed_picker(filter)
 end
 
 function M.summary()
@@ -3612,82 +1670,6 @@ function M.summary()
   vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO)
 end
 
-function M.show_thread()
-  local path = current_relpath()
-  if not path then
-    return
-  end
-
-  if vim.tbl_isempty(state.comments) then
-    hydrate_comments()
-  end
-
-  local line = vim.api.nvim_win_get_cursor(0)[1]
-  local comments = comments_for_line(path, line)
-  local lines = {}
-
-  if #comments == 0 then
-    lines = { string.format("No PR comments on %s:%d", path, line) }
-  else
-    for _, comment in ipairs(comments) do
-      local author = comment.user and comment.user.login or "reviewer"
-      lines[#lines + 1] = string.format("%s:", author)
-      for body_line in (comment.body or ""):gmatch("[^\n]+") do
-        lines[#lines + 1] = "  " .. body_line
-      end
-      lines[#lines + 1] = ""
-    end
-  end
-
-  open_lines_preview(lines, "markdown", {
-    max_width = math.floor(vim.o.columns * 0.6),
-    max_height = math.floor(vim.o.lines * 0.5),
-  })
-end
-
-function M.reply()
-  local path = current_relpath()
-  if not path then
-    return
-  end
-
-  if vim.tbl_isempty(state.comments) then
-    hydrate_comments()
-  end
-
-  local line = vim.api.nvim_win_get_cursor(0)[1]
-  local comments = comments_for_line(path, line)
-  if #comments == 0 then
-    vim.notify("No PR comment thread on current line", vim.log.levels.WARN)
-    return
-  end
-
-  local target = comments[#comments]
-  vim.ui.input({ prompt = "PR thread reply: " }, function(input)
-    local body = trim(input or "")
-    if body == "" then
-      return
-    end
-
-    gh_json_async({
-      "api",
-      string.format("repos/%s/pulls/%s/comments/%s/replies", state.repo, state.pr, target.id),
-      "--method",
-      "POST",
-      "-f",
-      "body=" .. body,
-    }, function(created, err)
-      if not created then
-        vim.notify("Review Mode reply failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
-        return
-      end
-
-      load_comments_async({ force = true })
-      vim.notify("Submitted PR thread reply")
-    end)
-  end)
-end
-
 local function thread_comment_on_current_line()
   local path = current_relpath()
   if not path then
@@ -3695,7 +1677,7 @@ local function thread_comment_on_current_line()
   end
 
   if vim.tbl_isempty(state.comments) then
-    hydrate_comments()
+    github.hydrate_comments()
   end
 
   local line = vim.api.nvim_win_get_cursor(0)[1]
@@ -3711,15 +1693,25 @@ local function thread_comment_on_current_line()
   return target, nil
 end
 
-local function set_thread_resolved(resolved)
+local function set_thread_resolved(resolved, thread_id, callback)
   if not state.repo or not state.pr then
     vim.notify("Review Mode thread: start Review Mode first", vim.log.levels.WARN)
     return
   end
 
-  local target, err = thread_comment_on_current_line()
-  if not target then
-    vim.notify("Review Mode thread: " .. tostring(err), vim.log.levels.WARN)
+  if not thread_id then
+    local target, err = thread_comment_on_current_line()
+    if not target then
+      vim.notify("Review Mode thread: " .. tostring(err), vim.log.levels.WARN)
+      return
+    end
+    thread_id = target.thread_id
+  end
+
+  -- REST-loaded and cache-derived threads have a synthetic id; GitHub only
+  -- resolves threads it issued an id for.
+  if thread_id:match("^comment:") or thread_id:match("^rest:") then
+    vim.notify("Review Mode thread: this comment was loaded without a review thread id", vim.log.levels.WARN)
     return
   end
 
@@ -3744,53 +1736,37 @@ mutation($threadId: ID!) {
     "-f",
     "query=" .. mutation,
     "-F",
-    "threadId=" .. target.thread_id,
+    "threadId=" .. thread_id,
   }, function(result, mutation_err)
     if not result then
       vim.notify(
         "Review Mode thread update failed: " .. tostring(mutation_err or "unknown error"),
         vim.log.levels.ERROR
       )
+      if callback then
+        callback(false, mutation_err)
+      end
       return
     end
 
-    load_comments_async({ force = true })
+    api.reload_comments()
+    hooks.emit("thread_resolved", { thread_id = thread_id, resolved = resolved })
     vim.notify(resolved and "Resolved PR review thread" or "Unresolved PR review thread")
+    if callback then
+      callback(true, nil)
+    end
   end)
 end
 
-function M.resolve_thread()
-  set_thread_resolved(true)
+function M.resolve_thread(thread_id)
+  set_thread_resolved(true, thread_id)
 end
 
-function M.unresolve_thread()
-  set_thread_resolved(false)
+function M.unresolve_thread(thread_id)
+  set_thread_resolved(false, thread_id)
 end
 
-local function visual_range(command)
-  if command and command.range and command.range > 0 then
-    return command.line1, command.line2
-  end
-
-  local mode = vim.fn.mode()
-  if mode ~= "v" and mode ~= "V" and mode ~= "\22" then
-    local line = vim.api.nvim_win_get_cursor(0)[1]
-    return line, line
-  end
-
-  local start_pos = vim.fn.getpos("v")
-  local end_pos = vim.fn.getpos(".")
-  local start_line = math.min(start_pos[2], end_pos[2])
-  local end_line = math.max(start_pos[2], end_pos[2])
-  vim.cmd("normal! \27")
-  return start_line, end_line
-end
-
-local function selected_text(start_line, end_line)
-  return table.concat(vim.api.nvim_buf_get_lines(0, start_line - 1, end_line, false), "\n")
-end
-
-local function post_review_comment(path, start_line, end_line, body, commit_id)
+local function post_review_comment(path, start_line, end_line, body, commit_id, callback)
   local args = {
     "api",
     string.format("repos/%s/pulls/%s/comments", state.repo, state.pr),
@@ -3820,22 +1796,29 @@ local function post_review_comment(path, start_line, end_line, body, commit_id)
   gh_json_async(args, function(created, err)
     if not created then
       vim.notify("Review Mode comment failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
+      if callback then
+        callback(false, err)
+      end
       return
     end
 
-    load_comments_async({ force = true })
+    api.reload_comments()
+    hooks.emit("comment_posted", { kind = "comment", path = path, line = end_line })
     vim.notify(string.format("Submitted PR comment on %s:%d", path, end_line))
+    if callback then
+      callback(true, nil)
+    end
   end)
 end
 
-local function submit_review_comment(path, start_line, end_line, body)
+local function submit_review_comment(path, start_line, end_line, body, callback)
   if not state.repo or not state.pr then
     vim.notify("Review Mode comment: start Review Mode first", vim.log.levels.WARN)
     return
   end
 
   if state.head then
-    post_review_comment(path, start_line, end_line, body, state.head)
+    post_review_comment(path, start_line, end_line, body, state.head, callback)
     return
   end
 
@@ -3848,9 +1831,88 @@ local function submit_review_comment(path, start_line, end_line, body)
         return
       end
 
-      post_review_comment(path, start_line, end_line, body, commit_id)
+      post_review_comment(path, start_line, end_line, body, commit_id, callback)
     end
   )
+end
+
+--- Backing calls for review_mode.api. They take tables and callbacks rather
+--- than reading the cursor, so a caller that is not a keymap can use them.
+function M.submit_comment(opts, callback)
+  opts = opts or {}
+  local path = opts.path or current_relpath()
+  local body = util.trim(opts.body or "")
+  if not path or body == "" then
+    if callback then
+      callback(false, "path and body are required")
+    end
+    return false
+  end
+
+  local first = tonumber(opts.start_line) or tonumber(opts.line) or 1
+  local last = tonumber(opts.end_line) or tonumber(opts.line) or first
+  submit_review_comment(path, math.min(first, last), math.max(first, last), body, callback)
+  return true
+end
+
+function M.submit_reply(opts, callback)
+  opts = opts or {}
+  local body = util.trim(opts.body or "")
+  -- A reply needs the id of the comment it answers. Callers may pass it
+  -- directly, or a thread id: search the file they named, and every changed
+  -- file when they did not, so opts.path stays optional.
+  local comment_id = opts.comment_id
+  if not comment_id and opts.thread_id then
+    local paths = opts.path and { opts.path } or state.file_order
+    for _, path in ipairs(paths) do
+      for _, thread in ipairs(comments_ui.threads(state.comments[path], path)) do
+        if thread.id == opts.thread_id then
+          comment_id = thread.comments[#thread.comments].id
+          break
+        end
+      end
+      if comment_id then
+        break
+      end
+    end
+  end
+
+  if not comment_id or body == "" then
+    if callback then
+      callback(false, "a thread with at least one comment, and a body, are required")
+    end
+    return false
+  end
+
+  gh_json_async({
+    "api",
+    string.format("repos/%s/pulls/%s/comments/%s/replies", state.repo, state.pr, comment_id),
+    "--method",
+    "POST",
+    "-f",
+    "body=" .. body,
+  }, function(created, err)
+    if not created then
+      if callback then
+        callback(false, err)
+      end
+      return
+    end
+    api.reload_comments()
+    hooks.emit("comment_posted", { kind = "reply", thread_id = opts.thread_id })
+    if callback then
+      callback(true, nil)
+    end
+  end)
+  return true
+end
+
+function M.set_thread_resolved_by_id(thread_id, resolved, callback)
+  return set_thread_resolved(resolved, thread_id, callback)
+end
+
+function M.with_hunks(path, callback)
+  return maybe_with_hunks(path, callback)
 end
 
 function M.comment(command)
@@ -3860,7 +1922,7 @@ function M.comment(command)
     return
   end
 
-  local start_line, end_line = visual_range(command)
+  local start_line, end_line = util.visual_range(command)
   vim.ui.input({ prompt = string.format("PR comment %s:%d-%d: ", path, start_line, end_line) }, function(input)
     local body = trim(input or "")
     if body == "" then
@@ -3877,10 +1939,10 @@ function M.suggest(command)
     return
   end
 
-  local start_line, end_line = visual_range(command)
+  local start_line, end_line = util.visual_range(command)
   vim.ui.input({
     prompt = string.format("PR suggestion %s:%d-%d: ", path, start_line, end_line),
-    default = selected_text(start_line, end_line),
+    default = util.selected_text(start_line, end_line),
   }, function(input)
     local suggestion = input or ""
     if suggestion == "" then
@@ -3890,6 +1952,11 @@ function M.suggest(command)
   end)
 end
 
+-- The panel and its draft buffer own a lot of small helpers, and this file is
+-- already near Lua's 200-locals-per-chunk limit. Scoping them to a block keeps
+-- them out of the file-level slot budget; the M.* entry points below are still
+-- module functions.
+
 function M.open_browser()
   pr_url_async(function(url, err)
     if not url then
@@ -3897,19 +1964,7 @@ function M.open_browser()
       return
     end
 
-    local open_cmd
-    if vim.fn.has("mac") == 1 then
-      open_cmd = { "open", url }
-    elseif vim.fn.has("win32") == 1 then
-      open_cmd = { "cmd", "/c", "start", "", url }
-    else
-      open_cmd = { "xdg-open", url }
-    end
-    system_async(open_cmd, {}, function(_, open_err)
-      if open_err then
-        vim.notify("Review Mode browser: " .. tostring(open_err), vim.log.levels.ERROR)
-      end
-    end)
+    util.open_url(url)
   end)
 end
 
@@ -3942,7 +1997,7 @@ function M.checks()
     if #lines == 0 or (#lines == 1 and lines[1] == "") then
       lines = { "No PR checks found" }
     end
-    open_lines_preview(lines, "text")
+    util.open_lines_preview(lines, "text")
   end)
 end
 
@@ -3969,21 +2024,29 @@ function M.status()
       string.format("Review: %s", result.reviewDecision or "none"),
       string.format("URL: %s", result.url or ""),
     }
-    open_lines_preview(lines, "markdown")
+    util.open_lines_preview(lines, "markdown")
   end)
 end
 
-local function action_items()
+--- Open a changed file at a line. Backing call for review_mode.api.
+function M.goto_file(path, line)
+  return jump_to_path(path, line)
+end
+
+function M.action_items()
   return {
     { category = "PR", label = "Open in browser", run = M.open_browser },
     { category = "PR", label = "Copy PR URL", run = M.copy_url },
     { category = "PR", label = "Show PR status", run = M.status },
     { category = "PR", label = "Show PR checks", run = M.checks },
-    { category = "Thread", label = "Show current thread", run = M.show_thread },
-    { category = "Thread", label = "Reply to current thread", run = M.reply },
+    { category = "Thread", label = "Toggle thread panel", run = panel.toggle_panel },
+    { category = "Thread", label = "Show current thread", run = panel.show_thread },
+    { category = "Thread", label = "Reply to current thread", run = panel.reply },
     { category = "Thread", label = "Resolve current thread", run = M.resolve_thread },
     { category = "Thread", label = "Unresolve current thread", run = M.unresolve_thread },
     { category = "Review", label = "Comment on line/range", run = M.comment },
+    { category = "Review", label = "Draft comment on line/range", run = panel.compose_comment },
+    { category = "Review", label = "Apply suggestion on line", run = panel.apply_suggestion },
     { category = "Review", label = "Suggest change for line/range", run = M.suggest },
     { category = "Files", label = "Toggle viewed", run = M.toggle_viewed },
     {
@@ -3997,228 +2060,12 @@ local function action_items()
   }
 end
 
-local function action_item_label(item)
-  return string.format("%-8s %s", item.category or "Review", item.label)
-end
-
-local function run_action_item(item)
-  if item and item.run then
-    item.run()
-  end
-end
-
-local function open_native_actions_picker(items)
-  vim.ui.select(items, {
-    prompt = "Review Mode action",
-    format_item = action_item_label,
-  }, run_action_item)
-end
-
-local function open_snacks_actions_picker(items)
-  local picker = get_snacks_picker()
-  if not picker then
-    return false
-  end
-
-  picker.pick({
-    source = "review_mode_actions",
-    title = "Review Mode actions",
-    items = vim.tbl_map(function(item)
-      return {
-        text = action_item_label(item),
-        item = item,
-        preview = {
-          text = string.format("# %s\n\n%s", item.label, item.category or "Review"),
-          ft = "markdown",
-          loc = false,
-        },
-      }
-    end, items),
-    preview = "preview",
-    confirm = function(instance, selected)
-      close_picker_object(instance)
-      run_action_item(selected and (selected.item or selected))
-    end,
-  })
-  return true
-end
-
-local function open_telescope_actions_picker(items)
-  local ok_pickers, pickers = pcall(require, "telescope.pickers")
-  local ok_finders, finders = pcall(require, "telescope.finders")
-  local ok_conf, conf = pcall(require, "telescope.config")
-  local ok_actions, actions = pcall(require, "telescope.actions")
-  local ok_state, action_state = pcall(require, "telescope.actions.state")
-  if not (ok_pickers and ok_finders and ok_conf and ok_actions and ok_state) then
-    return false
-  end
-
-  pickers
-    .new({}, {
-      prompt_title = "Review Mode actions",
-      finder = finders.new_table({
-        results = items,
-        entry_maker = function(item)
-          return {
-            value = item,
-            display = action_item_label(item),
-            ordinal = table.concat({ item.category or "Review", item.label }, " "),
-          }
-        end,
-      }),
-      sorter = conf.values.generic_sorter({}),
-      attach_mappings = function(prompt_bufnr)
-        actions.select_default:replace(function()
-          local selection = action_state.get_selected_entry()
-          actions.close(prompt_bufnr)
-          run_action_item(selection and selection.value)
-        end)
-        return true
-      end,
-    })
-    :find()
-  return true
-end
-
-function M.actions()
-  local items = action_items()
-  for _, provider in ipairs(picker_provider_order()) do
-    if provider == "native" then
-      open_native_actions_picker(items)
-      return
-    end
-
-    local ok, opened = pcall(function()
-      if provider == "snacks" then
-        return open_snacks_actions_picker(items)
-      elseif provider == "telescope" then
-        return open_telescope_actions_picker(items)
-      end
-      return false
-    end)
-    if ok and opened then
-      return
-    end
-    if not ok then
-      notify_picker_error(provider, opened)
-    end
-  end
-end
-
-function M.is_active()
-  return state.active
-end
-
-function M.root()
-  return state.root
-end
-
-function M.is_changed_file(path)
-  return state.files[path] ~= nil
-end
-
-function M.is_changed_dir(path)
-  return state.dirs[path] == true
-end
-
-function M.is_viewed_file(path)
-  return state.config.viewed.enabled and state.viewed[path] == true
-end
-
-local function unresolved_file_comment_count(path)
-  local count = 0
-  for _, comment in ipairs(state.comments[path] or {}) do
-    if comment.is_resolved ~= true then
-      count = count + 1
-    end
-  end
-  return count
-end
-
--- nvim-tree asks every visible node for its counts on every render, so walking
--- file_order per directory made a render O(nodes * changed files). Roll the
--- per-directory totals up once instead.
---
--- The memo lives for one event-loop turn: a render is synchronous, and the bulk
--- rewrites of state.viewed/state.comments all happen inside async callbacks,
--- which are turns of their own. set_viewed_path clears it directly because a
--- toggle can be followed by a read in the same turn.
-local function dir_totals()
-  if state.dir_totals then
-    return state.dir_totals
-  end
-
-  local totals = { changed = {}, unviewed = {}, unresolved = {} }
-  for _, file in ipairs(state.file_order) do
-    local unviewed = state.viewed[file] and 0 or 1
-    local unresolved = unresolved_file_comment_count(file)
-    local dir = vim.fs.dirname(file)
-    while dir and dir ~= "." and dir ~= "" do
-      totals.changed[dir] = (totals.changed[dir] or 0) + 1
-      totals.unviewed[dir] = (totals.unviewed[dir] or 0) + unviewed
-      totals.unresolved[dir] = (totals.unresolved[dir] or 0) + unresolved
-      dir = vim.fs.dirname(dir)
-    end
-  end
-
-  state.dir_totals = totals
-  vim.schedule(function()
-    state.dir_totals = nil
-  end)
-  return totals
-end
-
-function M.unviewed_count(path)
-  if not state.config.viewed.enabled or not path then
-    return 0
-  end
-
-  if state.files[path] then
-    return state.viewed[path] and 0 or 1
-  end
-
-  if not state.dirs[path] then
-    return 0
-  end
-
-  return dir_totals().unviewed[path] or 0
-end
-
-function M.is_viewed_dir(path)
-  if not state.config.viewed.enabled or not state.dirs[path] then
-    return false
-  end
-
-  local totals = dir_totals()
-  return (totals.changed[path] or 0) > 0 and (totals.unviewed[path] or 0) == 0
-end
-
-function M.comment_count(path)
-  return #(state.comments[path] or {})
-end
-
-function M.unresolved_comment_count(path)
-  if not state.config.comments.enabled or not path then
-    return 0
-  end
-
-  if state.files[path] then
-    return unresolved_file_comment_count(path)
-  end
-
-  if not state.dirs[path] then
-    return 0
-  end
-
-  return dir_totals().unresolved[path] or 0
-end
-
 function M.config()
   return state.config
 end
 
 function M.setup(opts)
-  state.config = normalize_config(opts)
+  state.config = core.normalize_config(opts)
 
   if state.config.commands then
     vim.api.nvim_create_user_command("ReviewMode", function()
@@ -4286,12 +2133,27 @@ function M.setup(opts)
     )
     vim.api.nvim_create_user_command(
       "ReviewModeThread",
-      M.show_thread,
+      panel.show_thread,
       { desc = "Show PR comments for the current line" }
     )
     vim.api.nvim_create_user_command(
+      "ReviewModePanel",
+      panel.toggle_panel,
+      { desc = "Toggle the PR thread panel beside the current file" }
+    )
+    vim.api.nvim_create_user_command(
+      "ReviewModeApplySuggestion",
+      panel.apply_suggestion,
+      { desc = "Apply the suggestion on the current line to the buffer" }
+    )
+    vim.api.nvim_create_user_command(
+      "ReviewModeCompose",
+      panel.compose_comment,
+      { range = true, desc = "Draft a PR comment for the current line or visual range" }
+    )
+    vim.api.nvim_create_user_command(
       "ReviewModeReply",
-      M.reply,
+      panel.reply,
       { desc = "Reply to PR comment thread on the current line" }
     )
     vim.api.nvim_create_user_command(
@@ -4318,7 +2180,7 @@ function M.setup(opts)
       M.toggle_viewed()
     end, { desc = "Toggle viewed state for the current PR file" })
     vim.api.nvim_create_user_command("ReviewModeViewedList", function(command)
-      M.list_viewed(command.args ~= "" and command.args or "all")
+      picker.list_viewed(command.args ~= "" and command.args or "all")
     end, {
       nargs = "?",
       complete = function()
@@ -4356,7 +2218,7 @@ function M.setup(opts)
       M.toggle_viewed()
     end, { desc = "Alias for ReviewModeViewedToggle" })
     vim.api.nvim_create_user_command("PrViewedList", function(command)
-      M.list_viewed(command.args ~= "" and command.args or "all")
+      picker.list_viewed(command.args ~= "" and command.args or "all")
     end, {
       nargs = "?",
       complete = function()
@@ -4376,7 +2238,7 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd({ "BufReadPost", "BufEnter" }, {
     group = vim.api.nvim_create_augroup("normal_review_mode", { clear = true }),
     callback = function(args)
-      close_stale_side_by_side_pair()
+      diff.close_stale_side_by_side_pair()
       annotate_buffer(args.buf)
       local delay = tonumber(state.config.performance.hunk_prefetch.focused_delay_ms or 0) or 0
       if delay > 0 then
@@ -4394,17 +2256,32 @@ function M.setup(opts)
     callback = head_watch.check,
   })
 
+  vim.api.nvim_create_autocmd({ "CursorMoved", "BufEnter" }, {
+    group = vim.api.nvim_create_augroup("normal_review_mode_panel", { clear = true }),
+    callback = function()
+      -- Only movement in the code window changes what the panel should show;
+      -- scrolling the panel itself must not redraw it under the cursor.
+      if
+        state.config.panel.follow_cursor
+        and panel.panel_is_open()
+        and vim.api.nvim_get_current_win() ~= panel.panel_win()
+      then
+        panel.schedule_refresh()
+      end
+    end,
+  })
+
   vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
     group = vim.api.nvim_create_augroup("normal_review_mode_old_view", { clear = true }),
     callback = function(args)
-      close_side_by_side_pair_for_buffer(args.buf)
+      diff.close_side_by_side_pair_for_buffer(args.buf)
     end,
   })
 
   vim.api.nvim_create_autocmd("WinClosed", {
     group = vim.api.nvim_create_augroup("normal_review_mode_old_view_window", { clear = true }),
     callback = function(args)
-      close_side_by_side_pair_for_window(tonumber(args.match))
+      diff.close_side_by_side_pair_for_window(tonumber(args.match))
     end,
   })
 

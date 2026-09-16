@@ -38,6 +38,12 @@ chmod +x "$tmp/bin/gh"
 echo "Creating fixture: ${files} changed files, ${lines} lines each" >&2
 cd "$tmp/repo"
 git init -q
+# The fixture repo is a throwaway that checks out a branch and commits. Do not
+# inherit the developer's global hooks (core.hooksPath): a post-checkout hook
+# that keeps root checkouts on the default branch will revert this repo off its
+# feature branch, and a commit-msg hook will reject the fixture's commits.
+mkdir -p "$tmp/nohooks"
+git config core.hooksPath "$tmp/nohooks"
 git config user.email test@example.com
 git config user.name Test
 git checkout -q -B main

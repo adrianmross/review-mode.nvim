@@ -10,6 +10,10 @@ The goal is to keep review inside normal files instead of a dedicated diff UI:
 - jumps between PR hunks, PR comments, and changed files
 - shows changed files/folders in `nvim-tree`
 - loads GitHub review comments asynchronously with a small disk cache
+- renders comments as threads: author, association, age, reactions, replies,
+  and suggestions shown as the diff they will apply
+- opens a thread panel in a side split that follows the cursor, with replies
+  drafted in a real buffer and confirmed before they are sent
 - tracks viewed/unviewed PR files locally, with optional GitHub-backed viewed sync
 - opens the base version of the current file in a side-by-side diff split
 - creates line or visual-range PR comments and suggestions through `gh`
@@ -55,6 +59,7 @@ With `lazy.nvim`:
     { "<leader>rs", "<cmd>ReviewModeViewedSync<cr>", desc = "Review sync viewed" },
     { "<leader>rS", "<cmd>ReviewModeViewedSyncToggle<cr>", desc = "Review toggle viewed sync" },
     { "<leader>rc", "<cmd>ReviewModeThread<cr>", desc = "Review line comments" },
+    { "<leader>rt", "<cmd>ReviewModePanel<cr>", desc = "Review thread panel" },
     { "<leader>rr", "<cmd>ReviewModeReply<cr>", desc = "Review reply" },
     { "<leader>rR", "<cmd>ReviewModeResolveThread<cr>", desc = "Review resolve thread" },
     {
@@ -133,6 +138,7 @@ mapping of yours that they shadow is saved on entry and restored on exit:
 | `]h` / `[h` | next / previous PR hunk |
 | `]c` / `[c` | next / previous PR comment |
 | `]f` / `[f` | next / previous changed file |
+| `gt` | toggle the thread panel |
 | `<Tab>` | mark viewed and jump to the next unviewed file |
 | `<S-Tab>` | toggle viewed |
 | `<Esc>` | step out of the mode |
@@ -148,6 +154,173 @@ mode = {
   },
 },
 ```
+
+## The Thread Panel
+
+`:ReviewModePanel` (or `gt` in the mode) opens a vertical split beside the file.
+It follows the cursor: threads anchored to the current line, or every thread in
+the file when the cursor is not on one. Each thread shows who wrote it, their
+association with the repo, how long ago, the reply chain, emoji reactions, and
+its resolved/outdated state. Fenced code inside a comment is drawn as code
+rather than as more prose, and a `suggestion` block is drawn as the diff it
+would apply — the lines it replaces above the lines it proposes.
+
+Keys inside the panel:
+
+| key | action |
+|---|---|
+| `r` | reply to the thread under the cursor |
+| `c` | comment on the line the code window is on |
+| `R` | resolve or unresolve the thread |
+| `a` | apply the thread's suggestion to the buffer |
+| `o` | open the comment on GitHub |
+| `<CR>` | jump to the thread's line in the code window |
+| `]c` / `[c` | next / previous thread in the panel |
+| `gr` | reload comments from GitHub |
+| `q` | close the panel |
+
+### Replies are drafted, not typed into a prompt
+
+`r`, `c`, `:ReviewModeCompose` and `:ReviewModeReply` open a real markdown
+buffer instead of `vim.ui.input`, so a reply can be more than one line and can
+be edited before it goes out. Nothing is sent until you confirm:
+
+| key | action |
+|---|---|
+| `<C-s>` or `:w` | post, after a confirmation prompt showing what will be sent |
+| `<C-r>` | quote the lines you have selected in the code window, with their path and line numbers |
+| `<C-g>` | seed a ```suggestion block from the lines the draft is aimed at |
+| `q` | discard the draft (confirmed if it is not empty) |
+
+`<C-r>` is what lets a reply point at lines other than the one the thread is
+anchored to: select the lines in the code window, come back to the draft, and
+press it.
+
+Resolved threads are hidden in the panel and the float unless a line has
+nothing else on it; set `comments.show_resolved = true` to always show them.
+
+## API
+
+`review_mode.api` is the surface to build on. The rule that keeps it honest: the
+bundled panel, picker and nvim-tree decorations use nothing else, so anything
+they can do, your own UI can do too. `scripts/validate.sh` enforces it — if one
+of them starts requiring a plugin internal, the build fails, because that means
+the API is missing something.
+
+```lua
+local api = require("review_mode.api")
+
+-- session
+api.session()        --> { repo, pr, base, head, root, in_mode } or nil
+api.is_active() / api.is_in_mode() / api.config() / api.root()
+
+-- lifecycle
+api.start() / api.stop() / api.enter() / api.leave() / api.toggle() / api.refresh()
+
+-- files
+api.files()          --> { { path, status, added, removed, viewed, comments, unresolved }, ... }
+api.file(path)       --> one entry, or nil when the path is not in the PR
+api.is_changed_file(path) / api.is_changed_dir(path)
+api.is_viewed_file(path) / api.is_viewed_dir(path)
+api.unviewed_count(path) / api.unresolved_count(path) / api.comment_count(path)
+api.set_viewed(path, true)
+api.hunks(path, function(hunks) ... end)   -- lazy, so it takes a callback
+
+-- threads
+api.threads({ path = "src/a.ts", line = 42, include_resolved = false })
+api.comment({ path = ..., start_line = ..., end_line = ..., body = ... }, cb)
+api.reply({ thread_id = ..., body = ... }, cb)          -- or comment_id = ... to skip the lookup
+api.resolve(thread_id, true, cb)
+api.reload_comments()
+
+-- navigation ("hunk" | "comment" | "file")
+api.goto_next("comment") / api.goto_prev("hunk")
+
+-- rendering, so a custom UI reuses the thread renderer instead of reimplementing it
+local lines, marks = api.render_threads(threads, { width = 60 })
+api.apply_render(bufnr, namespace, lines, marks)
+api.suggestion(comment)   --> the ```suggestion block as lines, or nil
+
+-- events (see Hooks); returns an unsubscribe function
+local unsubscribe = api.on("comments_loaded", function(ctx) ... end)
+```
+
+Writes take a `callback(ok, err)`. `api.reply` needs the id of the comment it
+answers: pass `comment_id` directly, or a `thread_id` and it is looked up —
+add `path` to limit that lookup to one file instead of every changed file. `api.unstable_state()` returns the raw session
+table as an escape hatch — if you need it, that is a gap in the API worth
+reporting.
+
+A thread looks like:
+
+```lua
+{
+  id = "PRRT_...",            -- GitHub thread id, or "comment:N" from the REST fallback
+  path = "src/a.ts",
+  line = 42, start_line = 40,
+  is_resolved = false, is_outdated = false,
+  comments = {
+    { id = 1, author = "reviewer", association = "OWNER", created_at = "...",
+      body = "...", url = "...", reactions = { { content = "THUMBS_UP", count = 2 } } },
+  },
+}
+```
+
+## Hooks
+
+Two kinds, and they answer different questions.
+
+**Observers** are told what happened. Every listener runs and the return value
+is ignored. Each one is also a `User` autocommand, so use whichever style you
+prefer.
+
+| hook | autocommand | fires when |
+|---|---|---|
+| `on_start` | `ReviewModeStart` | a review session loads |
+| `on_enter` | `ReviewModeEnter` | you step into the mode |
+| `on_leave` | `ReviewModeLeave` | you step out, session intact |
+| `on_stop` | `ReviewModeStop` | the session ends |
+| `on_comments_loaded` | `ReviewModeCommentsLoaded` | review comments finish loading |
+| `on_viewed_changed` | `ReviewModeViewedChanged` | viewed state changes |
+| `on_panel_open` / `on_panel_close` | `ReviewModePanelOpen` / `Close` | the thread panel opens or closes |
+| `on_comment_posted` | `ReviewModeCommentPosted` | you post a comment or reply |
+| `on_thread_resolved` | `ReviewModeThreadResolved` | you resolve or unresolve a thread |
+
+**Overrides** are asked *how* something should be done, and what they return
+replaces the built-in behavior. Return `nil` to fall back to the default, so an
+override can decide case by case.
+
+| hook | gets | returns |
+|---|---|---|
+| `open_panel_window` | `{ buf, position, width, origin }` | the window to show the panel in |
+
+```lua
+require("review_mode").setup({
+  hooks = {
+    on_start = function(ctx)
+      vim.notify(("reviewing %s#%s"):format(ctx.repo, ctx.pr))
+    end,
+    on_comment_posted = function(ctx)
+      vim.notify("posted a " .. ctx.kind .. " on " .. ctx.path)
+    end,
+
+    -- open the thread panel as a float instead of a split
+    open_panel_window = function(ctx)
+      return vim.api.nvim_open_win(ctx.buf, true, {
+        relative = "editor",
+        width = ctx.width,
+        height = math.floor(vim.o.lines * 0.8),
+        row = 1,
+        col = vim.o.columns - ctx.width - 2,
+        border = "rounded",
+      })
+    end,
+  },
+})
+```
+
+A hook that errors is reported once and then ignored — the review keeps working
+and the built-in behavior still runs.
 
 ### Committing during a review
 
@@ -170,9 +343,35 @@ The default, `"inplace"`, never touches your windows.
 
 `vim.g.review_mode` is `"mode"`, `"session"`, or `nil`, and
 `require("review_mode").statusline()` returns e.g. `REVIEW owner/repo#123 3/12`
-(uppercase in the mode, lowercase when stepped out). The plugin also fires
-`User ReviewModeStart`, `ReviewModeEnter`, `ReviewModeLeave` and
-`ReviewModeStop`, so you can drive a statusline, a which-key group or a
+(uppercase in the mode, lowercase when stepped out).
+
+Review is a key layer over normal mode, not a real Vim mode, so `mode()` never
+returns it and a statusline's stock mode component cannot show it on its own.
+`require("review_mode").mode_text()` is a drop-in replacement for that
+component: it returns `REVIEW` while the layer is live and you are in normal
+mode, `REVIEW INSERT` (or `REVIEW VISUAL`, …) once you step into another mode,
+and the plain mode name when there is no review. So you keep normal/insert
+context while the slot still says you are reviewing.
+
+With lualine:
+
+```lua
+{
+  "nvim-lualine/lualine.nvim",
+  opts = {
+    sections = {
+      lualine_a = {
+        { require("review_mode").mode_text },
+      },
+    },
+  },
+}
+```
+
+Pass `{ label = "PR", separator = "·" }` to change the wording. `statusline()`
+is the longer form with the PR number and viewed count, for `lualine_c` or
+`lualine_x`. The plugin also fires `User` autocommands for every event in
+[Hooks](#hooks), so you can drive a statusline, a which-key group or a
 colorscheme change yourself:
 
 ```lua
@@ -201,9 +400,12 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeNextFile` jumps to the next changed file
 - `:ReviewModePrevFile` jumps to the previous changed file
 - `:ReviewModeOldToggle` toggles the base version or unified diff for the current file
-- `:ReviewModeDiffLayoutToggle` toggles the open diff between side-by-side and unified layout
-- `:ReviewModeDiffFullToggle` toggles the open diff between condensed context and full-file context
+- `:ReviewModeDiffLayoutToggle` switches between side-by-side and unified layout, opening the diff if none is open
+- `:ReviewModeDiffFullToggle` switches between condensed context and full-file context, opening the diff if none is open
 - `:ReviewModeThread` shows comments on the current line
+- `:ReviewModePanel` toggles the thread panel beside the current file
+- `:ReviewModeCompose` drafts a PR comment for the current line or visual range
+- `:ReviewModeApplySuggestion` applies the suggestion on the current line to the buffer
 - `:ReviewModeReply` replies to the latest comment on the current line
 - `:ReviewModeResolveThread` resolves the PR review thread on the current line
 - `:ReviewModeUnresolveThread` unresolves the PR review thread on the current line
@@ -256,6 +458,13 @@ require("review_mode").setup({
     sign_text = "", -- Nerd Font glyph, override if your font lacks it
     sign_hl_group = "DiagnosticInfo",
     virtual_text = true,
+    show_resolved = false,
+  },
+  panel = {
+    auto_open = false,
+    follow_cursor = true,
+    position = "right", -- "right" | "left"
+    width = 60,
   },
   diff = {
     fast_diffopt = "internal,filler,closeoff,indent-heuristic,linematch:0",
@@ -283,6 +492,7 @@ require("review_mode").setup({
   picker = {
     provider = "auto", -- "auto" | "native" | "snacks" | "telescope"
   },
+  hooks = {}, -- see "Hooks" above
   viewed = {
     enabled = true,
     sync = false,
