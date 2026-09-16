@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.12.0](https://github.com/adrianmross/review-mode.nvim/compare/v0.11.0...v0.12.0) (2026-09-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* **api:** the query functions moved off the module root to review_mode.api, and unresolved_comment_count is now api.unresolved_count. is_active, root, is_changed_file, is_changed_dir, is_viewed_file, is_viewed_dir, unviewed_count and comment_count are affected. setup, statusline, mode_text and the command-backing functions stay on the root, so :ReviewMode* commands and existing keymaps are unaffected.
+
+### Features
+
+* **api:** add a public API, hooks, and a richer comment UI ([#59](https://github.com/adrianmross/review-mode.nvim/issues/59)) ([aa35866](https://github.com/adrianmross/review-mode.nvim/commit/aa358667427f316f6093e4625f91ae295967b291))
+
 ## [0.11.0](https://github.com/adrianmross/review-mode.nvim/compare/v0.10.2...v0.11.0) (2026-09-15)
 
 
