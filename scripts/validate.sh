@@ -24,7 +24,9 @@ nvim --headless -u NONE -i NONE \
 # If one of these needs a plugin internal, the API is missing something: add it
 # to review_mode.api rather than reaching around it.
 for ui in lua/review_mode/panel.lua lua/review_mode/picker.lua lua/review_mode/integrations/nvim_tree.lua; do
-  if grep -nE 'require\("review_mode\.(state|github|viewed|comments|diff|init)"\)' "$ui"; then
+  # Lua accepts require("x"), require 'x', and require( "x" ) alike, so match the
+  # call loosely rather than one spelling of it.
+  if grep -nE "require[[:space:]]*\(?[[:space:]]*['\"]review_mode\.(state|github|viewed|comments|diff|init)['\"]" "$ui"; then
     echo "$ui reaches past review_mode.api (see the rule in lua/review_mode/api.lua)" >&2
     exit 1
   fi
@@ -124,6 +126,12 @@ chmod +x "$tmp/bin/gh"
 
 cd "$tmp/repo"
 git init -q
+# The fixture repo is a throwaway that checks out a branch and commits. Do not
+# inherit the developer's global hooks (core.hooksPath): a post-checkout hook
+# that keeps root checkouts on the default branch will revert this repo off its
+# feature branch, and a commit-msg hook will reject the fixture's commits.
+mkdir -p "$tmp/nohooks"
+git config core.hooksPath "$tmp/nohooks"
 git config user.email test@example.com
 git config user.name Test
 git checkout -q -B main

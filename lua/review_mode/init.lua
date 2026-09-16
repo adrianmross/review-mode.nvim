@@ -1858,11 +1858,20 @@ end
 function M.submit_reply(opts, callback)
   opts = opts or {}
   local body = util.trim(opts.body or "")
+  -- A reply needs the id of the comment it answers. Callers may pass it
+  -- directly, or a thread id: search the file they named, and every changed
+  -- file when they did not, so opts.path stays optional.
   local comment_id = opts.comment_id
   if not comment_id and opts.thread_id then
-    for _, thread in ipairs(comments_ui.threads(state.comments[opts.path], opts.path)) do
-      if thread.id == opts.thread_id then
-        comment_id = thread.comments[#thread.comments].id
+    local paths = opts.path and { opts.path } or state.file_order
+    for _, path in ipairs(paths) do
+      for _, thread in ipairs(comments_ui.threads(state.comments[path], path)) do
+        if thread.id == opts.thread_id then
+          comment_id = thread.comments[#thread.comments].id
+          break
+        end
+      end
+      if comment_id then
         break
       end
     end

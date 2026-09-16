@@ -1,9 +1,13 @@
 -- The public API.
 --
--- This is the surface other code is meant to build on: the bundled panel,
--- picker and nvim-tree decorations use nothing else. That rule is the point —
--- if the built-in UI cannot reach past this module, then anything it can do,
--- your own UI can do too.
+-- This is the surface other code is meant to build on: review data reaches the
+-- bundled panel, picker and nvim-tree decorations only through here, never
+-- through state, github, viewed, comments or diff. That rule is the point — if
+-- the built-in UI cannot reach past this module, then anything it can do, your
+-- own UI can do too. (review_mode.util and review_mode.hooks are shared
+-- infrastructure carrying no review data, so a UI may require them directly;
+-- this module deliberately does not re-export them, because a passthrough would
+-- blur the boundary. scripts/validate.sh enforces the list.)
 --
 -- Everything here is stable. The modules behind it are not: functions that
 -- still live in init.lua are reached through a lazy require inside the call, so
@@ -11,11 +15,10 @@
 local M = {}
 
 local core = require("review_mode.state")
-local util = require("review_mode.util")
 local hooks = require("review_mode.hooks")
+local util = require("review_mode.util")
 local comments_ui = require("review_mode.comments")
 local github = require("review_mode.github")
-local viewed_state = require("review_mode.viewed")
 
 local state = core.state
 
@@ -422,8 +425,5 @@ end
 function M.unstable_state()
   return state
 end
-
-M.util = util
-M.viewed_store = viewed_state
 
 return M

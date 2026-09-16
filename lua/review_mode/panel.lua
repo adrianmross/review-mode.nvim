@@ -1,9 +1,15 @@
 -- The thread panel and its draft buffer.
 --
--- This module talks to review_mode.api and nothing else from the plugin, which
--- is the rule that keeps the API honest: everything the built-in panel does,
--- your own UI can do too. Its window state is local here rather than in the
--- shared session table, because it belongs to this UI and not to the review.
+-- Review data reaches this module only through review_mode.api -- never through
+-- state, github, viewed, comments or diff -- which is the rule that keeps the
+-- API honest: everything the built-in panel does, your own UI can do too.
+-- review_mode.util and review_mode.hooks are the exception, and not a loophole:
+-- they are shared infrastructure (process calls, buffer paths, the event bus)
+-- that carry no review data, and any third-party UI may require them too.
+-- scripts/validate.sh enforces exactly that list.
+--
+-- Its window state is local here rather than in the shared session table,
+-- because it belongs to this UI and not to the review.
 local M = {}
 
 local api = require("review_mode.api")

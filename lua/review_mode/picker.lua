@@ -2,7 +2,11 @@
 -- or plain vim.ui.select.
 --
 -- Provider selection lives here so nothing else has to care which is installed.
--- Like the panel, this talks to review_mode.api rather than plugin internals.
+--
+-- Like the panel, review data reaches this module only through review_mode.api.
+-- review_mode.util is shared infrastructure rather than a review internal, so
+-- requiring it directly is deliberate; the API does not re-export it, because a
+-- passthrough would blur the boundary it is meant to draw.
 local M = {}
 
 local api = require("review_mode.api")

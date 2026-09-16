@@ -229,7 +229,7 @@ api.hunks(path, function(hunks) ... end)   -- lazy, so it takes a callback
 -- threads
 api.threads({ path = "src/a.ts", line = 42, include_resolved = false })
 api.comment({ path = ..., start_line = ..., end_line = ..., body = ... }, cb)
-api.reply({ thread_id = ..., path = ..., body = ... }, cb)
+api.reply({ thread_id = ..., body = ... }, cb)          -- or comment_id = ... to skip the lookup
 api.resolve(thread_id, true, cb)
 api.reload_comments()
 
@@ -245,7 +245,9 @@ api.suggestion(comment)   --> the ```suggestion block as lines, or nil
 local unsubscribe = api.on("comments_loaded", function(ctx) ... end)
 ```
 
-Writes take a `callback(ok, err)`. `api.unstable_state()` returns the raw session
+Writes take a `callback(ok, err)`. `api.reply` needs the id of the comment it
+answers: pass `comment_id` directly, or a `thread_id` and it is looked up —
+add `path` to limit that lookup to one file instead of every changed file. `api.unstable_state()` returns the raw session
 table as an escape hatch — if you need it, that is a gap in the API worth
 reporting.
 
