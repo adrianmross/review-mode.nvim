@@ -26,6 +26,7 @@ M.highlights = {
   ReviewModeSuggestionAdd = "DiffAdd",
   ReviewModeSuggestionDelete = "DiffDelete",
   ReviewModeReaction = "Special",
+  ReviewModeReactionOwn = "DiagnosticOk",
   ReviewModeResolved = "DiagnosticOk",
   ReviewModeUnresolved = "DiagnosticWarn",
   ReviewModeOutdated = "DiagnosticHint",
@@ -114,18 +115,30 @@ function M.relative_time(iso, now)
   return string.format("%dy ago", math.max(1, math.floor(delta / 31536000)))
 end
 
-function M.reactions_text(groups)
-  local parts = {}
+--- Reactions as one line of text plus byte spans, so the viewer's own reactions
+--- can be highlighted apart from everyone else's. Returns nil when there are none.
+--- Each span is { col, end_col, own }.
+function M.reaction_spans(groups)
+  local text, spans = "", {}
   for _, group in ipairs(groups or {}) do
     local count = tonumber(group.count) or 0
     if count > 0 then
-      parts[#parts + 1] = string.format("%s %d", reaction_emoji[group.content] or "?", count)
+      if text ~= "" then
+        text = text .. "  "
+      end
+      local part = string.format("%s %d", reaction_emoji[group.content] or "?", count)
+      spans[#spans + 1] = { #text, #text + #part, group.viewer_has_reacted == true }
+      text = text .. part
     end
   end
-  if #parts == 0 then
+  if text == "" then
     return nil
   end
-  return table.concat(parts, "  ")
+  return text, spans
+end
+
+function M.reactions_text(groups)
+  return (M.reaction_spans(groups))
 end
 
 local function wrap(text, width)
@@ -323,22 +336,32 @@ local function write_comment(out, comment, index, opts)
     end
   end
 
-  local reactions = M.reactions_text(comment.reactions)
+  local reactions, spans = M.reaction_spans(comment.reactions)
   if reactions then
-    out:add(indent .. reactions, "ReviewModeReaction")
+    local reaction_row = out:add(indent .. reactions)
+    for _, span in ipairs(spans) do
+      out:span(
+        reaction_row,
+        #indent + span[1],
+        #indent + span[2],
+        span[3] and "ReviewModeReactionOwn" or "ReviewModeReaction"
+      )
+    end
   end
+  return row
 end
 
 --- Render threads into buffer lines plus extmark specs.
 ---
 --- @param threads table list of normalized threads
 --- @param opts table width, now, original_lines, empty, hint
---- @return table lines, table marks, table rows keyed by thread id
+--- @return table lines, table marks, table rows keyed by thread id, table header rows keyed by comment id
 function M.render(threads, opts)
   opts = opts or {}
   opts.width = math.max(30, tonumber(opts.width) or 60)
   local out = writer()
   local rows = {}
+  local comment_rows = {}
 
   if not threads or #threads == 0 then
     out:add(opts.empty or "No PR comments here", "ReviewModeHint")
@@ -348,7 +371,7 @@ function M.render(threads, opts)
         out:add(line, "ReviewModeHint")
       end
     end
-    return out.lines, out.marks, rows
+    return out.lines, out.marks, rows, comment_rows
   end
 
   for index, thread in ipairs(threads) do
@@ -376,13 +399,16 @@ function M.render(threads, opts)
       if comment_index > 1 then
         out:blank()
       end
-      write_comment(out, comment, comment_index, {
+      local comment_row = write_comment(out, comment, comment_index, {
         width = opts.width,
         now = opts.now,
         -- a thread's own context wins, so two suggestions on one line do not
         -- both render the first one's replaced lines
         original_lines = comment_index == 1 and (thread.original_lines or opts.original_lines) or nil,
       })
+      if comment.id then
+        comment_rows[comment.id] = comment_row
+      end
     end
   end
 
@@ -394,7 +420,7 @@ function M.render(threads, opts)
     end
   end
 
-  return out.lines, out.marks, rows
+  return out.lines, out.marks, rows, comment_rows
 end
 
 --- Write rendered lines and their marks into a scratch buffer.
@@ -518,6 +544,7 @@ function M.threads(list, path)
 
     thread.comments[#thread.comments + 1] = {
       id = comment.id,
+      node_id = comment.node_id,
       author = comment.user and comment.user.login or nil,
       association = comment.association,
       created_at = comment.created_at,
@@ -571,6 +598,24 @@ function M.visible(threads, show_resolved)
   -- An all-resolved file still has something to say; falling back to the full
   -- list beats showing "no comments" over a line that visibly has a sign.
   return #visible > 0 and visible or threads
+end
+
+-- Reactions ------------------------------------------------------------------
+
+--- The reactions GitHub accepts, in GitHub's order: { content, emoji }.
+M.reaction_contents = {}
+for _, content in ipairs({ "THUMBS_UP", "THUMBS_DOWN", "LAUGH", "HOORAY", "CONFUSED", "HEART", "ROCKET", "EYES" }) do
+  M.reaction_contents[#M.reaction_contents + 1] = { content = content, emoji = reaction_emoji[content] }
+end
+
+--- The REST spelling ("+1", "laugh", ...) of a GraphQL reaction content, or nil.
+function M.rest_reaction_key(content)
+  for key, value in pairs(rest_reaction_content) do
+    if value == content then
+      return key
+    end
+  end
+  return nil
 end
 
 return M

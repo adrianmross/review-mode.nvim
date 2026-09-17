@@ -178,6 +178,7 @@ Keys inside the panel:
 | `<CR>` | jump to the thread's line in the code window |
 | `]c` / `[c` | next / previous thread in the panel |
 | `gr` | reload comments from GitHub |
+| `+` | react to the comment under the cursor |
 | `q` | close the panel |
 
 ### Replies are drafted, not typed into a prompt
@@ -199,6 +200,18 @@ press it.
 
 Resolved threads are hidden in the panel and the float unless a line has
 nothing else on it; set `comments.show_resolved = true` to always show them.
+
+### Reactions
+
+`+` in the panel, or `:ReviewModeReact`, toggles one of GitHub's eight
+reactions on a comment: your own reactions are highlighted
+(`ReviewModeReactionOwn`) and marked in the picker, and picking one you already
+added removes it. Reactions are not confirmed first, because they are cheap and
+reversible.
+
+Comments loaded through the REST fallback can only *gain* a reaction: removing
+one needs the GraphQL id that the REST comment list does not carry, so removal
+is refused with a message rather than silently doing nothing.
 
 ## API
 
@@ -235,6 +248,8 @@ api.comment({ path = ..., start_line = ..., end_line = ..., body = ... }, cb)
 api.reply({ thread_id = ..., body = ... }, cb)          -- or comment_id = ... to skip the lookup
 api.resolve(thread_id, true, cb)
 api.reload_comments()
+api.react({ comment = thread.comments[1], content = "THUMBS_UP" }, cb)  -- toggles
+api.reaction_contents                                   -- the eight contents and their emoji
 
 -- navigation ("hunk" | "comment" | "file")
 api.goto_next("comment") / api.goto_prev("hunk")
@@ -268,7 +283,8 @@ A thread looks like:
   is_resolved = false, is_outdated = false,
   comments = {
     { id = 1, author = "reviewer", association = "OWNER", created_at = "...",
-      body = "...", url = "...", reactions = { { content = "THUMBS_UP", count = 2 } } },
+      body = "...", url = "...",
+      reactions = { { content = "THUMBS_UP", count = 2, viewer_has_reacted = true } } },
   },
 }
 ```
@@ -294,6 +310,7 @@ prefer.
 | `on_thread_resolved` | `ReviewModeThreadResolved` | you resolve or unresolve a thread |
 | `on_checkout_ready` | `ReviewModeCheckoutReady` | a PR worktree is ready to review |
 | `on_checkout_removed` | `ReviewModeCheckoutRemoved` | a review worktree is removed |
+| `on_reaction_changed` | `ReviewModeReactionChanged` | you add or remove a reaction (`{ comment_id, content, added }`) |
 
 **Overrides** are asked *how* something should be done, and what they return
 replaces the built-in behavior. Return `nil` to fall back to the default, so an
@@ -466,6 +483,7 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeReply` replies to the latest comment on the current line
 - `:ReviewModeResolveThread` resolves the PR review thread on the current line
 - `:ReviewModeUnresolveThread` unresolves the PR review thread on the current line
+- `:ReviewModeReact [THUMBS_UP]` toggles a reaction on the latest comment on the current line, asking which one when no argument is given
 - `:ReviewModeComment` creates a PR comment on the current line or visual range
 - `:ReviewModeSuggest` creates a GitHub suggestion comment on the current line or visual range
 - `:ReviewModeViewedToggle` toggles viewed state for the current PR file

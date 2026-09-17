@@ -170,7 +170,7 @@ local function render_panel()
     end
   end
 
-  local lines, marks, rows = api.render_threads(threads, {
+  local lines, marks, rows, comment_rows = api.render_threads(threads, {
     width = width,
     empty = empty,
     hint = panel_hint,
@@ -179,6 +179,7 @@ local function render_panel()
   write_render(ui.panel_buf, lines, marks)
   ui.panel_threads = threads
   ui.panel_rows = rows
+  ui.panel_comment_rows = comment_rows
   ui.panel_target = target
 
   if vim.api.nvim_get_current_win() ~= ui.panel_win then
@@ -224,6 +225,26 @@ local function panel_thread_at_cursor()
     end
   end
   return best or threads[1]
+end
+
+-- The comment whose header is at or above the cursor, within the thread under
+-- it. Outside the panel there is no cursor to go by, so take the latest.
+local function panel_comment_at_cursor()
+  local thread = panel_thread_at_cursor()
+  local comments = thread and thread.comments or {}
+  if #comments == 0 or vim.api.nvim_get_current_win() ~= ui.panel_win then
+    return thread, comments[#comments]
+  end
+
+  local row = vim.api.nvim_win_get_cursor(ui.panel_win)[1] - 1
+  local best = comments[1]
+  for _, comment in ipairs(comments) do
+    local comment_row = (ui.panel_comment_rows or {})[comment.id]
+    if comment_row and comment_row <= row then
+      best = comment
+    end
+  end
+  return thread, best
 end
 
 -- Composer -------------------------------------------------------------------
@@ -548,11 +569,17 @@ local function apply_panel_keys(bufnr)
   map("gr", function()
     api.reload_comments()
   end)
+  -- Reactions --
+  map("+", function()
+    local _, comment = panel_comment_at_cursor()
+    M.react_to(comment)
+  end)
 end
 
 local function forget_panel()
   ui.panel_win, ui.panel_buf = nil, nil
   ui.panel_threads, ui.panel_rows, ui.panel_target = nil, nil, nil
+  ui.panel_comment_rows = nil
 end
 
 function M.close_panel()
@@ -697,6 +724,49 @@ function M.compose_comment(command)
     start_line = start_line,
     end_line = end_line,
   })
+end
+
+-- Reactions ------------------------------------------------------------------
+
+--- Toggle a reaction on `comment`. Without `content`, pick one; reactions you
+--- already added are marked, and picking one removes it. No confirmation: a
+--- reaction is cheap to undo.
+function M.react_to(comment, content)
+  if not comment then
+    vim.notify("No PR comment to react to", vim.log.levels.WARN)
+    return
+  end
+  if content and content ~= "" then
+    api.react({ comment = comment, content = content:upper() })
+    return
+  end
+
+  local own = {}
+  for _, reaction in ipairs(comment.reactions or {}) do
+    own[reaction.content] = reaction.viewer_has_reacted
+  end
+  vim.ui.select(api.reaction_contents, {
+    prompt = "React to " .. (comment.author or "comment"),
+    format_item = function(item)
+      return string.format("%s %s%s", item.emoji, item.content, own[item.content] and "  (yours, remove)" or "")
+    end,
+  }, function(item)
+    if item then
+      api.react({ comment = comment, content = item.content })
+    end
+  end)
+end
+
+--- React to the latest comment on the current line, or the one under the panel
+--- cursor.
+function M.react(content)
+  if panel_is_open() and vim.api.nvim_get_current_win() == ui.panel_win then
+    local _, comment = panel_comment_at_cursor()
+    return M.react_to(comment, content)
+  end
+  local thread = focused_thread()
+  local comments = thread and thread.comments or {}
+  M.react_to(comments[#comments], content)
 end
 
 function M.toggle_panel()
