@@ -87,6 +87,11 @@ local defaults = {
     },
   },
   commands = true,
+  -- review a PR without checking it out (:ReviewModeCheckout). Review worktrees
+  -- are only ever removed by :ReviewModeCheckoutClean; "manual" is the only mode.
+  checkout = {
+    cleanup = "manual",
+  },
 }
 
 local state = {
@@ -155,6 +160,8 @@ local state = {
   saved_keys = {},
   workspace_tab = nil,
   return_tab = nil,
+  -- per-session override of config.mode.workspace ("tab" for checkout reviews)
+  workspace = nil,
 }
 
 M.defaults = defaults

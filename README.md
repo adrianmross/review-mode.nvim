@@ -216,6 +216,7 @@ api.is_active() / api.is_in_mode() / api.config() / api.root()
 
 -- lifecycle
 api.start() / api.stop() / api.enter() / api.leave() / api.toggle() / api.refresh()
+api.review_pr({ pr = 123 }, function(ok, result) ... end)   -- review without checking out
 
 -- files
 api.files()          --> { { path, status, added, removed, viewed, comments, unresolved }, ... }
@@ -285,6 +286,8 @@ prefer.
 | `on_panel_open` / `on_panel_close` | `ReviewModePanelOpen` / `Close` | the thread panel opens or closes |
 | `on_comment_posted` | `ReviewModeCommentPosted` | you post a comment or reply |
 | `on_thread_resolved` | `ReviewModeThreadResolved` | you resolve or unresolve a thread |
+| `on_checkout_ready` | `ReviewModeCheckoutReady` | a PR worktree is ready to review |
+| `on_checkout_removed` | `ReviewModeCheckoutRemoved` | a review worktree is removed |
 
 **Overrides** are asked *how* something should be done, and what they return
 replaces the built-in behavior. Return `nil` to fall back to the default, so an
@@ -293,6 +296,7 @@ override can decide case by case.
 | hook | gets | returns |
 |---|---|---|
 | `open_panel_window` | `{ buf, position, width, origin }` | the window to show the panel in |
+| `prepare_checkout` | `{ repo, pr, head, base, ref, root, default_path }` | the path of a worktree at `ref` to review in |
 
 ```lua
 require("review_mode").setup({
@@ -338,6 +342,53 @@ switches to it, stepping out returns you to the tab you came from, and the
 review layout survives in between — so you can flip between "my work" and "the
 review" without either disturbing the other. Ending the session closes the tab.
 The default, `"inplace"`, never touches your windows.
+
+### Review a PR without checking it out
+
+`:ReviewModeCheckout 123` (or a PR URL, or `api.review_pr`) reviews a PR
+without touching your working tree or your branch. It fetches the PR head into
+`refs/review-mode/pr/<n>` — `pull/<n>/head`, so PRs from forks work — gives it
+a detached worktree of its own under
+`stdpath("cache")/review-mode/worktrees/<owner>_<repo>/pr-<n>`, and opens the
+review in its own tabpage with a tab-local `:tcd` into that worktree. Your own
+checkout, branch, cwd and windows are left alone.
+
+The files are real files on disk, not virtual read-only diff buffers, so LSP,
+formatters, treesitter and the rest of your setup work on the PR exactly as
+they do on your own code — that is the whole point of the plugin, and a PR you
+did not check out should not be a lesser review.
+
+Review worktrees are never removed for you. `:ReviewModeCheckoutClean [pr]`
+removes the clean ones after a confirmation and refuses the dirty ones, listing
+what is uncommitted in each; the worktree the current session is using is
+refused too. A tree that has uncommitted changes is also never updated: a
+second `:ReviewModeCheckout` on it reuses it as it stands and warns instead of
+moving it to the new PR head. `checkout = { cleanup = "manual" }` is the only
+cleanup mode.
+
+If you manage worktrees with your own tool, route creation through it with the
+`prepare_checkout` override and return the path to use. The worktree it makes
+is yours, including its removal — `:ReviewModeCheckoutClean` only touches the
+default cache location (the `wt` flags below are one tool's; returning `nil`
+falls back to the built-in worktree, so a hook can decide case by case):
+
+```lua
+hooks = {
+  -- create the review worktree with worktrunk instead
+  prepare_checkout = function(ctx)
+    local branch = "review/pr-" .. ctx.pr
+    local args = { "wt", "switch", branch, "--no-cd", "-y", "-x", "echo", "--", "{{ worktree_path }}" }
+    if vim.system({ "git", "rev-parse", "--verify", "--quiet", branch }, { cwd = ctx.root }):wait().code ~= 0 then
+      vim.list_extend(args, { "--create", "--base", ctx.head })
+    end
+    local out = vim.system(args, { cwd = ctx.root, text = true }):wait()
+    if out.code ~= 0 then
+      return nil -- fall back to the built-in worktree
+    end
+    return vim.split(vim.trim(out.stdout), "\n")[1]
+  end,
+}
+```
 
 ### Statusline and events
 
@@ -419,7 +470,9 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeViewedClear` clears local viewed state for the current PR
 - `:ReviewModeViewedSync` pulls viewed state from GitHub
 - `:ReviewModeViewedSyncToggle` toggles GitHub viewed-state sync
-- `:ReviewModeSummary` shows file, comment, thread, and viewed-sync counts.
+- `:ReviewModeSummary` shows file, comment, thread, and viewed-sync counts
+- `:ReviewModeCheckout <number|url>` reviews a PR in its own worktree without checking it out
+- `:ReviewModeCheckoutClean [pr]` removes clean review worktrees, after a confirmation.
 
 ## gh-dash / Worktree Handoff
 
@@ -493,6 +546,9 @@ require("review_mode").setup({
     provider = "auto", -- "auto" | "native" | "snacks" | "telescope"
   },
   hooks = {}, -- see "Hooks" above
+  checkout = {
+    cleanup = "manual", -- review worktrees are only removed by :ReviewModeCheckoutClean
+  },
   viewed = {
     enabled = true,
     sync = false,
