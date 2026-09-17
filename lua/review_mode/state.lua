@@ -12,6 +12,10 @@ local default_comment_sign_text = ""
 local defaults = {
   auto_open_first_change = true,
   follow_head = true,
+  -- "auto" | "github" | "gitlab"; auto reads the origin remote's host
+  provider = "auto",
+  -- self-hosted GitLab hosts that auto should treat as GitLab
+  gitlab_hosts = {},
   comments = {
     enabled = true,
     cache_ttl_seconds = 300,
@@ -216,6 +220,13 @@ function M.normalize_config(opts)
     picker.provider = defaults.picker.provider
   end
   config.picker = picker
+
+  if config.provider ~= "auto" and config.provider ~= "github" and config.provider ~= "gitlab" then
+    config.provider = defaults.provider
+  end
+  if type(config.gitlab_hosts) ~= "table" then
+    config.gitlab_hosts = {}
+  end
 
   return config
 end

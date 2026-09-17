@@ -319,6 +319,10 @@ function M.load_comments_async(opts)
     return
   end
 
+  if state.provider == "gitlab" then
+    return require("review_mode.providers.gitlab").fetch_comments_async(generation)
+  end
+
   state.comments_loading = true
   M.review_threads_async(generation, nil, {}, function(threads, err)
     if not core.is_current(generation) then
@@ -357,6 +361,11 @@ function M.toggle_reaction(comment, content, callback)
     if callback then
       callback(ok, err)
     end
+  end
+
+  if state.provider == "gitlab" then
+    require("review_mode.providers").unsupported("Reactions", callback)
+    return
   end
 
   local rest_key = comments_ui.rest_reaction_key(content)
@@ -458,6 +467,10 @@ local function finish_comment_write(event, comment, callback)
 end
 
 function M.edit_comment(opts, callback)
+  if state.provider == "gitlab" then
+    require("review_mode.providers").unsupported("Editing a comment", callback)
+    return false
+  end
   opts = opts or {}
   local body = util.trim(opts.body or "")
   if body == "" then
@@ -480,6 +493,10 @@ function M.edit_comment(opts, callback)
 end
 
 function M.delete_comment(comment_id, callback)
+  if state.provider == "gitlab" then
+    require("review_mode.providers").unsupported("Deleting a comment", callback)
+    return false
+  end
   local comment, err = M.own_comment(comment_id)
   if not comment then
     return refuse(err, callback)

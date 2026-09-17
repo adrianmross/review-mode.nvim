@@ -56,6 +56,11 @@ local function active_pr_arg()
 end
 
 local function pr_url_async(callback)
+  if state.provider == "gitlab" then
+    local url = require("review_mode.providers.gitlab").web_url()
+    callback(url, not url and "merge request metadata is still loading" or nil)
+    return
+  end
   local args = { "pr", "view" }
   local pr = active_pr_arg()
   if pr then
@@ -99,6 +104,9 @@ local function pr_view_args()
 end
 
 local function pr_meta_async(generation, callback)
+  if state.provider == "gitlab" then
+    return require("review_mode.providers.gitlab").mr_meta_async(generation, callback)
+  end
   gh_json_async(pr_view_args(), function(meta, err)
     if not core.is_current(generation) then
       return
@@ -1163,6 +1171,9 @@ local function load_review_async(generation, opts)
 end
 
 local function load_metadata_async(generation, callback)
+  if state.provider == "gitlab" then
+    return require("review_mode.providers.gitlab").load_metadata_async(generation, callback)
+  end
   local pending = 2
   local slug_result = nil
   local meta_result = nil
@@ -1224,6 +1235,10 @@ function M.start(opts)
   state.base = opts.base or util.env_value("GH_REVIEW_BASE")
   state.head = opts.head or util.env_value("GH_REVIEW_HEAD")
   state.workspace = opts.workspace
+  state.provider = require("review_mode.providers").select(root)
+  if state.provider == "gitlab" then
+    require("review_mode.providers.gitlab").apply_env()
+  end
   local generation = core.next_generation()
   core.reset_review_data()
   diff.close_old_view()
@@ -1733,6 +1748,10 @@ local function set_thread_resolved(resolved, thread_id, callback)
     thread_id = target.thread_id
   end
 
+  if state.provider == "gitlab" then
+    return require("review_mode.providers.gitlab").set_resolved(thread_id, resolved, callback)
+  end
+
   -- REST-loaded and cache-derived threads have a synthetic id; GitHub only
   -- resolves threads it issued an id for.
   if thread_id:match("^comment:") or thread_id:match("^rest:") then
@@ -1842,6 +1861,10 @@ local function submit_review_comment(path, start_line, end_line, body, callback)
     return
   end
 
+  if state.provider == "gitlab" then
+    return require("review_mode.providers.gitlab").submit_comment(path, start_line, end_line, body, callback)
+  end
+
   if state.head then
     post_review_comment(path, start_line, end_line, body, state.head, callback)
     return
@@ -1881,6 +1904,9 @@ function M.submit_comment(opts, callback)
 end
 
 function M.submit_reply(opts, callback)
+  if state.provider == "gitlab" then
+    return require("review_mode.providers.gitlab").submit_reply(opts, callback)
+  end
   opts = opts or {}
   local body = util.trim(opts.body or "")
   -- A reply needs the id of the comment it answers. Callers may pass it
@@ -2007,6 +2033,9 @@ function M.copy_url()
 end
 
 function M.checks()
+  if state.provider == "gitlab" then
+    return require("review_mode.providers").unsupported("PR checks")
+  end
   local args = { "gh", "pr", "checks" }
   local pr = active_pr_arg()
   if pr then
@@ -2027,6 +2056,9 @@ function M.checks()
 end
 
 function M.status()
+  if state.provider == "gitlab" then
+    return require("review_mode.providers").unsupported("PR status")
+  end
   local args = { "pr", "view" }
   local pr = active_pr_arg()
   if pr then

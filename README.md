@@ -27,6 +27,8 @@ The goal is to keep review inside normal files instead of a dedicated diff UI:
 - Neovim 0.10+
 - `git`
 - GitHub CLI `gh`, authenticated for the target repository
+- for GitLab merge requests: GitLab CLI `glab`, authenticated for the target
+  project (see [GitLab](#gitlab))
 - a [Nerd Font](https://www.nerdfonts.com/) for the default comment sign; without one, set
   `comments.sign_text` to any character your font has
 - optional: `lewis6991/gitsigns.nvim`
@@ -599,6 +601,45 @@ GH_REVIEW_REPO=adrianmross/example GH_REVIEW_PR=123 nvim +ReviewMode
 
 If those variables are not set, the plugin asks `gh` for the current repo and PR.
 
+## GitLab
+
+Merge requests are reviewed the same way pull requests are: the provider is
+picked from the `origin` remote, so a `gitlab.com` checkout just works.
+
+```lua
+require("review_mode").setup({
+  provider = "auto",          -- "auto" | "github" | "gitlab"
+  gitlab_hosts = { "git.corp.example" }, -- self-hosted instances "auto" should treat as GitLab
+})
+```
+
+Requirements: `glab`, authenticated for the project. `auto` reads the host of
+`git remote get-url origin` — anything containing `gitlab`, or listed in
+`gitlab_hosts`, is GitLab. A launcher can hand the session over instead, the
+same way `GH_REVIEW_*` does:
+
+```sh
+GL_REVIEW_MR=123 nvim +ReviewMode
+```
+
+`GL_REVIEW_REPO`, `GL_REVIEW_BASE` and `GL_REVIEW_HEAD` skip the matching
+startup lookups. Setting `GL_REVIEW_MR` also selects the GitLab provider.
+
+What works: MR metadata, diff discussions loaded as threads (signs, panel,
+tree, `api.threads`), starting a thread on a line or range, replying, and
+resolving/unresolving. Threads are GitLab discussions, so `api.reply` and
+`api.resolve` take a discussion id where GitHub takes a review thread id.
+
+GitHub-only for now, and reported as "not supported on GitLab yet" rather than
+falling through to `gh`: viewed-state sync, reactions, editing and deleting
+comments, pending comments and review submission, reviewing in a separate
+checkout (`:ReviewModeCheckout`), `:ReviewModeStatus` and `:ReviewModeChecks`.
+Review comments as diagnostics and the quickfix list are forge-independent and
+work on GitLab too. Local
+viewed state, the diff views and navigation are forge-independent and work as
+usual. A comment on a range anchors to its last line, and `:ReviewModeSuggest`
+posts GitHub's suggestion syntax, which GitLab does not read the same way.
+
 ## Picker Providers
 
 The default `picker.provider = "auto"` uses snacks.nvim when available, then
@@ -619,6 +660,8 @@ Install snacks.nvim or Telescope for the preview and toggle keymaps.
 require("review_mode").setup({
   auto_open_first_change = true,
   follow_head = true,
+  provider = "auto", -- "auto" | "github" | "gitlab"
+  gitlab_hosts = {}, -- self-hosted GitLab hosts for provider = "auto"
   comments = {
     enabled = true,
     cache_ttl_seconds = 300,
@@ -700,7 +743,9 @@ reuse, and an optional delayed background scan for PRs under
 `performance.background_hunk_scan.max_files`.
 
 External launchers can provide `GH_REVIEW_REPO`, `GH_REVIEW_PR`,
-`GH_REVIEW_BASE`, and `GH_REVIEW_HEAD` to avoid startup discovery calls.
+`GH_REVIEW_BASE`, and `GH_REVIEW_HEAD` to avoid startup discovery calls, or
+`GL_REVIEW_MR`, `GL_REVIEW_REPO`, `GL_REVIEW_BASE` and `GL_REVIEW_HEAD` for
+GitLab.
 
 Viewed state is persisted in `stdpath("state")/review-mode-state.json` by
 default. Set `viewed.sync = true` or run `:ReviewModeViewedSyncToggle` to pull

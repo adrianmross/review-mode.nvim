@@ -91,6 +91,9 @@ end
 --- opts.repo  "owner/repo" (optional; defaults to the repo `gh` sees from root)
 --- opts.root  the local clone to fetch into (defaults to the cwd's repo)
 function M.prepare(opts, callback)
+  if core.state.provider == "gitlab" then
+    return callback(nil, require("review_mode.providers").unsupported("Reviewing in a separate checkout"))
+  end
   opts = opts or {}
   coroutine.wrap(function()
     local pr, repo = M.parse_target(opts.pr, opts.repo)

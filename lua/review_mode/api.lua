@@ -65,6 +65,7 @@ function M.session()
     head = state.head,
     root = state.root,
     in_mode = state.in_mode,
+    provider = state.provider,
   }
 end
 
