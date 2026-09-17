@@ -99,11 +99,20 @@ Keys inside the panel:
         <CR>    jump to the thread's line in the code window
         ]c [c   next / previous thread in the panel
         gr      reload comments from GitHub
+        +       react to the comment under the cursor
         q       close the panel
 
 Resolved threads are hidden in the panel and in |:ReviewModeThread| unless a
 line has nothing else on it. Set comments.show_resolved = true to always show
 them.
+
+                                                       *review-mode-reactions*
+The panel's `+` key and |:ReviewModeReact| toggle one of GitHub's eight
+reactions on a comment. Your own reactions are highlighted with
+ReviewModeReactionOwn and marked in the picker, and choosing one you already
+added removes it. Nothing is confirmed first: a reaction is cheap to undo.
+Comments loaded through the REST fallback can only gain a reaction; removing
+one needs a GraphQL id they do not carry, so removal is refused.
 
                                                            *review-mode-draft*
 |:ReviewModeReply|, |:ReviewModeCompose| and the panel's `r` and `c` keys open a
@@ -217,6 +226,12 @@ COMMANDS                                                  *review-mode-commands*
                                                         *:ReviewModeUnresolveThread*
 :ReviewModeUnresolveThread
         Unresolve the PR review thread on the current line.
+
+                                                        *:ReviewModeReact*
+:ReviewModeReact [content]
+        Toggle a reaction on the latest PR comment on the current line, or on
+        the comment under the panel cursor. Without an argument, pick one of
+        THUMBS_UP, THUMBS_DOWN, LAUGH, HOORAY, CONFUSED, HEART, ROCKET, EYES.
 
                                                         *:ReviewModePanel*
 :ReviewModePanel

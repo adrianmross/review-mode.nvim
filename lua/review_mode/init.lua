@@ -2063,6 +2063,14 @@ function M.action_items()
     { category = "Thread", label = "Reply to current thread", run = panel.reply },
     { category = "Thread", label = "Resolve current thread", run = M.resolve_thread },
     { category = "Thread", label = "Unresolve current thread", run = M.unresolve_thread },
+    -- Reactions --
+    {
+      category = "Thread",
+      label = "React to current comment",
+      run = function()
+        panel.react()
+      end,
+    },
     { category = "Review", label = "Comment on line/range", run = M.comment },
     { category = "Review", label = "Draft comment on line/range", run = panel.compose_comment },
     { category = "Review", label = "Apply suggestion on line", run = panel.apply_suggestion },
@@ -2324,6 +2332,18 @@ function M.setup(opts)
     vim.api.nvim_create_user_command("ReviewModeDiagnosticsToggle", function()
       require("review_mode.diagnostics").toggle()
     end, { desc = "Toggle PR review threads as diagnostics" })
+    -- Reactions --
+    vim.api.nvim_create_user_command("ReviewModeReact", function(command)
+      panel.react(command.args)
+    end, {
+      nargs = "?",
+      complete = function()
+        return vim.tbl_map(function(item)
+          return item.content
+        end, api.reaction_contents)
+      end,
+      desc = "Toggle a reaction on the latest PR comment on the current line",
+    })
   end
 
   if setup_done then

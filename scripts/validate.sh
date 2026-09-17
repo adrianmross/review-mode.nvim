@@ -91,6 +91,8 @@ case "$1 $2" in
       printf '{"data":{"resolveReviewThread":{"thread":{"id":"thread_1","isResolved":true}}}}\n'
     elif [[ "$args" == *"unresolveReviewThread"* ]]; then
       printf '{"data":{"unresolveReviewThread":{"thread":{"id":"thread_1","isResolved":false}}}}\n'
+    elif [[ "$args" == *"reviewThreads"* && "${REVIEW_MODE_FIXTURE:-}" == "reactions" ]]; then
+      printf '%s\n' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"id":"thread_1","path":"file.txt","line":2,"originalLine":2,"startLine":null,"diffSide":"RIGHT","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_1","databaseId":1,"path":"file.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r1","state":"SUBMITTED","authorAssociation":"OWNER","viewerDidAuthor":false,"body":"Needs review","author":{"login":"reviewer"},"reactionGroups":[{"content":"THUMBS_UP","viewerHasReacted":true,"reactors":{"totalCount":2}},{"content":"HOORAY","viewerHasReacted":false,"reactors":{"totalCount":1}}]},{"id":"comment_5","databaseId":5,"path":"file.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-03T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r5","state":"SUBMITTED","authorAssociation":"MEMBER","viewerDidAuthor":true,"body":"Done","author":{"login":"maintainer"},"reactionGroups":[]}]}}]}}}}}'
     elif [[ "$args" == *"reviewThreads"* ]]; then
       if [[ "${REVIEW_MODE_FORCE_REST_COMMENTS:-}" == "1" ]]; then
         echo "forced reviewThreads failure" >&2
@@ -113,10 +115,17 @@ case "$1 $2" in
         exit 1
       fi
       printf '{"data":{"unmarkFileAsViewed":{"clientMutationId":null}}}\n'
+    elif [[ "$args" == *"addReaction"* || "$args" == *"removeReaction"* ]]; then
+      printf '%s\n' "$*" >> "${REVIEW_MODE_GH_LOG:-/dev/null}"
+      printf '{"data":{"reaction":{"reaction":{"content":"THUMBS_UP"}}}}\n'
     else
       echo "unexpected gh graphql args: $*" >&2
       exit 1
     fi
+    ;;
+  "api repos/owner/repo/pulls/comments/1/reactions")
+    printf '%s\n' "$*" >> "${REVIEW_MODE_GH_LOG:-/dev/null}"
+    printf '{"id":7,"content":"+1"}\n'
     ;;
   *)
     echo "unexpected gh args: $*" >&2
@@ -213,3 +222,17 @@ REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/diagnostics_fixture.lua"
+
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/reactions-cache" \
+XDG_STATE_HOME="$tmp/reactions-state" \
+GH_REVIEW_REPO=owner/repo \
+GH_REVIEW_PR=123 \
+GH_REVIEW_BASE=main \
+GH_REVIEW_HEAD=abc123 \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+REVIEW_MODE_FIXTURE=reactions \
+REVIEW_MODE_GH_LOG="$tmp/reactions-gh.log" \
+nvim --headless -u NONE -i NONE \
+  -c "set noswapfile" \
+  -l "$repo_root/scripts/reactions_fixture.lua"

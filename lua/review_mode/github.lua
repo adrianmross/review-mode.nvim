@@ -78,7 +78,11 @@ function M.normalize_thread_comment(thread, comment)
   for _, group in ipairs(comment.reactionGroups or {}) do
     local count = group.reactors and tonumber(group.reactors.totalCount) or 0
     if count > 0 then
-      reactions[#reactions + 1] = { content = group.content, count = count }
+      reactions[#reactions + 1] = {
+        content = group.content,
+        count = count,
+        viewer_has_reacted = group.viewerHasReacted == true,
+      }
     end
   end
 
@@ -214,6 +218,7 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
               }
               reactionGroups {
                 content
+                viewerHasReacted
                 reactors {
                   totalCount
                 }
@@ -332,6 +337,79 @@ function M.load_comments_async(opts)
     end
     state.comments_loading = false
     hooks.emit("comments_loaded", { repo = state.repo, pr = state.pr })
+  end)
+end
+
+-- Reactions ------------------------------------------------------------------
+
+--- Toggle one reaction on a review comment: remove it when the viewer already
+--- reacted with it, add it otherwise, then reload. `comment` is a stored or
+--- thread comment. callback(ok, err).
+---
+--- GraphQL needs the comment's node id. Comments without one (the REST
+--- fallback) can only gain a reaction through REST: removing one there needs
+--- the reaction's own id, which the REST comment list does not carry.
+function M.toggle_reaction(comment, content, callback)
+  local function done(ok, err)
+    if not ok then
+      vim.notify("Review Mode reaction: " .. tostring(err), vim.log.levels.WARN)
+    end
+    if callback then
+      callback(ok, err)
+    end
+  end
+
+  local rest_key = comments_ui.rest_reaction_key(content)
+  if not state.repo or not state.pr then
+    return done(false, "start Review Mode first")
+  end
+  if not comment or not comment.id or not rest_key then
+    return done(false, "a comment and a valid reaction content are required")
+  end
+
+  local added = true
+  for _, reaction in ipairs(comment.reactions or {}) do
+    if reaction.content == content and reaction.viewer_has_reacted then
+      added = false
+    end
+  end
+
+  local args
+  if comment.node_id then
+    local field = added and "addReaction" or "removeReaction"
+    args = {
+      "api",
+      "graphql",
+      "-f",
+      string.format(
+        "query=mutation($subjectId: ID!, $content: ReactionContent!) { %s(input: {subjectId: $subjectId, content: $content}) { reaction { content } } }",
+        field
+      ),
+      "-F",
+      "subjectId=" .. comment.node_id,
+      "-F",
+      "content=" .. content,
+    }
+  elseif added then
+    args = {
+      "api",
+      string.format("repos/%s/pulls/comments/%s/reactions", state.repo, comment.id),
+      "--method",
+      "POST",
+      "-f",
+      "content=" .. rest_key,
+    }
+  else
+    return done(false, "this comment was loaded without a GraphQL id, so its reactions cannot be removed here")
+  end
+
+  gh_json_async(args, function(result, err)
+    if not result then
+      return done(false, err or "unknown error")
+    end
+    M.load_comments_async({ force = true })
+    hooks.emit("reaction_changed", { comment_id = comment.id, content = content, added = added })
+    done(true, nil)
   end)
 end
 

@@ -41,6 +41,7 @@ M.events = {
   "thread_resolved",
   "checkout_ready",
   "checkout_removed",
+  "reaction_changed",
 }
 
 -- Session ---------------------------------------------------------------------
@@ -335,6 +336,24 @@ function M.reload_comments()
   return github.load_comments_async({ force = true })
 end
 
+-- Reactions ---------------------------------------------------------------------
+
+--- The eight reactions GitHub accepts, as { content = "THUMBS_UP", emoji = ... }.
+M.reaction_contents = comments_ui.reaction_contents
+
+--- Toggle a reaction on a comment from M.threads: removed when you already
+--- reacted with it, added otherwise. Emits "reaction_changed". callback(ok, err).
+---
+--- opts.comment  a thread comment
+--- opts.content  one of M.reaction_contents, e.g. "THUMBS_UP"
+---
+--- Comments loaded through the REST fallback can gain a reaction but not lose
+--- one: removal needs a GraphQL id.
+function M.react(opts, callback)
+  opts = opts or {}
+  return github.toggle_reaction(opts.comment, opts.content, callback)
+end
+
 -- Navigation ------------------------------------------------------------------
 
 local jumps = {
@@ -357,7 +376,7 @@ end
 -- Rendering -------------------------------------------------------------------
 
 --- Turn threads into buffer lines plus extmark specs, the same way the built-in
---- panel does. Returns lines, marks, rows-by-thread-id.
+--- panel does. Returns lines, marks, rows-by-thread-id, header-rows-by-comment-id.
 function M.render_threads(threads, opts)
   return comments_ui.render(threads, opts)
 end
