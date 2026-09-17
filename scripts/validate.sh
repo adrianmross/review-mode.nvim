@@ -23,7 +23,7 @@ nvim --headless -u NONE -i NONE \
 # The bundled UI must build on the public API, the same as anyone else's would.
 # If one of these needs a plugin internal, the API is missing something: add it
 # to review_mode.api rather than reaching around it.
-for ui in lua/review_mode/panel.lua lua/review_mode/picker.lua lua/review_mode/integrations/nvim_tree.lua lua/review_mode/diagnostics.lua; do
+for ui in lua/review_mode/panel.lua lua/review_mode/picker.lua lua/review_mode/integrations/nvim_tree.lua lua/review_mode/diagnostics.lua lua/review_mode/review_buffer.lua; do
   # Lua accepts require("x"), require 'x', and require( "x" ) alike, so match the
   # call loosely rather than one spelling of it.
   if grep -nE "require[[:space:]]*\(?[[:space:]]*['\"]review_mode\.(state|github|viewed|comments|diff|init)['\"]" "$ui"; then
@@ -144,6 +144,28 @@ case "$1 $2" in
   "api repos/owner/repo/pulls/comments/1/reactions")
     printf '%s\n' "$*" >> "${REVIEW_MODE_GH_LOG:-/dev/null}"
     printf '{"id":7,"content":"+1"}\n'
+    ;;
+  "api repos/owner/repo/pulls/123/reviews")
+    # review submission: keep the --input payload where the fixture can read it
+    args=("$@")
+    input=""
+    for ((i = 0; i < ${#args[@]}; i++)); do
+      if [[ "${args[$i]}" == "--input" ]]; then
+        input="${args[$((i + 1))]}"
+      fi
+    done
+    if [[ "$*" != *"--method POST"* || -z "$input" ]]; then
+      echo "unexpected gh reviews args: $*" >&2
+      exit 1
+    fi
+    if [[ "${REVIEW_MODE_FAIL_REVIEW:-}" == "1" ]]; then
+      echo "forced review submission failure" >&2
+      exit 1
+    fi
+    if [[ -n "${REVIEW_MODE_REVIEW_CAPTURE:-}" ]]; then
+      cp "$input" "$REVIEW_MODE_REVIEW_CAPTURE"
+    fi
+    printf '{"id":500,"state":"COMMENTED"}\n'
     ;;
   *)
     echo "unexpected gh args: $*" >&2
@@ -268,3 +290,16 @@ REVIEW_MODE_GH_LOG="$tmp/edit-delete-gh.log" \
 nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/comment_edit_delete_fixture.lua"
+
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/review-cache" \
+XDG_STATE_HOME="$tmp/review-state" \
+GH_REVIEW_REPO=owner/repo \
+GH_REVIEW_PR=123 \
+GH_REVIEW_BASE=main \
+GH_REVIEW_HEAD=abc123 \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+REVIEW_MODE_REVIEW_CAPTURE="$tmp/review-capture.json" \
+nvim --headless -u NONE -i NONE \
+  -c "set noswapfile" \
+  -l "$repo_root/scripts/review_submit_fixture.lua"

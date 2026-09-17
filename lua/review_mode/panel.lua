@@ -255,7 +255,7 @@ end
 local function close_composer()
   local win, bufnr = ui.composer_win, ui.composer_buf
   ui.composer_win, ui.composer_buf, ui.composer_source = nil, nil, nil
-  ui.composer_submit, ui.composer_prompt = nil, nil
+  ui.composer_submit, ui.composer_prompt, ui.composer_pend = nil, nil, nil
   if win and vim.api.nvim_win_is_valid(win) then
     pcall(vim.api.nvim_win_close, win, true)
   elseif bufnr and vim.api.nvim_buf_is_valid(bufnr) then
@@ -346,6 +346,18 @@ function M.composer_submit()
   end
 end
 
+--- Queue the draft for the next review instead of posting it. Only offered for
+--- new comments: the reviews endpoint cannot batch replies.
+function M.composer_pend()
+  local pend = ui.composer_pend
+  local body = composer_body()
+  if not pend or body == "" then
+    return
+  end
+  close_composer()
+  pend(body)
+end
+
 function M.composer_cancel()
   if composer_body() ~= "" and vim.fn.confirm("Discard this draft?", "&Discard\n&Keep editing", 2) ~= 1 then
     return
@@ -372,6 +384,7 @@ local function open_composer(opts)
   ui.composer_source = opts.source
   ui.composer_submit = opts.submit
   ui.composer_prompt = opts.prompt
+  ui.composer_pend = opts.pend
 
   vim.api.nvim_win_set_buf(ui.composer_win, bufnr)
   vim.bo[bufnr].buftype = "acwrite"
@@ -379,7 +392,9 @@ local function open_composer(opts)
   vim.bo[bufnr].filetype = "markdown"
   vim.api.nvim_buf_set_name(bufnr, "review-mode://" .. (opts.name or "draft"))
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, opts.default or { "" })
-  vim.wo[ui.composer_win].winbar = opts.title .. "  │  C-s post  C-r quote  C-g suggest  q cancel"
+  vim.wo[ui.composer_win].winbar = opts.title
+    .. "  │  C-s post  C-r quote  C-g suggest  q cancel"
+    .. (opts.pend and "  C-p pending" or "")
   vim.wo[ui.composer_win].wrap = true
 
   local function map(mode, lhs, rhs)
@@ -389,6 +404,9 @@ local function open_composer(opts)
   map("n", "q", M.composer_cancel)
   map({ "n", "i" }, "<C-r>", M.composer_reference)
   map({ "n", "i" }, "<C-g>", M.composer_suggest)
+  if opts.pend then
+    map({ "n", "i" }, "<C-p>", M.composer_pend)
+  end
 
   vim.api.nvim_create_autocmd("BufWriteCmd", {
     buffer = bufnr,
@@ -457,6 +475,14 @@ local function comment_on_target(source)
     source = source,
     submit = function(body)
       api.comment({ path = source.path, start_line = first, end_line = last, body = body })
+    end,
+    pend = function(body)
+      local draft, err = api.add_pending({ path = source.path, start_line = first, end_line = last, body = body })
+      if not draft then
+        vim.notify("Review Mode pending: " .. tostring(err), vim.log.levels.ERROR)
+        return
+      end
+      vim.notify(string.format("Added pending comment on %s:%d (%d pending)", source.path, last, #api.pending()))
     end,
   })
 end
@@ -637,6 +663,10 @@ local function apply_panel_keys(bufnr)
   end)
   map("D", function()
     delete_comment(select(2, panel_comment_at_cursor()))
+  end)
+  -- the review buffer is a sibling UI module, loaded lazily
+  map("S", function()
+    require("review_mode.review_buffer").open()
   end)
 end
 
