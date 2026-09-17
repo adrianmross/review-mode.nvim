@@ -42,6 +42,9 @@ M.events = {
   "checkout_ready",
   "checkout_removed",
   "reaction_changed",
+  -- edit and delete
+  "comment_edited",
+  "comment_deleted",
 }
 
 -- Session ---------------------------------------------------------------------
@@ -329,6 +332,28 @@ end
 --- through the REST fallback cannot be resolved.
 function M.resolve(thread_id, resolved, callback)
   return plugin().set_thread_resolved_by_id(thread_id, resolved ~= false, callback)
+end
+
+-- Edit and delete ---------------------------------------------------------------
+
+--- True when the viewer may edit or delete this comment; otherwise false and
+--- why not. Comments loaded through the REST fallback carry no authorship, so
+--- they are always refused.
+function M.can_modify_comment(comment_id)
+  local comment, err = github.own_comment(comment_id)
+  return comment ~= nil, err
+end
+
+--- Replace the body of your own comment. opts: comment_id, body.
+--- Emits "comment_edited" and reloads comments. callback(ok, err).
+function M.edit_comment(opts, callback)
+  return github.edit_comment(opts, callback)
+end
+
+--- Delete your own comment. Emits "comment_deleted" and reloads comments.
+--- callback(ok, err).
+function M.delete_comment(comment_id, callback)
+  return github.delete_comment(comment_id, callback)
 end
 
 --- Reload comments from GitHub, bypassing the disk cache.

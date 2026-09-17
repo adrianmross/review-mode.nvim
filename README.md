@@ -179,6 +179,8 @@ Keys inside the panel:
 | `]c` / `[c` | next / previous thread in the panel |
 | `gr` | reload comments from GitHub |
 | `+` | react to the comment under the cursor |
+| `e` | edit your comment under the cursor in a draft buffer |
+| `D` | delete your comment under the cursor, after a confirmation |
 | `q` | close the panel |
 
 ### Replies are drafted, not typed into a prompt
@@ -197,6 +199,10 @@ be edited before it goes out. Nothing is sent until you confirm:
 `<C-r>` is what lets a reply point at lines other than the one the thread is
 anchored to: select the lines in the code window, come back to the draft, and
 press it.
+
+`e`, `D`, `:ReviewModeEditComment` and `:ReviewModeDeleteComment` only act on
+comments you wrote. GitHub says who that is only through the GraphQL query, so
+comments loaded through the REST fallback are refused rather than guessed at.
 
 Resolved threads are hidden in the panel and the float unless a line has
 nothing else on it; set `comments.show_resolved = true` to always show them.
@@ -250,6 +256,9 @@ api.resolve(thread_id, true, cb)
 api.reload_comments()
 api.react({ comment = thread.comments[1], content = "THUMBS_UP" }, cb)  -- toggles
 api.reaction_contents                                   -- the eight contents and their emoji
+api.edit_comment({ comment_id = ..., body = ... }, cb)  -- your own comments only
+api.delete_comment(comment_id, cb)
+api.can_modify_comment(comment_id)   --> true, or false and why not
 
 -- navigation ("hunk" | "comment" | "file")
 api.goto_next("comment") / api.goto_prev("hunk")
@@ -311,6 +320,8 @@ prefer.
 | `on_checkout_ready` | `ReviewModeCheckoutReady` | a PR worktree is ready to review |
 | `on_checkout_removed` | `ReviewModeCheckoutRemoved` | a review worktree is removed |
 | `on_reaction_changed` | `ReviewModeReactionChanged` | you add or remove a reaction (`{ comment_id, content, added }`) |
+| `on_comment_edited` | `ReviewModeCommentEdited` | you edit one of your comments |
+| `on_comment_deleted` | `ReviewModeCommentDeleted` | you delete one of your comments |
 
 **Overrides** are asked *how* something should be done, and what they return
 replaces the built-in behavior. Return `nil` to fall back to the default, so an
@@ -484,6 +495,8 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeResolveThread` resolves the PR review thread on the current line
 - `:ReviewModeUnresolveThread` unresolves the PR review thread on the current line
 - `:ReviewModeReact [THUMBS_UP]` toggles a reaction on the latest comment on the current line, asking which one when no argument is given
+- `:ReviewModeEditComment` edits your most recent comment on the current line in a draft buffer
+- `:ReviewModeDeleteComment` deletes your most recent comment on the current line, after a confirmation
 - `:ReviewModeComment` creates a PR comment on the current line or visual range
 - `:ReviewModeSuggest` creates a GitHub suggestion comment on the current line or visual range
 - `:ReviewModeViewedToggle` toggles viewed state for the current PR file

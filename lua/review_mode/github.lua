@@ -413,4 +413,88 @@ function M.toggle_reaction(comment, content, callback)
   end)
 end
 
+-- Editing and deleting your own comments ----------------------------------------
+
+--- The loaded comment with this id, when the viewer wrote it; otherwise nil and
+--- why not. Only the GraphQL path says who wrote a comment: one loaded through
+--- the REST fallback has no viewer_did_author at all, and guessing from the
+--- login would be wrong for anyone reviewing under a different account.
+function M.own_comment(comment_id)
+  for _, list in pairs(state.comments) do
+    for _, comment in ipairs(list) do
+      if comment_id ~= nil and tostring(comment.id) == tostring(comment_id) then
+        if comment.viewer_did_author == nil then
+          return nil, "authorship is unknown for comments loaded through the REST fallback"
+        end
+        if comment.viewer_did_author ~= true then
+          return nil, "you can only edit or delete your own comments"
+        end
+        return comment, nil
+      end
+    end
+  end
+  return nil, "comment not found in this review"
+end
+
+local function refuse(err, callback)
+  if callback then
+    callback(false, err)
+  end
+  return false
+end
+
+local function finish_comment_write(event, comment, callback)
+  return function(output, err)
+    if not output then
+      refuse(err or "unknown error", callback)
+      return
+    end
+    M.load_comments_async({ force = true })
+    hooks.emit(event, { comment_id = comment.id, thread_id = comment.thread_id, path = comment.path })
+    if callback then
+      callback(true, nil)
+    end
+  end
+end
+
+function M.edit_comment(opts, callback)
+  opts = opts or {}
+  local body = util.trim(opts.body or "")
+  if body == "" then
+    return refuse("a body is required", callback)
+  end
+  local comment, err = M.own_comment(opts.comment_id)
+  if not comment then
+    return refuse(err, callback)
+  end
+
+  gh_json_async({
+    "api",
+    "--method",
+    "PATCH",
+    string.format("repos/%s/pulls/comments/%s", state.repo, comment.id),
+    "-f",
+    "body=" .. body,
+  }, finish_comment_write("comment_edited", comment, callback))
+  return true
+end
+
+function M.delete_comment(comment_id, callback)
+  local comment, err = M.own_comment(comment_id)
+  if not comment then
+    return refuse(err, callback)
+  end
+
+  -- DELETE answers 204 with an empty body, which gh_json_async cannot decode;
+  -- success here is the exit code alone.
+  util.system_async({
+    "gh",
+    "api",
+    "--method",
+    "DELETE",
+    string.format("repos/%s/pulls/comments/%s", state.repo, comment.id),
+  }, {}, finish_comment_write("comment_deleted", comment, callback))
+  return true
+end
+
 return M
