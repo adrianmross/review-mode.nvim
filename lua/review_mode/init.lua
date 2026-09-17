@@ -2086,6 +2086,21 @@ function M.action_items()
         end)
       end,
     },
+    -- Diagnostics and quickfix
+    {
+      category = "Thread",
+      label = "Threads to quickfix",
+      run = function()
+        require("review_mode.diagnostics").set_quickfix()
+      end,
+    },
+    {
+      category = "Thread",
+      label = "Toggle thread diagnostics",
+      run = function()
+        require("review_mode.diagnostics").toggle()
+      end,
+    },
     { category = "PR", label = "Summary", run = M.summary },
   }
 end
@@ -2296,6 +2311,19 @@ function M.setup(opts)
     vim.api.nvim_create_user_command("ReviewModeCheckoutClean", function(command)
       M.checkout_clean(command.args ~= "" and command.args or nil)
     end, { nargs = "?", desc = "Remove clean review worktrees" })
+    -- Diagnostics and quickfix
+    vim.api.nvim_create_user_command("ReviewModeQuickfix", function(command)
+      require("review_mode.diagnostics").set_quickfix({ filter = command.args ~= "" and command.args or nil })
+    end, {
+      nargs = "?",
+      complete = function()
+        return { "unresolved", "all" }
+      end,
+      desc = "Fill the quickfix list with PR review threads",
+    })
+    vim.api.nvim_create_user_command("ReviewModeDiagnosticsToggle", function()
+      require("review_mode.diagnostics").toggle()
+    end, { desc = "Toggle PR review threads as diagnostics" })
   end
 
   if setup_done then
@@ -2303,6 +2331,9 @@ function M.setup(opts)
   end
 
   setup_done = true
+
+  -- Diagnostics and quickfix: requiring it wires its event subscriptions.
+  require("review_mode.diagnostics").setup()
 
   vim.api.nvim_create_autocmd({ "BufReadPost", "BufEnter" }, {
     group = vim.api.nvim_create_augroup("normal_review_mode", { clear = true }),

@@ -19,6 +19,16 @@ local defaults = {
     sign_hl_group = "DiagnosticInfo",
     virtual_text = true,
     show_resolved = false,
+    -- Diagnostics: review threads as vim.diagnostic entries ------------------
+    -- Off by default: once on, ]d/[d, statusline counts and Trouble mix review
+    -- comments in with LSP diagnostics. display stays off so the namespace
+    -- feeds navigation and floats without re-drawing the plugin's own signs.
+    diagnostics = {
+      enabled = false,
+      severity = { unresolved = "INFO", outdated = "HINT", resolved = "HINT" },
+      display = { signs = false, virtual_text = false, underline = false },
+    },
+    -- End diagnostics ---------------------------------------------------------
   },
   panel = {
     auto_open = false,

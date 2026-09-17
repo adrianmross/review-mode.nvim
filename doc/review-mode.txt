@@ -297,6 +297,16 @@ COMMANDS                                                  *review-mode-commands*
         also never updated: reviewing its PR again reuses it as it stands and
         warns.
 
+                                                        *:ReviewModeQuickfix*
+:ReviewModeQuickfix [unresolved|all]
+        Fill the quickfix list with the PR review threads and open it. The
+        default follows comments.show_resolved; "all" also lists resolved
+        threads, marked [resolved].
+
+                                                        *:ReviewModeDiagnosticsToggle*
+:ReviewModeDiagnosticsToggle
+        Toggle review threads as vim.diagnostic entries.
+
 ==============================================================================
 KEYMAPS                                                    *review-mode-keymaps*
 
@@ -338,6 +348,11 @@ SETUP                                                        *review-mode-setup*
       sign_hl_group = "DiagnosticInfo",
       virtual_text = true,
       show_resolved = false,
+      diagnostics = {
+        enabled = false,
+        severity = { unresolved = "INFO", outdated = "HINT", resolved = "HINT" },
+        display = { signs = false, virtual_text = false, underline = false },
+      },
     },
     panel = {
       auto_open = false,
@@ -437,5 +452,24 @@ enabled, side-by-side diffs temporarily apply diff.fast_diffopt and restore the
 previous diffopt when the split closes. Unified diffs highlight changed spans
 inside modified lines with DiffText; set diff.partial_line_highlights = false
 to disable those inline spans.
+
+                                                    *review-mode-diagnostics*
+Set comments.diagnostics.enabled = true (or run :ReviewModeDiagnosticsToggle)
+to publish every visible thread as a vim.diagnostic entry in the
+review_mode_diagnostics namespace, so ]d, vim.diagnostic.open_float, Trouble
+and statusline diagnostic counts work on review comments. The message is the
+latest comment's author and first line, with a reply count, and user_data
+carries the thread id and comment URL. Unresolved threads default to INFO,
+resolved and outdated ones to HINT; comments.show_resolved decides whether
+resolved threads appear at all.
+
+It is off by default because it mixes review comments into every diagnostic
+consumer. The namespace itself draws nothing (comments.diagnostics.display sets
+signs, virtual_text and underline to false), because the plugin already draws
+comment signs and end-of-line virtual text and the two displays would double up.
+
+:ReviewModeQuickfix fills the quickfix list with the same threads across every
+changed file, and review_mode.api.quickfix_items() returns those items without
+setting the list.
 
  vim:tw=78:ts=8:noet:ft=help:norl:
