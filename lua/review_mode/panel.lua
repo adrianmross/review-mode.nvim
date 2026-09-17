@@ -531,6 +531,62 @@ local function open_thread_url(thread)
   util.open_url(url)
 end
 
+-- Edit and delete ------------------------------------------------------------
+
+local function modifiable(comment)
+  if not comment then
+    vim.notify("Review Mode: no PR comment here", vim.log.levels.WARN)
+    return false
+  end
+  local ok, err = api.can_modify_comment(comment.id)
+  if not ok then
+    vim.notify("Review Mode: " .. tostring(err), vim.log.levels.WARN)
+  end
+  return ok
+end
+
+local function edit_comment(thread, comment, target)
+  if not modifiable(comment) then
+    return
+  end
+
+  open_composer({
+    name = "edit",
+    title = "Edit your comment",
+    prompt = "Save this edit to GitHub?",
+    source = panel_source(thread, target),
+    default = vim.split(comment.body or "", "\n", { plain = true }),
+    submit = function(body)
+      api.edit_comment({ comment_id = comment.id, body = body }, function(ok, err)
+        if not ok then
+          vim.notify("Review Mode edit failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
+          return
+        end
+        vim.notify("Edited PR comment")
+      end)
+    end,
+  })
+end
+
+local function delete_comment(comment)
+  if not modifiable(comment) then
+    return
+  end
+
+  local first = vim.trim((comment.body or ""):match("([^\n]+)") or "")
+  if vim.fn.confirm(string.format("Delete your comment?\n\n  %s\n", first), "&Delete\n&Keep", 2) ~= 1 then
+    return
+  end
+
+  api.delete_comment(comment.id, function(ok, err)
+    if not ok then
+      vim.notify("Review Mode delete failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
+      return
+    end
+    vim.notify("Deleted PR comment")
+  end)
+end
+
 local function apply_panel_keys(bufnr)
   local function map(lhs, rhs)
     vim.keymap.set("n", lhs, rhs, { buffer = bufnr, nowait = true, silent = true })
@@ -573,6 +629,14 @@ local function apply_panel_keys(bufnr)
   map("+", function()
     local _, comment = panel_comment_at_cursor()
     M.react_to(comment)
+  end)
+  -- edit and delete
+  map("e", function()
+    local thread, comment = panel_comment_at_cursor()
+    edit_comment(thread, comment, ui.panel_target)
+  end)
+  map("D", function()
+    delete_comment(select(2, panel_comment_at_cursor()))
   end)
 end
 
@@ -767,6 +831,44 @@ function M.react(content)
   local thread = focused_thread()
   local comments = thread and thread.comments or {}
   M.react_to(comments[#comments], content)
+end
+
+-- Your most recent comment on the current line, or the one under the panel
+-- cursor. With none of your own, the line's last comment, so the refusal can
+-- say why (not yours, or authorship unknown).
+local function focused_own_comment()
+  if panel_is_open() and vim.api.nvim_get_current_win() == ui.panel_win then
+    local thread, comment = panel_comment_at_cursor()
+    return thread, comment, ui.panel_target
+  end
+
+  local thread, target = focused_thread()
+  if not thread then
+    return nil, nil, nil
+  end
+
+  local own_thread, own
+  for _, candidate in ipairs(api.threads({ path = target.path, line = target.line })) do
+    for _, comment in ipairs(candidate.comments) do
+      if comment.viewer_did_author and (not own or (comment.created_at or "") >= (own.created_at or "")) then
+        own_thread, own = candidate, comment
+      end
+    end
+  end
+  if own then
+    return own_thread, own, target
+  end
+  return thread, thread.comments[#thread.comments], target
+end
+
+--- Edit your most recent comment on the current line through the draft buffer.
+function M.edit_comment()
+  edit_comment(focused_own_comment())
+end
+
+--- Delete your most recent comment on the current line, after confirming.
+function M.delete_comment()
+  delete_comment(select(2, focused_own_comment()))
 end
 
 function M.toggle_panel()

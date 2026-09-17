@@ -2071,6 +2071,9 @@ function M.action_items()
         panel.react()
       end,
     },
+    -- edit and delete
+    { category = "Thread", label = "Edit my comment on line", run = panel.edit_comment },
+    { category = "Thread", label = "Delete my comment on line", run = panel.delete_comment },
     { category = "Review", label = "Comment on line/range", run = M.comment },
     { category = "Review", label = "Draft comment on line/range", run = panel.compose_comment },
     { category = "Review", label = "Apply suggestion on line", run = panel.apply_suggestion },
@@ -2344,6 +2347,17 @@ function M.setup(opts)
       end,
       desc = "Toggle a reaction on the latest PR comment on the current line",
     })
+    -- edit and delete
+    vim.api.nvim_create_user_command(
+      "ReviewModeEditComment",
+      panel.edit_comment,
+      { desc = "Edit your most recent PR comment on the current line" }
+    )
+    vim.api.nvim_create_user_command(
+      "ReviewModeDeleteComment",
+      panel.delete_comment,
+      { desc = "Delete your most recent PR comment on the current line" }
+    )
   end
 
   if setup_done then

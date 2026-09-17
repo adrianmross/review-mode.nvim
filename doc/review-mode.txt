@@ -100,6 +100,8 @@ Keys inside the panel:
         ]c [c   next / previous thread in the panel
         gr      reload comments from GitHub
         +       react to the comment under the cursor
+        e       edit your comment under the cursor in a draft buffer
+        D       delete your comment under the cursor, after a confirmation
         q       close the panel
 
 Resolved threads are hidden in the panel and in |:ReviewModeThread| unless a
@@ -232,6 +234,16 @@ COMMANDS                                                  *review-mode-commands*
         Toggle a reaction on the latest PR comment on the current line, or on
         the comment under the panel cursor. Without an argument, pick one of
         THUMBS_UP, THUMBS_DOWN, LAUGH, HOORAY, CONFUSED, HEART, ROCKET, EYES.
+                                                        *:ReviewModeEditComment*
+:ReviewModeEditComment
+        Edit your most recent PR comment on the current line in a draft
+        buffer, confirmed before it is sent. Only comments you wrote can be
+        edited; comments loaded through the REST fallback are refused.
+
+                                                        *:ReviewModeDeleteComment*
+:ReviewModeDeleteComment
+        Delete your most recent PR comment on the current line, after a
+        confirmation showing its first line.
 
                                                         *:ReviewModePanel*
 :ReviewModePanel

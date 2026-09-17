@@ -74,6 +74,19 @@ case "$1 $2" in
       exit 1
     fi
     ;;
+  # edit and delete: PATCH answers the updated comment, DELETE answers 204 with
+  # an empty body, as GitHub does
+  "api --method")
+    if [[ -n "${REVIEW_MODE_GH_LOG:-}" ]]; then
+      printf '%s\n' "$*" >> "$REVIEW_MODE_GH_LOG"
+    fi
+    if [[ "$3 $4" == "PATCH repos/owner/repo/pulls/comments/11" ]]; then
+      printf '{"id":11,"path":"file.txt","line":2,"body":"edited"}\n'
+    elif [[ "$3 $4" != "DELETE repos/owner/repo/pulls/comments/11" ]]; then
+      echo "unexpected gh --method args: $*" >&2
+      exit 1
+    fi
+    ;;
   "api repos/owner/repo/pulls/123/comments")
     args="$*"
     if [[ "$args" == *"--method POST"* ]]; then
@@ -93,6 +106,11 @@ case "$1 $2" in
       printf '{"data":{"unresolveReviewThread":{"thread":{"id":"thread_1","isResolved":false}}}}\n'
     elif [[ "$args" == *"reviewThreads"* && "${REVIEW_MODE_FIXTURE:-}" == "reactions" ]]; then
       printf '%s\n' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"id":"thread_1","path":"file.txt","line":2,"originalLine":2,"startLine":null,"diffSide":"RIGHT","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_1","databaseId":1,"path":"file.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r1","state":"SUBMITTED","authorAssociation":"OWNER","viewerDidAuthor":false,"body":"Needs review","author":{"login":"reviewer"},"reactionGroups":[{"content":"THUMBS_UP","viewerHasReacted":true,"reactors":{"totalCount":2}},{"content":"HOORAY","viewerHasReacted":false,"reactors":{"totalCount":1}}]},{"id":"comment_5","databaseId":5,"path":"file.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-03T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r5","state":"SUBMITTED","authorAssociation":"MEMBER","viewerDidAuthor":true,"body":"Done","author":{"login":"maintainer"},"reactionGroups":[]}]}}]}}}}}'
+    elif [[ "$args" == *"reviewThreads"* && "${REVIEW_MODE_FIXTURE:-}" == "edit_delete" ]]; then
+      if [[ -n "${REVIEW_MODE_GH_LOG:-}" ]]; then
+        printf 'graphql reviewThreads\n' >> "$REVIEW_MODE_GH_LOG"
+      fi
+      printf '%s\n' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"id":"thread_ed","path":"file.txt","line":2,"originalLine":2,"startLine":null,"diffSide":"RIGHT","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_10","databaseId":10,"path":"file.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r10","state":"SUBMITTED","authorAssociation":"MEMBER","viewerDidAuthor":false,"body":"Please rename this","author":{"login":"alice"},"reactionGroups":[]},{"id":"comment_11","databaseId":11,"path":"file.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-03T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r11","state":"SUBMITTED","authorAssociation":"OWNER","viewerDidAuthor":true,"body":"Renamed in the next push\nsecond line","author":{"login":"adrian"},"reactionGroups":[]}]}}]}}}}}'
     elif [[ "$args" == *"reviewThreads"* ]]; then
       if [[ "${REVIEW_MODE_FORCE_REST_COMMENTS:-}" == "1" ]]; then
         echo "forced reviewThreads failure" >&2
@@ -236,3 +254,17 @@ REVIEW_MODE_GH_LOG="$tmp/reactions-gh.log" \
 nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/reactions_fixture.lua"
+
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/edit-delete-cache" \
+XDG_STATE_HOME="$tmp/edit-delete-state" \
+GH_REVIEW_REPO=owner/repo \
+GH_REVIEW_PR=123 \
+GH_REVIEW_BASE=main \
+GH_REVIEW_HEAD=abc123 \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+REVIEW_MODE_FIXTURE=edit_delete \
+REVIEW_MODE_GH_LOG="$tmp/edit-delete-gh.log" \
+nvim --headless -u NONE -i NONE \
+  -c "set noswapfile" \
+  -l "$repo_root/scripts/comment_edit_delete_fixture.lua"
