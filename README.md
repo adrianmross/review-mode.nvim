@@ -18,6 +18,7 @@ The goal is to keep review inside normal files instead of a dedicated diff UI:
 - opens the base version of the current file in a side-by-side diff split
 - creates line or visual-range PR comments and suggestions through `gh`
 - opens quick PR actions for status, checks, browser handoff, URL copy, and thread resolution
+- can expose threads as `vim.diagnostic` entries and a quickfix list, so `]d`, `vim.diagnostic.open_float`, Trouble and `:cnext` work on review comments
 - can use snacks.nvim or Telescope for action and viewed-file pickers, with `vim.ui.select` as fallback
 
 ## Requirements
@@ -245,6 +246,10 @@ api.suggestion(comment)   --> the ```suggestion block as lines, or nil
 
 -- events (see Hooks); returns an unsubscribe function
 local unsubscribe = api.on("comments_loaded", function(ctx) ... end)
+
+-- quickfix (see Diagnostics and Quickfix)
+api.quickfix_items({ filter = "all" })   --> the items, without setting the list
+api.set_quickfix({ filter = "unresolved", open = false })
 ```
 
 Writes take a `callback(ok, err)`. `api.reply` needs the id of the comment it
@@ -471,9 +476,47 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeViewedClear` clears local viewed state for the current PR
 - `:ReviewModeViewedSync` pulls viewed state from GitHub
 - `:ReviewModeViewedSyncToggle` toggles GitHub viewed-state sync
-- `:ReviewModeSummary` shows file, comment, thread, and viewed-sync counts
+- `:ReviewModeSummary` shows file, comment, thread, and viewed-sync counts.
 - `:ReviewModeCheckout <number|url>` reviews a PR in its own worktree without checking it out
 - `:ReviewModeCheckoutClean [pr]` removes clean review worktrees, after a confirmation.
+- `:ReviewModeQuickfix [unresolved|all]` fills the quickfix list with review threads and opens it
+- `:ReviewModeDiagnosticsToggle` toggles review threads as diagnostics
+
+## Diagnostics and Quickfix
+
+Review threads can also be published as `vim.diagnostic` entries in their own
+namespace, one per visible thread in each changed-file buffer. Everything built
+on diagnostics then works on review comments for free: `]d` / `[d`,
+`vim.diagnostic.open_float`, `vim.diagnostic.setloclist`, Trouble, and the
+diagnostic counts in your statusline. `user_data` carries the thread id and the
+comment URL.
+
+It is off by default (`comments.diagnostics.enabled = true` to turn it on),
+because once on, review comments join your LSP diagnostics in every one of those
+places, and that should be your decision rather than an upgrade's.
+
+The namespace draws nothing by default:
+
+```lua
+comments = {
+  diagnostics = {
+    enabled = false,
+    severity = { unresolved = "INFO", outdated = "HINT", resolved = "HINT" },
+    display = { signs = false, virtual_text = false, underline = false },
+  },
+},
+```
+
+The plugin already draws its own comment signs and end-of-line virtual text, so
+letting the namespace draw as well would show every thread twice. With `display`
+off the diagnostics feed navigation, floats and counts only. If you would rather
+have the diagnostic display, turn the entries in `display` on and
+`comments.virtual_text` off.
+
+`:ReviewModeQuickfix` fills the quickfix list with every thread across the PR —
+`unresolved` (the default, unless `comments.show_resolved` is set) or `all`,
+which appends `[resolved]` to resolved threads. `api.quickfix_items()` returns
+the same items without touching the list.
 
 ## gh-dash / Worktree Handoff
 
@@ -513,6 +556,11 @@ require("review_mode").setup({
     sign_hl_group = "DiagnosticInfo",
     virtual_text = true,
     show_resolved = false,
+    diagnostics = {
+      enabled = false,
+      severity = { unresolved = "INFO", outdated = "HINT", resolved = "HINT" },
+      display = { signs = false, virtual_text = false, underline = false },
+    },
   },
   panel = {
     auto_open = false,

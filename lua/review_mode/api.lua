@@ -442,6 +442,20 @@ function M.on(event, fn)
   return hooks.on(event, fn)
 end
 
+-- Diagnostics and quickfix ----------------------------------------------------
+
+--- Quickfix items for review threads, without setting the list.
+--- opts.filter is "unresolved" or "all" (defaults to comments.show_resolved).
+function M.quickfix_items(opts)
+  return require("review_mode.diagnostics").quickfix_items(opts)
+end
+
+--- Fill the quickfix list with review threads and open it (opts.open = false
+--- to only set it).
+function M.set_quickfix(opts)
+  return require("review_mode.diagnostics").set_quickfix(opts)
+end
+
 -- Escape hatches --------------------------------------------------------------
 
 --- The raw session table. Unstable on purpose: reach for it only when the API

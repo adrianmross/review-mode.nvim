@@ -23,7 +23,7 @@ nvim --headless -u NONE -i NONE \
 # The bundled UI must build on the public API, the same as anyone else's would.
 # If one of these needs a plugin internal, the API is missing something: add it
 # to review_mode.api rather than reaching around it.
-for ui in lua/review_mode/panel.lua lua/review_mode/picker.lua lua/review_mode/integrations/nvim_tree.lua; do
+for ui in lua/review_mode/panel.lua lua/review_mode/picker.lua lua/review_mode/integrations/nvim_tree.lua lua/review_mode/diagnostics.lua; do
   # Lua accepts require("x"), require 'x', and require( "x" ) alike, so match the
   # call loosely rather than one spelling of it.
   if grep -nE "require[[:space:]]*\(?[[:space:]]*['\"]review_mode\.(state|github|viewed|comments|diff|init)['\"]" "$ui"; then
@@ -200,3 +200,16 @@ REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/async_preview_fixture.lua"
+
+# Review threads as diagnostics and quickfix.
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/diagnostics-cache" \
+XDG_STATE_HOME="$tmp/diagnostics-state" \
+GH_REVIEW_REPO=owner/repo \
+GH_REVIEW_PR=123 \
+GH_REVIEW_BASE=main \
+GH_REVIEW_HEAD=abc123 \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+nvim --headless -u NONE -i NONE \
+  -c "set noswapfile" \
+  -l "$repo_root/scripts/diagnostics_fixture.lua"
