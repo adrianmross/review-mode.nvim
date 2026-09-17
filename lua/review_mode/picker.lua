@@ -143,13 +143,9 @@ local function viewed_picker_items(filter)
   return items
 end
 
-local function viewed_picker_preview_lines(item, preview_cache)
-  if not item then
-    return { "No matching PR files" }
-  end
-
+local function viewed_picker_preview_header(item)
   local stats = file_stats(item.path)
-  local lines = {
+  return {
     item.path,
     string.format(
       "%s  %s  %s",
@@ -159,23 +155,11 @@ local function viewed_picker_preview_lines(item, preview_cache)
     ),
     "",
   }
+end
 
-  preview_cache = preview_cache or {}
-  preview_cache[item.path] = preview_cache[item.path]
-    or util.system({
-      "git",
-      "diff",
-      "--find-renames",
-      "--no-ext-diff",
-      "--no-color",
-      "--unified=80",
-      api.base_ref() .. "...HEAD",
-      "--",
-      item.path,
-    }, { cwd = api.root(), raw = true })
-
-  local diff = preview_cache[item.path] or ""
-  if diff == "" then
+local function viewed_picker_preview_lines(item, diff)
+  local lines = viewed_picker_preview_header(item)
+  if not diff or diff == "" then
     lines[#lines + 1] = "No diff preview available"
     return lines
   end
@@ -188,6 +172,38 @@ local function viewed_picker_preview_lines(item, preview_cache)
     end
   end
 
+  return lines
+end
+
+-- The lines to show for `item` right now, plus, when the diff has to be
+-- fetched, a later render(lines) once it lands.
+--
+-- A cached diff is returned outright, so revisiting a file does not flicker.
+-- Otherwise this returns a placeholder and shells out asynchronously: a blocking
+-- git diff per newly selected row stalls the editor for anyone holding `j`.
+--
+-- still_showing() is the crux. Selection moves faster than git returns, so by
+-- the time a diff lands the preview may be on another file, and a late write
+-- must not land there. Each provider answers it from the path it last painted.
+local function viewed_picker_preview(item, preview_cache, still_showing, render)
+  if not item then
+    return { "No matching PR files" }
+  end
+
+  local cached = preview_cache[item.path]
+  if cached then
+    return viewed_picker_preview_lines(item, cached)
+  end
+
+  api.file_diff(item.path, function(diff)
+    preview_cache[item.path] = diff or ""
+    if still_showing() then
+      render(viewed_picker_preview_lines(item, preview_cache[item.path]))
+    end
+  end)
+
+  local lines = viewed_picker_preview_header(item)
+  lines[#lines + 1] = "Loading diff..."
   return lines
 end
 
@@ -250,6 +266,7 @@ local function open_snacks_viewed_picker(filter)
 
   filter = normalize_viewed_filter(filter)
   local preview_cache = {}
+  local showing = nil
   local snacks_items = vim.tbl_map(function(item)
     return {
       text = item.label,
@@ -262,12 +279,22 @@ local function open_snacks_viewed_picker(filter)
     source = "review_mode_files",
     title = string.format("Review Mode files [%s]", filter),
     items = snacks_items,
-    -- built per selection: each preview shells out to git diff for that file
+    -- built per selection, and the diff behind it is fetched asynchronously
     preview = function(ctx)
       local item = ctx.item and (ctx.item.item or ctx.item)
-      ctx.preview:reset()
-      ctx.preview:set_lines(viewed_picker_preview_lines(item, preview_cache))
-      ctx.preview:highlight({ ft = "diff" })
+      local preview = ctx.preview
+      showing = item and item.path or nil
+      local function render(lines)
+        -- pcall: the preview window can be gone by the time a late diff lands.
+        pcall(function()
+          preview:set_lines(lines)
+          preview:highlight({ ft = "diff" })
+        end)
+      end
+      preview:reset()
+      render(viewed_picker_preview(item, preview_cache, function()
+        return showing == item.path
+      end, render))
       return true
     end,
     confirm = function(instance, selected)
@@ -346,6 +373,7 @@ local function open_telescope_viewed_picker(filter)
 
   filter = normalize_viewed_filter(filter)
   local preview_cache = {}
+  local showing = nil
   local items = viewed_picker_items_for_provider(filter)
   local function refresh_filter(prompt_bufnr, next_filter)
     actions.close(prompt_bufnr)
@@ -373,9 +401,16 @@ local function open_telescope_viewed_picker(filter)
         title = "Preview",
         define_preview = function(self, entry)
           local item = entry and entry.value
-          vim.bo[self.state.bufnr].filetype = "diff"
-          vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, viewed_picker_preview_lines(item, preview_cache))
-          highlight_diff_preview(self.state.bufnr)
+          local bufnr = self.state.bufnr
+          showing = item and item.path or nil
+          vim.bo[bufnr].filetype = "diff"
+          local function render(lines)
+            vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+            highlight_diff_preview(bufnr)
+          end
+          render(viewed_picker_preview(item, preview_cache, function()
+            return showing == item.path and vim.api.nvim_buf_is_valid(bufnr)
+          end, render))
         end,
       }),
       attach_mappings = function(prompt_bufnr, map)

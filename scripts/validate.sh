@@ -32,7 +32,7 @@ for ui in lua/review_mode/panel.lua lua/review_mode/picker.lua lua/review_mode/i
   fi
 done
 
-stylua --check lua plugin scripts/fixture.lua scripts/rest_fallback_fixture.lua scripts/no_checkout_fixture.lua
+stylua --check lua plugin scripts/*.lua
 git diff --check
 bash scripts/release-check.sh
 
@@ -188,3 +188,15 @@ REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/no_checkout_fixture.lua"
+
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/async-preview-cache" \
+XDG_STATE_HOME="$tmp/async-preview-state" \
+GH_REVIEW_REPO=owner/repo \
+GH_REVIEW_PR=123 \
+GH_REVIEW_BASE=main \
+GH_REVIEW_HEAD=abc123 \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+nvim --headless -u NONE -i NONE \
+  -c "set noswapfile" \
+  -l "$repo_root/scripts/async_preview_fixture.lua"

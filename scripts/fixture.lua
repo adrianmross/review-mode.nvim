@@ -289,10 +289,11 @@ assert(type(snacks_files_opts.preview) == "function", "snacks file preview shoul
 assert(snacks_files_preview, "snacks lazy preview was not invoked")
 assert(snacks_files_preview.ft == "diff", "snacks file preview filetype was wrong")
 assert(has_line(snacks_files_preview.lines, snacks_files_opts.items[1].item.path), "snacks file preview path missing")
-assert(
-  has_line(snacks_files_preview.lines, "+feature") or has_line(snacks_files_preview.lines, "+new"),
-  "snacks file preview diff missing"
-)
+-- The diff is fetched asynchronously, so it lands a turn or more after the
+-- placeholder. scripts/async_preview_fixture.lua covers that flow in detail.
+wait_for(function()
+  return has_line(snacks_files_preview.lines, "+feature") or has_line(snacks_files_preview.lines, "+new")
+end, "snacks file preview diff missing")
 _G.Snacks = original_snacks
 
 local telescope_state = { maps = {} }
@@ -354,14 +355,11 @@ package.preload["telescope.pickers"] = function()
           else
             telescope_state.selected = opts.finder.entries[1]
             if opts.previewer and opts.previewer.define_preview then
-              local preview_buf = vim.api.nvim_create_buf(false, true)
-              opts.previewer.define_preview({ state = { bufnr = preview_buf } }, telescope_state.selected)
-              local preview_lines = vim.api.nvim_buf_get_lines(preview_buf, 0, -1, false)
-              assert(
-                has_line(preview_lines, "+feature") or has_line(preview_lines, "+new"),
-                "telescope file preview diff missing"
+              telescope_state.preview_buf = vim.api.nvim_create_buf(false, true)
+              opts.previewer.define_preview(
+                { state = { bufnr = telescope_state.preview_buf } },
+                telescope_state.selected
               )
-              vim.api.nvim_buf_delete(preview_buf, { force = true })
             end
           end
         end,
@@ -374,6 +372,11 @@ pr.actions()
 assert(last_notification():find("Files:", 1, true), "telescope action picker did not run selected action")
 pr.list_viewed("unviewed")
 assert(telescope_state.opts.prompt_title:find("unviewed", 1, true), "telescope viewed picker title missing")
+wait_for(function()
+  local preview_lines = vim.api.nvim_buf_get_lines(telescope_state.preview_buf, 0, -1, false)
+  return has_line(preview_lines, "+feature") or has_line(preview_lines, "+new")
+end, "telescope file preview diff missing")
+vim.api.nvim_buf_delete(telescope_state.preview_buf, { force = true })
 for _, module in ipairs({
   "telescope.finders",
   "telescope.config",
