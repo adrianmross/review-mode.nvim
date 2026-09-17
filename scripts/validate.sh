@@ -303,3 +303,45 @@ REVIEW_MODE_REVIEW_CAPTURE="$tmp/review-capture.json" \
 nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/review_submit_fixture.lua"
+
+# GitLab: a fake glab answers for the merge request, and the fixture points the
+# repo's origin at gitlab.com so the provider is auto-detected.
+cat > "$tmp/bin/glab" <<'GLAB'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf 'ARGS %s\n' "$*" >> "$GLAB_LOG"
+args="$*"
+case "$args" in
+  "mr view --output json"|"mr view 7 --repo group/project --output json")
+    printf '%s\n' '{"iid":7,"project_id":42,"target_branch":"main","source_branch":"feature","sha":"headsha","web_url":"https://gitlab.com/group/project/-/merge_requests/7","references":{"full":"group/project!7"},"diff_refs":{"base_sha":"basesha","start_sha":"startsha","head_sha":"headsha"}}'
+    ;;
+  "api --paginate projects/group%2Fproject/merge_requests/7/discussions?per_page=100")
+    printf '%s\n' '[{"id":"disc1","individual_note":false,"notes":[{"id":11,"type":"DiffNote","body":"Needs review","author":{"username":"reviewer"},"created_at":"2024-01-02T03:04:05Z","system":false,"resolvable":true,"resolved":false,"position":{"base_sha":"basesha","start_sha":"startsha","head_sha":"headsha","old_path":"file.txt","new_path":"file.txt","position_type":"text","old_line":null,"new_line":2}},{"id":12,"type":"DiffNote","body":"Agreed","author":{"username":"maintainer"},"created_at":"2024-01-03T03:04:05Z","system":false,"resolvable":true,"resolved":false,"position":{"old_path":"file.txt","new_path":"file.txt","position_type":"text","old_line":null,"new_line":2}}]},{"id":"disc2","individual_note":false,"notes":[{"id":21,"type":"DiffNote","body":"Check final line","author":{"username":"reviewer"},"created_at":"2024-01-02T03:04:05Z","system":false,"resolvable":true,"resolved":true,"position":{"old_path":"file.txt","new_path":"file.txt","position_type":"text","old_line":3,"new_line":4}}]},{"id":"disc3","individual_note":true,"notes":[{"id":31,"type":null,"body":"Overall looks good","author":{"username":"reviewer"},"created_at":"2024-01-02T03:04:05Z","system":false,"resolvable":false}]}]'
+    ;;
+  "api --method POST projects/group%2Fproject/merge_requests/7/discussions --input "*)
+    printf 'INPUT %s\n' "$(cat "${!#}")" >> "$GLAB_LOG"
+    printf '{"id":"disc_new"}\n'
+    ;;
+  "api --method POST projects/group%2Fproject/merge_requests/7/discussions/disc1/notes --raw-field body="*)
+    printf '{"id":13}\n'
+    ;;
+  "api --method PUT projects/group%2Fproject/merge_requests/7/discussions/disc1 --field resolved="*)
+    printf '{"id":"disc1"}\n'
+    ;;
+  *)
+    echo "unexpected glab args: $*" >&2
+    exit 1
+    ;;
+esac
+GLAB
+chmod +x "$tmp/bin/glab"
+
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/gitlab-cache" \
+XDG_STATE_HOME="$tmp/gitlab-state" \
+GLAB_LOG="$tmp/glab.log" \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+nvim --headless -u NONE -i NONE \
+  -c "set noswapfile" \
+  -l "$repo_root/scripts/gitlab_fixture.lua"

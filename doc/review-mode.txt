@@ -11,6 +11,7 @@ CONTENTS                                                  *review-mode-contents*
 5. Keymaps                                       |review-mode-keymaps|
 6. Picker Providers                              |review-mode-pickers|
 7. Setup                                         |review-mode-setup|
+8. GitLab                                        |review-mode-gitlab|
 
 ==============================================================================
 OVERVIEW                                                  *review-mode-overview*
@@ -410,6 +411,8 @@ SETUP                                                        *review-mode-setup*
   require("review_mode").setup({
     auto_open_first_change = true,
     follow_head = true,
+    provider = "auto", -- "auto" | "github" | "gitlab"
+    gitlab_hosts = {}, -- self-hosted GitLab hosts for provider = "auto"
     comments = {
       enabled = true,
       cache_ttl_seconds = 300,
@@ -497,7 +500,8 @@ folder markers because its children show the same state inline. A folder
 switches to viewed after every changed file under it is viewed.
 
 External launchers can provide GH_REVIEW_REPO, GH_REVIEW_PR, GH_REVIEW_BASE,
-and GH_REVIEW_HEAD to avoid startup discovery calls.
+and GH_REVIEW_HEAD to avoid startup discovery calls, or GL_REVIEW_MR,
+GL_REVIEW_REPO, GL_REVIEW_BASE and GL_REVIEW_HEAD for GitLab.
 
 :ReviewModeCheckout reviews a PR in a detached worktree of its own instead,
 leaving the current checkout alone; review worktrees are only ever removed by
@@ -540,5 +544,29 @@ comment signs and end-of-line virtual text and the two displays would double up.
 :ReviewModeQuickfix fills the quickfix list with the same threads across every
 changed file, and review_mode.api.quickfix_items() returns those items without
 setting the list.
+
+==============================================================================
+GITLAB                                                      *review-mode-gitlab*
+
+GitLab merge requests are reviewed the same way pull requests are. The provider
+comes from the origin remote: any host containing "gitlab", or listed in
+gitlab_hosts, uses `glab` instead of `gh`. Set provider = "github" or "gitlab"
+to decide it yourself, and authenticate glab for the project.
+
+A launcher can hand the session over with GL_REVIEW_MR, optionally with
+GL_REVIEW_REPO, GL_REVIEW_BASE and GL_REVIEW_HEAD, mirroring GH_REVIEW_*.
+Setting GL_REVIEW_MR also selects the GitLab provider.
+
+Supported: MR metadata, diff discussions loaded as threads, starting a thread on
+a line or range, replying, and resolving. A thread id is a GitLab discussion id,
+so |review_mode.api| reply and resolve take that instead of a review thread id.
+A range comment anchors to its last line.
+
+GitHub-only for now, and reported as "not supported on GitLab yet" instead of
+calling gh: viewed-state sync (local viewed state still works), reactions,
+comment edit and delete, pending comments and review submission,
+:ReviewModeCheckout, :ReviewModeStatus and :ReviewModeChecks. Review diagnostics
+and :ReviewModeQuickfix are forge-independent and work on GitLab too. :ReviewModeSuggest posts GitHub suggestion syntax, which
+GitLab does not read the same way.
 
  vim:tw=78:ts=8:noet:ft=help:norl:

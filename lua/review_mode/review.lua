@@ -55,6 +55,9 @@ end
 
 --- Queue a comment for the next review. Returns the draft, or nil and an error.
 function M.add(opts)
+  if state.provider == "gitlab" then
+    return nil, require("review_mode.providers").unsupported("Pending review comments")
+  end
   opts = opts or {}
   local body = util.trim(opts.body)
   local first = tonumber(opts.start_line) or tonumber(opts.line)
@@ -169,6 +172,9 @@ end
 --- Submit every pending draft as one review. opts.event is COMMENT, APPROVE or
 --- REQUEST_CHANGES (any case). Drafts are cleared only after GitHub accepts it.
 function M.submit(opts, callback)
+  if state.provider == "gitlab" then
+    return (callback or function() end)(false, require("review_mode.providers").unsupported("Submitting a review"))
+  end
   opts = opts or {}
   callback = callback or function() end
   local event = tostring(opts.event or "COMMENT"):upper()

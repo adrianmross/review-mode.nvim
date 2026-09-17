@@ -112,6 +112,10 @@ function M.set_viewed_path(path, viewed)
 end
 
 function M.github_viewed_files_async(generation, after, viewed, callback)
+  if state.provider == "gitlab" then
+    callback(nil, "GitHub viewed-state sync is not supported on GitLab yet")
+    return
+  end
   local owner, name = core.repo_parts()
   if not owner or not name or not state.pr then
     callback(nil, "could not determine GitHub repository or PR")
@@ -240,6 +244,10 @@ function M.sync_viewed_from_github_async(generation, force)
 end
 
 function M.github_pr_node_id_async(generation, callback)
+  if state.provider == "gitlab" then
+    callback(nil, "GitHub viewed-state sync is not supported on GitLab yet")
+    return
+  end
   if state.pr_node_id then
     callback(state.pr_node_id, nil)
     return
