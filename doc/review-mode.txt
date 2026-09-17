@@ -6,6 +6,7 @@ CONTENTS                                                  *review-mode-contents*
 1. Overview                                      |review-mode-overview|
 2. The Mode                                      |review-mode-mode|
 3. Thread Panel                                  |review-mode-panel|
+   Pending Review                                |review-mode-pending|
 4. Commands                                      |review-mode-commands|
 5. Keymaps                                       |review-mode-keymaps|
 6. Picker Providers                              |review-mode-pickers|
@@ -102,6 +103,7 @@ Keys inside the panel:
         +       react to the comment under the cursor
         e       edit your comment under the cursor in a draft buffer
         D       delete your comment under the cursor, after a confirmation
+        S       open the pending review buffer |review-mode-pending|
         q       close the panel
 
 Resolved threads are hidden in the panel and in |:ReviewModeThread| unless a
@@ -127,10 +129,40 @@ until the draft is confirmed.
         <C-r>   quote the lines selected in the code window, with their path
                 and line numbers
         <C-g>   seed a ```suggestion block from the lines the draft targets
+        <C-p>   queue the comment in the pending review instead of posting it
+                (new comments only) |review-mode-pending|
         q       discard the draft
 
 <C-r> is what lets a reply point at lines other than the one the thread is
 anchored to: select them in the code window, return to the draft, press it.
+
+==============================================================================
+PENDING REVIEW                                             *review-mode-pending*
+
+Comments can be batched into one review instead of posting one at a time. <C-p>
+in the draft buffer queues the comment; |:ReviewModePending| opens the review
+buffer with every queued comment, and the review body is whatever is typed
+below the marker line.
+
+        <CR>    jump to the draft's line
+        dd      drop the draft under the cursor
+        <C-s>   submit as a COMMENT review
+        <C-a>   submit as an APPROVE review
+        <C-x>   submit as a REQUEST_CHANGES review
+        q       close the buffer
+
+Every submission is confirmed first, showing the event and the number of
+comments. |:ReviewModeSubmit| does the same without the buffer.
+
+Queued comments render as pending threads in the panel and in
+|:ReviewModeThread|, persist in stdpath("state")/review-mode-reviews across
+restarts, and are cleared only once GitHub accepts the review; a failed
+submission keeps them. GitHub requires a review body for REQUEST_CHANGES, and
+for a COMMENT review carrying no comments.
+
+Replies are never batched: the reviews endpoint only accepts new comments, so
+|:ReviewModeReply| still posts immediately. A pending review started in the
+GitHub web UI is not merged with these drafts.
 
 ==============================================================================
 COMMANDS                                                  *review-mode-commands*
@@ -300,6 +332,16 @@ COMMANDS                                                  *review-mode-commands*
                                                         *:ReviewModeViewedSyncToggle*
 :ReviewModeViewedSyncToggle
         Toggle GitHub viewed-state sync.
+
+                                                        *:ReviewModePending*
+:ReviewModePending
+        Open the pending review buffer. See |review-mode-pending|.
+
+                                                        *:ReviewModeSubmit*
+:ReviewModeSubmit [comment|approve|request_changes]
+        Submit the pending review with that event, after a confirmation
+        showing the event and the comment count. With no argument it opens the
+        review buffer instead.
 
                                                         *:ReviewModeSummary*
 :ReviewModeSummary

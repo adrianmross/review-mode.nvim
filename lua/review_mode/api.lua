@@ -19,6 +19,7 @@ local hooks = require("review_mode.hooks")
 local util = require("review_mode.util")
 local comments_ui = require("review_mode.comments")
 local github = require("review_mode.github")
+local review = require("review_mode.review")
 
 local state = core.state
 
@@ -45,6 +46,9 @@ M.events = {
   -- edit and delete
   "comment_edited",
   "comment_deleted",
+  -- pending review
+  "pending_changed",
+  "review_submitted",
 }
 
 -- Session ---------------------------------------------------------------------
@@ -305,7 +309,7 @@ function M.threads(opts)
   local out = {}
 
   for _, path in ipairs(paths) do
-    local threads = comments_ui.threads(state.comments[path], path)
+    local threads = comments_ui.threads(review.with_pending(state.comments[path], path), path)
     if opts.line then
       threads = comments_ui.on_line(threads, opts.line)
     end
@@ -477,6 +481,38 @@ end
 --- Open the PR, or a specific comment, in the browser.
 function M.open_url(url, callback)
   return util.open_url(url, callback)
+end
+
+-- Pending review --------------------------------------------------------------
+
+--- Draft comments queued for the next review on this PR, oldest first:
+--- { { id, path, start_line, end_line, side, body, created_at }, ... }
+--- They persist across restarts and show in api.threads as pending comments.
+function M.pending()
+  return review.list()
+end
+
+--- Queue a new comment instead of posting it. opts: path, start_line, end_line
+--- (or line), body. Returns the draft, or nil and an error. Replies cannot be
+--- queued: the reviews endpoint only accepts new comments.
+function M.add_pending(opts)
+  return review.add(opts)
+end
+
+function M.remove_pending(id)
+  return review.remove(id)
+end
+
+function M.discard_pending()
+  return review.discard()
+end
+
+--- Submit every pending draft as one review. opts.event is "COMMENT",
+--- "APPROVE" or "REQUEST_CHANGES"; opts.body is the review summary, required
+--- for REQUEST_CHANGES and for a COMMENT with no drafts. Drafts are cleared only
+--- once GitHub accepts the review. callback(ok, err).
+function M.submit_review(opts, callback)
+  return review.submit(opts, callback)
 end
 
 -- Events ----------------------------------------------------------------------

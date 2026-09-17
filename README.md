@@ -17,6 +17,7 @@ The goal is to keep review inside normal files instead of a dedicated diff UI:
 - tracks viewed/unviewed PR files locally, with optional GitHub-backed viewed sync
 - opens the base version of the current file in a side-by-side diff split
 - creates line or visual-range PR comments and suggestions through `gh`
+- batches comments into a pending review and submits it as comment, approval, or changes requested
 - opens quick PR actions for status, checks, browser handoff, URL copy, and thread resolution
 - can expose threads as `vim.diagnostic` entries and a quickfix list, so `]d`, `vim.diagnostic.open_float`, Trouble and `:cnext` work on review comments
 - can use snacks.nvim or Telescope for action and viewed-file pickers, with `vim.ui.select` as fallback
@@ -181,6 +182,7 @@ Keys inside the panel:
 | `+` | react to the comment under the cursor |
 | `e` | edit your comment under the cursor in a draft buffer |
 | `D` | delete your comment under the cursor, after a confirmation |
+| `S` | open the pending review buffer |
 | `q` | close the panel |
 
 ### Replies are drafted, not typed into a prompt
@@ -194,6 +196,7 @@ be edited before it goes out. Nothing is sent until you confirm:
 | `<C-s>` or `:w` | post, after a confirmation prompt showing what will be sent |
 | `<C-r>` | quote the lines you have selected in the code window, with their path and line numbers |
 | `<C-g>` | seed a ```suggestion block from the lines the draft is aimed at |
+| `<C-p>` | queue the comment in the pending review instead of posting it (new comments only) |
 | `q` | discard the draft (confirmed if it is not empty) |
 
 `<C-r>` is what lets a reply point at lines other than the one the thread is
@@ -218,6 +221,32 @@ reversible.
 Comments loaded through the REST fallback can only *gain* a reaction: removing
 one needs the GraphQL id that the REST comment list does not carry, so removal
 is refused with a message rather than silently doing nothing.
+
+## Pending Reviews
+
+A comment can wait for the rest of the review instead of going out on its own.
+`<C-p>` in the draft buffer queues it; `:ReviewModePending` (or `S` in the
+panel) opens the review buffer, which lists every queued comment, takes the
+review body below the marker line, and submits the lot in one GitHub review:
+
+| key | action |
+|---|---|
+| `<CR>` | jump to the draft's line |
+| `dd` | drop the draft under the cursor |
+| `<C-s>` / `<C-a>` / `<C-x>` | submit as comment / approve / request changes |
+| `q` | close the buffer |
+
+Each submit is confirmed first, showing the event and how many comments go with
+it. `:ReviewModeSubmit [comment|approve|request_changes]` does the same without
+the buffer. Queued comments show as pending threads in the panel and the float,
+persist in `stdpath("state")/review-mode-reviews/` across Neovim restarts, and
+are cleared only once GitHub accepts the review — a failed submission keeps
+them. GitHub needs a review body for `request_changes`, and for a `comment`
+review with no queued comments; approving needs neither.
+
+Two limits: replies always post immediately, because the reviews endpoint only
+batches new comments; and a pending review you started in the GitHub web UI is
+separate from these drafts, so submitting here leaves that one open.
 
 ## API
 
@@ -267,6 +296,12 @@ api.goto_next("comment") / api.goto_prev("hunk")
 local lines, marks = api.render_threads(threads, { width = 60 })
 api.apply_render(bufnr, namespace, lines, marks)
 api.suggestion(comment)   --> the ```suggestion block as lines, or nil
+
+-- pending review
+api.pending()                       --> { { id, path, start_line, end_line, side, body, created_at }, ... }
+api.add_pending({ path = ..., start_line = ..., end_line = ..., body = ... })
+api.remove_pending(id) / api.discard_pending()
+api.submit_review({ event = "COMMENT", body = "..." }, cb)   -- or APPROVE, REQUEST_CHANGES
 
 -- events (see Hooks); returns an unsubscribe function
 local unsubscribe = api.on("comments_loaded", function(ctx) ... end)
@@ -322,6 +357,8 @@ prefer.
 | `on_reaction_changed` | `ReviewModeReactionChanged` | you add or remove a reaction (`{ comment_id, content, added }`) |
 | `on_comment_edited` | `ReviewModeCommentEdited` | you edit one of your comments |
 | `on_comment_deleted` | `ReviewModeCommentDeleted` | you delete one of your comments |
+| `on_pending_changed` | `ReviewModePendingChanged` | a pending review comment is added, dropped, or submitted |
+| `on_review_submitted` | `ReviewModeReviewSubmitted` | a review is submitted (`{ event, count }`) |
 
 **Overrides** are asked *how* something should be done, and what they return
 replaces the built-in behavior. Return `nil` to fall back to the default, so an
@@ -507,6 +544,8 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeViewedClear` clears local viewed state for the current PR
 - `:ReviewModeViewedSync` pulls viewed state from GitHub
 - `:ReviewModeViewedSyncToggle` toggles GitHub viewed-state sync
+- `:ReviewModePending` opens the pending review buffer
+- `:ReviewModeSubmit [comment|approve|request_changes]` submits the pending review, confirmed first
 - `:ReviewModeSummary` shows file, comment, thread, and viewed-sync counts.
 - `:ReviewModeCheckout <number|url>` reviews a PR in its own worktree without checking it out
 - `:ReviewModeCheckoutClean [pr]` removes clean review worktrees, after a confirmation.

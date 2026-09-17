@@ -202,7 +202,7 @@ local function annotate_buffer(bufnr)
   end
 
   local path = vim.fs.relpath(state.root, name)
-  local comments = path and state.comments[path] or nil
+  local comments = path and require("review_mode.review").with_pending(state.comments[path], path) or nil
   if not comments then
     return
   end
@@ -226,6 +226,8 @@ local function annotate_buffer(bufnr)
       sign_hl = "ReviewModeResolved"
     elseif thread.is_outdated then
       sign_hl = "ReviewModeOutdated"
+    elseif thread.comments[1].is_pending then
+      sign_hl = "ReviewModePending"
     end
 
     local virt_text
@@ -295,6 +297,10 @@ hooks.on("viewed_changed", function()
 end)
 
 hooks.on("comments_loaded", function()
+  schedule_comments_ui_refresh()
+end)
+
+hooks.on("pending_changed", function()
   schedule_comments_ui_refresh()
 end)
 
@@ -2112,6 +2118,25 @@ function M.action_items()
         require("review_mode.diagnostics").toggle()
       end,
     },
+    -- pending review (Summary stays last: scripts/fixture.lua selects the last action)
+    {
+      category = "Review",
+      label = "Pending review",
+      run = function()
+        require("review_mode.review_buffer").open()
+      end,
+    },
+    {
+      category = "Review",
+      label = "Submit review",
+      run = function()
+        vim.ui.select({ "comment", "approve", "request_changes" }, { prompt = "Submit review as" }, function(kind)
+          if kind then
+            require("review_mode.review_buffer").submit(kind)
+          end
+        end)
+      end,
+    },
     { category = "PR", label = "Summary", run = M.summary },
   }
 end
@@ -2358,6 +2383,23 @@ function M.setup(opts)
       panel.delete_comment,
       { desc = "Delete your most recent PR comment on the current line" }
     )
+    -- pending review
+    vim.api.nvim_create_user_command("ReviewModePending", function()
+      require("review_mode.review_buffer").open()
+    end, { desc = "Open the pending review buffer" })
+    vim.api.nvim_create_user_command("ReviewModeSubmit", function(command)
+      if command.args == "" then
+        require("review_mode.review_buffer").open()
+        return
+      end
+      require("review_mode.review_buffer").submit(command.args)
+    end, {
+      nargs = "?",
+      complete = function()
+        return { "comment", "approve", "request_changes" }
+      end,
+      desc = "Submit the pending review",
+    })
   end
 
   if setup_done then
