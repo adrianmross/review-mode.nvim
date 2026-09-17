@@ -273,6 +273,21 @@ function M.goto_file(path, line)
   return plugin().goto_file(path, line)
 end
 
+--- The PR diff for one file, as raw text. Async: git is slow enough on a large
+--- file to stall a picker preview. callback(diff, err).
+function M.file_diff(path, callback)
+  util.system_async({
+    "git",
+    "diff",
+    "--find-renames",
+    "--no-ext-diff",
+    "--no-color",
+    M.base_ref() .. "...HEAD",
+    "--",
+    path,
+  }, { cwd = state.root, raw = true }, callback)
+end
+
 -- Threads ---------------------------------------------------------------------
 
 --- Comment threads, newest comment last within each thread.

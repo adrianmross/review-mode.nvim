@@ -226,6 +226,7 @@ api.is_viewed_file(path) / api.is_viewed_dir(path)
 api.unviewed_count(path) / api.unresolved_count(path) / api.comment_count(path)
 api.set_viewed(path, true)
 api.hunks(path, function(hunks) ... end)   -- lazy, so it takes a callback
+api.file_diff(path, function(diff, err) ... end)  -- the diff for one file, never blocking
 
 -- threads
 api.threads({ path = "src/a.ts", line = 42, include_resolved = false })
