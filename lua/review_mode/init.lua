@@ -29,6 +29,7 @@ M.composer_reference = panel.composer_reference
 M.composer_suggest = panel.composer_suggest
 local viewed_state = require("review_mode.viewed")
 local github = require("review_mode.github")
+local checkout = require("review_mode.checkout")
 
 M.flush_viewed_sync = viewed_state.flush_viewed_sync
 
@@ -65,7 +66,7 @@ local function pr_url_async(callback)
 end
 
 local function repo_slug_async(generation, callback)
-  local repo = util.env_value("GH_REVIEW_REPO")
+  local repo = state.repo or util.env_value("GH_REVIEW_REPO")
   if repo then
     callback(repo, nil)
     return
@@ -85,7 +86,7 @@ local function pr_view_args()
     "view",
   }
 
-  local pr = util.env_value("GH_REVIEW_PR")
+  local pr = active_pr_arg()
   if pr then
     args[#args + 1] = pr
   end
@@ -910,6 +911,11 @@ local function clear_mode_keys()
   state.saved_keys = {}
 end
 
+-- a session started with opts.workspace (a checkout review) overrides the config
+local function workspace_kind()
+  return state.workspace or state.config.mode.workspace
+end
+
 local function close_workspace()
   local tab = state.workspace_tab
   state.workspace_tab = nil
@@ -927,7 +933,7 @@ end
 -- the review keeps its own tabpage, so stepping out is a tab switch and the
 -- review layout survives it
 local function focus_workspace()
-  if state.config.mode.workspace ~= "tab" then
+  if workspace_kind() ~= "tab" then
     return
   end
 
@@ -943,7 +949,7 @@ local function focus_workspace()
 end
 
 local function leave_workspace()
-  if state.config.mode.workspace ~= "tab" then
+  if workspace_kind() ~= "tab" then
     return
   end
 
@@ -1187,8 +1193,15 @@ local function load_metadata_async(generation, callback)
   end)
 end
 
-function M.start()
-  local root, root_err = util.repo_root()
+--- opts (all optional; no opts keeps the env/`gh` discovery):
+---   root, repo, pr, base, head  the session's context, instead of env/`gh`
+---   workspace                   "tab" | "inplace", overriding mode.workspace
+function M.start(opts)
+  opts = opts or {}
+  local root, root_err = opts.root, nil
+  if not root then
+    root, root_err = util.repo_root()
+  end
   if not root then
     vim.notify("Review Mode: " .. tostring(root_err or "not in a git repo"), vim.log.levels.ERROR)
     return
@@ -1200,10 +1213,11 @@ function M.start()
   clear_mode_keys()
   state.in_mode = state.config.mode.enabled
   state.metadata_loaded = false
-  state.repo = util.env_value("GH_REVIEW_REPO")
-  state.pr = util.env_value("GH_REVIEW_PR")
-  state.base = util.env_value("GH_REVIEW_BASE")
-  state.head = util.env_value("GH_REVIEW_HEAD")
+  state.repo = opts.repo or util.env_value("GH_REVIEW_REPO")
+  state.pr = opts.pr and tostring(opts.pr) or util.env_value("GH_REVIEW_PR")
+  state.base = opts.base or util.env_value("GH_REVIEW_BASE")
+  state.head = opts.head or util.env_value("GH_REVIEW_HEAD")
+  state.workspace = opts.workspace
   local generation = core.next_generation()
   core.reset_review_data()
   diff.close_old_view()
@@ -1211,6 +1225,10 @@ function M.start()
     apply_mode_keys()
   end
   focus_workspace()
+  if opts.root and state.workspace_tab == vim.api.nvim_get_current_tabpage() then
+    -- tab-local, so the rest of the editor keeps its own cwd
+    vim.cmd.tcd(vim.fn.fnameescape(root))
+  end
   head_watch.start(generation)
   announce("start")
 
@@ -1390,6 +1408,7 @@ end
 function M.stop()
   M.leave()
   close_workspace()
+  state.workspace = nil
   core.next_generation()
   reset_gitsigns_base()
   state.active = false
@@ -2056,9 +2075,53 @@ function M.action_items()
         M.list_viewed("all")
       end,
     },
+    {
+      category = "PR",
+      label = "Review a PR without checking it out",
+      run = function()
+        vim.ui.input({ prompt = "PR number or URL: " }, function(target)
+          if target and target ~= "" then
+            M.review_pr({ pr = target })
+          end
+        end)
+      end,
+    },
     { category = "PR", label = "Summary", run = M.summary },
   }
 end
+
+-- Checkout ----------------------------------------------------------------------
+
+--- Review a PR in its own detached worktree and tabpage, leaving the current
+--- checkout alone. callback(ok, err_or_result).
+function M.review_pr(opts, callback)
+  checkout.prepare(opts, function(result, err)
+    if not result then
+      vim.notify("Review Mode checkout: " .. tostring(err), vim.log.levels.ERROR)
+      if callback then
+        callback(false, err)
+      end
+      return
+    end
+
+    if state.active then
+      M.stop()
+    end
+    M.start({
+      root = result.path,
+      repo = result.repo,
+      pr = result.pr,
+      base = result.base,
+      head = result.head,
+      workspace = "tab",
+    })
+    if callback then
+      callback(true, result)
+    end
+  end)
+end
+
+M.checkout_clean = checkout.clean
 
 function M.config()
   return state.config
@@ -2227,6 +2290,12 @@ function M.setup(opts)
       desc = "Alias for ReviewModeViewedList",
     })
     vim.api.nvim_create_user_command("ReviewModeSummary", M.summary, { desc = "Show Review Mode summary" })
+    vim.api.nvim_create_user_command("ReviewModeCheckout", function(command)
+      M.review_pr({ pr = command.args })
+    end, { nargs = 1, desc = "Review a PR in its own worktree without checking it out" })
+    vim.api.nvim_create_user_command("ReviewModeCheckoutClean", function(command)
+      M.checkout_clean(command.args ~= "" and command.args or nil)
+    end, { nargs = "?", desc = "Remove clean review worktrees" })
   end
 
   if setup_done then

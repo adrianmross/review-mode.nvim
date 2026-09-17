@@ -39,6 +39,8 @@ M.events = {
   "panel_close",
   "comment_posted",
   "thread_resolved",
+  "checkout_ready",
+  "checkout_removed",
 }
 
 -- Session ---------------------------------------------------------------------
@@ -90,6 +92,13 @@ end
 
 function M.refresh()
   return plugin().refresh()
+end
+
+--- Review a PR without checking it out: fetch it into a detached worktree and
+--- start the session there in its own tabpage. opts = { pr = number|url,
+--- repo = "owner/repo"? }. callback(ok, result_or_err), result.path is the tree.
+function M.review_pr(opts, callback)
+  return plugin().review_pr(opts, callback)
 end
 
 -- Files -----------------------------------------------------------------------

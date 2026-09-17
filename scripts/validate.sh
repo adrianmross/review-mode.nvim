@@ -32,7 +32,7 @@ for ui in lua/review_mode/panel.lua lua/review_mode/picker.lua lua/review_mode/i
   fi
 done
 
-stylua --check lua plugin scripts/fixture.lua scripts/rest_fallback_fixture.lua
+stylua --check lua plugin scripts/fixture.lua scripts/rest_fallback_fixture.lua scripts/no_checkout_fixture.lua
 git diff --check
 bash scripts/release-check.sh
 
@@ -50,6 +50,8 @@ case "$1 $2" in
       printf 'https://github.com/owner/repo/pull/123\n'
     elif [[ "$args" == *"title,state,isDraft,mergeable,reviewDecision,headRefName,baseRefName,url"* ]]; then
       printf '{"title":"Improve review tools","state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","reviewDecision":"REVIEW_REQUIRED","headRefName":"feature","baseRefName":"main","url":"https://github.com/owner/repo/pull/123"}\n'
+    elif [[ "$args" == *"number,headRefOid,baseRefName,url"* ]]; then
+      printf '{"number":123,"headRefOid":"abc123","baseRefName":"main","url":"https://github.com/owner/repo/pull/123"}\n'
     else
       printf '{"baseRefName":"main","headRefOid":"abc123","number":123}\n'
     fi
@@ -176,3 +178,13 @@ REVIEW_MODE_FORCE_REST_COMMENTS=1 \
 nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/rest_fallback_fixture.lua"
+
+# :ReviewModeCheckout: review the PR in a detached worktree, not this checkout.
+# No GH_REVIEW_* here: the session context must come from the checkout itself.
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/checkout-cache" \
+XDG_STATE_HOME="$tmp/checkout-state" \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+nvim --headless -u NONE -i NONE \
+  -c "set noswapfile" \
+  -l "$repo_root/scripts/no_checkout_fixture.lua"

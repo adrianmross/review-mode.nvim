@@ -278,6 +278,25 @@ COMMANDS                                                  *review-mode-commands*
 :ReviewModeSummary
         Show file, comment, thread, and viewed-sync counts.
 
+                                                        *:ReviewModeCheckout*
+:ReviewModeCheckout {number|url}
+        Review a PR without checking it out. Fetches the PR head into
+        refs/review-mode/pr/{number} (pull/{number}/head, so fork PRs work),
+        puts a detached worktree for it under
+        stdpath("cache")/review-mode/worktrees/{owner}_{repo}/pr-{number}, and
+        opens the review in its own tabpage with a tab-local cwd. The current
+        checkout, branch and working tree are untouched. Set the
+        hooks.prepare_checkout override to create the worktree with your own
+        tool and return its path instead.
+
+                                                        *:ReviewModeCheckoutClean*
+:ReviewModeCheckoutClean [pr]
+        Remove review worktrees created by |:ReviewModeCheckout|, after a
+        confirmation. Worktrees with uncommitted changes, and the one the
+        current session is using, are refused and listed. A dirty worktree is
+        also never updated: reviewing its PR again reuses it as it stands and
+        warns.
+
 ==============================================================================
 KEYMAPS                                                    *review-mode-keymaps*
 
@@ -352,6 +371,9 @@ SETUP                                                        *review-mode-setup*
     picker = {
       provider = "auto",
     },
+    checkout = {
+      cleanup = "manual",
+    },
     viewed = {
       enabled = true,
       sync = false,
@@ -392,6 +414,13 @@ switches to viewed after every changed file under it is viewed.
 
 External launchers can provide GH_REVIEW_REPO, GH_REVIEW_PR, GH_REVIEW_BASE,
 and GH_REVIEW_HEAD to avoid startup discovery calls.
+
+:ReviewModeCheckout reviews a PR in a detached worktree of its own instead,
+leaving the current checkout alone; review worktrees are only ever removed by
+:ReviewModeCheckoutClean, which is what checkout.cleanup = "manual" means. The
+hooks.prepare_checkout override decides where that worktree comes from, and
+the checkout_ready and checkout_removed events report when one is ready or
+gone.
 
 Viewed state is persisted in stdpath("state")/review-mode-state.json by default.
 Set viewed.sync = true or run :ReviewModeViewedSyncToggle to pull GitHub's PR file
