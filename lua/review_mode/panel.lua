@@ -143,7 +143,8 @@ local function suggestion_context(target, thread)
   return vim.api.nvim_buf_get_lines(target.buf, first - 1, last, false)
 end
 
-local panel_hint = "r reply · c comment · R resolve · a apply · o open · <CR> jump · q close"
+local panel_hint = "r reply · c comment · e edit · D delete · + react · "
+  .. "R resolve · a apply · S review · o open · <CR> jump · q close"
 
 local function render_panel()
   if not panel_is_open() then
@@ -604,6 +605,12 @@ local function delete_comment(comment)
     return
   end
 
+  -- The reload that follows a delete is async, so between the request and the
+  -- refresh the cached rows still point at a comment GitHub has dropped. Clear
+  -- them now: a key pressed in that window finds nothing rather than acting on
+  -- an id that no longer exists.
+  ui.panel_comment_rows = nil
+
   api.delete_comment(comment.id, function(ok, err)
     if not ok then
       vim.notify("Review Mode delete failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
@@ -828,6 +835,12 @@ end
 function M.react_to(comment, content)
   if not comment then
     vim.notify("No PR comment to react to", vim.log.levels.WARN)
+    return
+  end
+  -- a pending draft only exists locally, so it has no id to react to; refuse
+  -- before the picker rather than after it
+  if not comment.id then
+    vim.notify("A pending review comment cannot be reacted to until it is submitted", vim.log.levels.WARN)
     return
   end
   if content and content ~= "" then

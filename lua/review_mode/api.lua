@@ -35,6 +35,7 @@ M.events = {
   "leave",
   "stop",
   "comments_loaded",
+  "highlights_changed",
   "viewed_changed",
   "panel_open",
   "panel_close",
