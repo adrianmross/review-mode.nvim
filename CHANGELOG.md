@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.4](https://github.com/adrianmross/review-mode.nvim/compare/v0.12.3...v0.12.4) (2026-09-18)
+
+
+### Features
+
+* **review:** panel-first defaults and keys that ship with the plugin ([#79](https://github.com/adrianmross/review-mode.nvim/issues/79)) ([ab3b8c0](https://github.com/adrianmross/review-mode.nvim/commit/ab3b8c091f2d0171a58748691542cbb92a81e8b0))
+
 ## [0.12.3](https://github.com/adrianmross/review-mode.nvim/compare/v0.12.2...v0.12.3) (2026-09-18)
 
 
