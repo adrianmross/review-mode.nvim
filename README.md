@@ -74,7 +74,7 @@ With `lazy.nvim`:
       mode = { "n", "v" },
       desc = "Review comment",
     },
-    -- ]h/[h, ]c/[c, ]f/[f, <Tab>, <S-Tab> and <Esc> come from the mode layer
+    -- ]h/[h, ]c/[c, ]f/[f and <Esc> come from the mode layer
     -- while you are in the mode; see "The Mode" below.
   },
 }
@@ -143,9 +143,12 @@ mapping of yours that they shadow is saved on entry and restored on exit:
 | `]c` / `[c` | next / previous PR comment |
 | `]f` / `[f` | next / previous changed file |
 | `gt` | toggle the thread panel |
-| `<Tab>` | mark viewed and jump to the next unviewed file |
-| `<S-Tab>` | toggle viewed |
 | `<Esc>` | step out of the mode |
+
+`<Tab>`/`<S-Tab>` are deliberately not defaults: buffer-cycling plugins such as
+bufferline use them, and the layer would shadow them for the whole review.
+`:ReviewModeViewedNext` and `:ReviewModeViewedToggle` do the same jobs; bind
+them in `mode.keys` if you want keys for them.
 
 Replace them with `mode.keys`, or set `mode.keys = {}` to install none:
 
@@ -191,8 +194,10 @@ Keys inside the panel:
 
 ### Replies are drafted, not typed into a prompt
 
-`r`, `c`, `:ReviewModeCompose` and `:ReviewModeReply` open a real markdown
-buffer instead of `vim.ui.input`, so a reply can be more than one line and can
+`r`, `c`, `:ReviewModeComment`, `:ReviewModeCompose` and `:ReviewModeReply` open
+a real markdown buffer instead of `vim.ui.input` — `:ReviewModeComment` opens the
+thread panel first and drafts under it (set `comments.compose = "prompt"` for
+the old one-line prompt), so a reply can be more than one line and can
 be edited before it goes out. Nothing is sent until you confirm:
 
 | key | action |
@@ -656,11 +661,11 @@ comments = {
 },
 ```
 
-The plugin already draws its own comment signs and end-of-line virtual text, so
-letting the namespace draw as well would show every thread twice. With `display`
-off the diagnostics feed navigation, floats and counts only. If you would rather
-have the diagnostic display, turn the entries in `display` on and
-`comments.virtual_text` off.
+The plugin already draws its own comment signs (and end-of-line text, if you
+turn `comments.virtual_text` on), so letting the namespace draw as well would
+show every thread twice. With `display` off the diagnostics feed navigation,
+floats and counts only. If you would rather have the diagnostic display, turn the
+entries in `display` on and leave `comments.virtual_text` off.
 
 `:ReviewModeQuickfix` fills the quickfix list with every thread across the PR —
 `unresolved` (the default, unless `comments.show_resolved` is set) or `all`,
@@ -873,7 +878,8 @@ require("review_mode").setup({
     conditional_requests = true, -- revalidate the REST comment list with If-None-Match
     sign_text = "", -- Nerd Font glyph, override if your font lacks it
     sign_hl_group = "DiagnosticInfo",
-    virtual_text = true,
+    virtual_text = false, -- end-of-line summary beside each comment sign
+    compose = "panel", -- "panel" | "prompt": where :ReviewModeComment drafts
     show_resolved = false,
     resolve_flash_ms = 1200, -- 0 turns the resolve/unresolve confirmation off
     diagnostics = {

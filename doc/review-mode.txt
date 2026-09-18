@@ -48,8 +48,6 @@ Keys installed while in the mode (see mode.keys to change them):
         ]c / [c         next / previous PR comment
         ]f / [f         next / previous changed file
         gt              toggle the thread panel |review-mode-panel|
-        <Tab>           mark viewed, jump to next unviewed file
-        <S-Tab>         toggle viewed
         <Esc>           step out of the mode
 
 A mapping shadowed by the layer is saved on entry and restored on exit.
@@ -463,7 +461,8 @@ SETUP                                                        *review-mode-setup*
       conditional_requests = true,
       sign_text = "", -- Nerd Font glyph
       sign_hl_group = "DiagnosticInfo",
-      virtual_text = true,
+      virtual_text = false,
+      compose = "panel",
       show_resolved = false,
       resolve_flash_ms = 1200, -- 0 turns the confirmation off
       diagnostics = {

@@ -25,7 +25,10 @@ local defaults = {
     cache_ttl_seconds = 300,
     sign_text = default_comment_sign_text,
     sign_hl_group = "DiagnosticInfo",
-    virtual_text = true,
+    virtual_text = false,
+    -- where :ReviewModeComment drafts: "panel" (the thread panel's composer)
+    -- or "prompt" (a one-line vim.ui.input)
+    compose = "panel",
     show_resolved = false,
     -- Diagnostics: review threads as vim.diagnostic entries ------------------
     -- Off by default: once on, ]d/[d, statusline counts and Trouble mix review
@@ -87,8 +90,6 @@ local defaults = {
       ["]f"] = "next_file",
       ["[f"] = "prev_file",
       ["gt"] = "toggle_panel",
-      ["<Tab>"] = "mark_viewed_next",
-      ["<S-Tab>"] = "toggle_viewed",
       ["<Esc>"] = "leave",
     },
   },
@@ -246,6 +247,10 @@ function M.normalize_config(opts)
 
   if config.no_pr ~= "local" and config.no_pr ~= "error" then
     config.no_pr = defaults.no_pr
+  end
+
+  if config.comments.compose ~= "panel" and config.comments.compose ~= "prompt" then
+    config.comments.compose = defaults.comments.compose
   end
 
   if type(config.hooks) ~= "table" then

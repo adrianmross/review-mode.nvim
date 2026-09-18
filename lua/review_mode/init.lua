@@ -2154,7 +2154,19 @@ function M.comment(command)
     return
   end
 
+  -- read the range first: opening the panel leaves visual mode
   local start_line, end_line = util.visual_range(command)
+
+  if state.config.comments.compose == "panel" then
+    -- draft in the thread panel, so the comment is written beside the threads
+    -- it joins; open_panel hands focus back to this window
+    if not panel.panel_is_open() then
+      panel.open_panel()
+    end
+    panel.compose_comment({ range = 2, line1 = start_line, line2 = end_line })
+    return
+  end
+
   vim.ui.input({ prompt = string.format("PR comment %s:%d-%d: ", path, start_line, end_line) }, function(input)
     local body = trim(input or "")
     if body == "" then
