@@ -125,6 +125,11 @@ for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
 end
 assert(other and other[4] == "base changed", "the split of an applied suggestion should show the original")
 assert(api.preview_suggestion(entries[2], { buf = buf, layout = "split" }) == false, "split preview should close")
+-- reverting closes a split of what the trial replaced, which would be stale
+assert(api.preview_suggestion(entries[2], { buf = buf, layout = "split" }) == true, "split preview should reopen")
+assert(api.revert_suggestion(), "reverting under an open split failed")
+assert(#vim.api.nvim_tabpage_list_wins(0) == 1, "reverting left the split of the original open")
+assert(api.accept_suggestion(entries[2], { buf = buf }), "re-applying after the split revert failed")
 
 -- the apply key toggles: on an applied suggestion it reverts
 vim.api.nvim_win_set_cursor(0, { 4, 0 })

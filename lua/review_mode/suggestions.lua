@@ -492,6 +492,10 @@ function M.revert(id)
     pcall(vim.api.nvim_buf_del_extmark, trial.buf, preview_ns, open)
     previews[trial.buf][trial.thread_id] = nil
   end
+  if split_thread == trial.thread_id and diff.old_view_is_open() then
+    diff.close_old_view()
+    split_thread = nil
+  end
   vim.api.nvim_buf_set_lines(trial.buf, start_row, finish, false, trial.original)
   pcall(vim.api.nvim_buf_del_extmark, trial.buf, trial_ns, trial.mark)
   trial.mark = -1

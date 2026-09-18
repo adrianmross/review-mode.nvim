@@ -508,8 +508,12 @@ local function apply_thread_suggestion(thread, target)
   -- the apply key toggles: on a suggestion already applied, it reverts
   for _, live in ipairs(api.suggestion_trials()) do
     if live.thread_id == thread.id and live.buf == target.buf then
-      api.revert_suggestion(live.id)
-      vim.notify(string.format("Reverted the trial suggestion at %s:%d", live.path, live.line))
+      local reverted, err = api.revert_suggestion(live.id)
+      if not reverted then
+        vim.notify("Review Mode: " .. tostring(err), vim.log.levels.WARN)
+        return
+      end
+      vim.notify(string.format("Reverted the trial suggestion at %s:%d", reverted.path, reverted.line))
       return
     end
   end
