@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.3](https://github.com/adrianmross/review-mode.nvim/compare/v0.12.2...v0.12.3) (2026-09-18)
+
+
+### Features
+
+* **review:** review a branch with no PR locally ([#76](https://github.com/adrianmross/review-mode.nvim/issues/76)) ([7d412ba](https://github.com/adrianmross/review-mode.nvim/commit/7d412baffb0ce51d0f1eab749bca0f903301e785))
+
 ## [0.12.2](https://github.com/adrianmross/review-mode.nvim/compare/v0.12.1...v0.12.2) (2026-09-18)
 
 
