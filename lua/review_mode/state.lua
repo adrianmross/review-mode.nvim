@@ -33,6 +33,11 @@ local defaults = {
       display = { signs = false, virtual_text = false, underline = false },
     },
     -- End diagnostics ---------------------------------------------------------
+    -- Resolve feedback --------------------------------------------------------
+    -- How long the line of a just-resolved (or just-unresolved) thread stays
+    -- marked, in milliseconds. 0 turns the confirmation off.
+    resolve_flash_ms = 1200,
+    -- End resolve feedback ------------------------------------------------------
   },
   panel = {
     auto_open = false,

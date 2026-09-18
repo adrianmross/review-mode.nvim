@@ -291,6 +291,19 @@ nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/comment_edit_delete_fixture.lua"
 
+# The resolve/unresolve confirmation flash.
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/resolve-feedback-cache" \
+XDG_STATE_HOME="$tmp/resolve-feedback-state" \
+GH_REVIEW_REPO=owner/repo \
+GH_REVIEW_PR=123 \
+GH_REVIEW_BASE=main \
+GH_REVIEW_HEAD=abc123 \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+nvim --headless -u NONE -i NONE \
+  -c "set noswapfile" \
+  -l "$repo_root/scripts/resolve_feedback_fixture.lua"
+
 PATH="$tmp/bin:$PATH" \
 XDG_CACHE_HOME="$tmp/review-cache" \
 XDG_STATE_HOME="$tmp/review-state" \

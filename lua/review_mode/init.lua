@@ -269,6 +269,88 @@ local function annotate_open_buffers()
   end
 end
 
+-- Resolve feedback -------------------------------------------------------------
+-- Resolving a thread otherwise just makes it disappear: the sign is gone on the
+-- next reload and nothing says why. Flash the line the thread sat on, in the
+-- colour of its new state, so the action is confirmed where it happened. Its own
+-- namespace on purpose -- the reload that follows clears `ns`, and this mark has
+-- to outlive it without touching the real signs or virtual text.
+local flash_ns = vim.api.nvim_create_namespace("review_mode_resolve_flash")
+local flash_generation = 0
+
+local function clear_resolve_flash()
+  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      vim.api.nvim_buf_clear_namespace(bufnr, flash_ns, 0, -1)
+    end
+  end
+end
+
+--- The path and line a thread sits on, searched across the changed files.
+local function thread_location(thread_id)
+  for _, path in ipairs(state.file_order or {}) do
+    for _, thread in ipairs(comments_ui.threads(state.comments[path], path)) do
+      if thread.id == thread_id then
+        return path, thread.line
+      end
+    end
+  end
+  return nil, nil
+end
+
+--- Mark a thread's line as just resolved or just unresolved, briefly.
+--- comments.resolve_flash_ms = 0 turns it off.
+local function flash_thread_resolved(thread_id, resolved)
+  local ms = (state.config.comments or {}).resolve_flash_ms
+  if type(ms) ~= "number" or ms <= 0 or not state.active or not state.root then
+    return
+  end
+
+  local path, line = thread_location(thread_id)
+  if not path or not line then
+    return
+  end
+
+  api.ensure_highlights()
+  local hl = resolved and "ReviewModeResolved" or "ReviewModeUnresolved"
+  local label = resolved and "resolved" or "unresolved"
+
+  clear_resolve_flash()
+  local marked = false
+  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_loaded(bufnr) then
+      local name = vim.api.nvim_buf_get_name(bufnr)
+      if name ~= "" and vim.fs.relpath(state.root, name) == path then
+        -- line-1 can be past the end of a buffer showing an older revision
+        if line <= vim.api.nvim_buf_line_count(bufnr) then
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, flash_ns, line - 1, 0, {
+            line_hl_group = hl,
+            virt_text = { { "  " .. label, hl } },
+            virt_text_pos = "eol",
+            -- above the annotation layer (160) so the confirmation reads first
+            priority = 200,
+          })
+          marked = true
+        end
+      end
+    end
+  end
+
+  if not marked then
+    return
+  end
+
+  flash_generation = flash_generation + 1
+  local generation = flash_generation
+  vim.defer_fn(function()
+    -- a newer flash owns the marks now; let its own timer clear them
+    if generation == flash_generation then
+      clear_resolve_flash()
+    end
+  end, ms)
+end
+-- End resolve feedback ---------------------------------------------------------
+
 local function refresh_tree()
   if not state.config.nvim_tree.enabled then
     return
@@ -311,6 +393,13 @@ end)
 hooks.on("pending_changed", function()
   schedule_comments_ui_refresh()
 end)
+
+-- Resolve feedback: the flash rides the event, not the network call, so the
+-- GitLab provider's own resolve and any future one get it for free.
+hooks.on("thread_resolved", function(data)
+  flash_thread_resolved(data.thread_id, data.resolved)
+end)
+-- End resolve feedback
 
 local function parse_changed_files(output)
   state.files = {}
@@ -2304,12 +2393,20 @@ function M.setup(opts)
     )
     vim.api.nvim_create_user_command(
       "ReviewModeResolveThread",
-      M.resolve_thread,
+      -- wrapped: a bare M.resolve_thread would take the command table as its
+      -- thread id and never look at the current line
+      function()
+        M.resolve_thread()
+      end,
       { desc = "Resolve PR comment thread on the current line" }
     )
     vim.api.nvim_create_user_command(
       "ReviewModeUnresolveThread",
-      M.unresolve_thread,
+      -- wrapped: a bare M.unresolve_thread would take the command table as its
+      -- thread id and never look at the current line
+      function()
+        M.unresolve_thread()
+      end,
       { desc = "Unresolve PR comment thread on the current line" }
     )
     vim.api.nvim_create_user_command(
