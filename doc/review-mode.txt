@@ -66,7 +66,7 @@ Vim (see session.keys to change them):
         <leader>rf      changed files with viewed state and comment counts
         <leader>rv      toggle this file viewed
         <leader>rd      base diff (rD layout; full file is in the actions)
-        <leader>ra      actions picker
+        <leader>ra      actions picker (every action, with its key)
         <leader>rs      pending review and submit
         <leader>rq      end the review
 
@@ -221,7 +221,8 @@ COMMANDS                                                  *review-mode-commands*
 
                                                         *:ReviewModeActions*
 :ReviewModeActions
-        Open an action picker for common PR actions, using the configured picker
+        Open a picker of every action, grouped by what it acts on, with the
+        key bound to each shown beside it, using the configured picker
         provider.
 
                                                         *:ReviewModeBrowser*

@@ -139,7 +139,7 @@ layer goes.
 | `<leader>rf` | changed files, with viewed state and comment counts |
 | `<leader>rv` | toggle this file viewed |
 | `<leader>rd` / `<leader>rD` | base diff / diff layout (full-file diff is in the actions picker) |
-| `<leader>ra` | actions picker |
+| `<leader>ra` | actions picker: every action, grouped, with its key beside it |
 | `<leader>rs` | pending review and submit |
 | `<leader>rq` | end the review |
 
@@ -553,7 +553,7 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewMode` toggles Review Mode, starting the review session if there is none
 - `:ReviewModeEnter` steps into the mode without reloading the session
 - `:ReviewModeLeave` steps out of the mode, keeping the session loaded
-- `:ReviewModeActions` opens an action picker for common PR actions, using the configured picker provider
+- `:ReviewModeActions` opens a picker of every action, grouped (Comment, Thread, Suggest, Files, Diff, Review, PR, Local, Session) and showing the key bound to each, so typing `rx` finds resolve; using the configured picker provider
 - `:ReviewModeBrowser` opens the current PR in your browser
 - `:ReviewModeCopyUrl` copies the current PR URL to registers
 - `:ReviewModeChecks` shows `gh pr checks` output in a floating preview

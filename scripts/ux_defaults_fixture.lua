@@ -73,6 +73,20 @@ assert(vim.fn.maparg("<leader>rc", "n") == "", "<leader>rc is still a default ke
 assert(desc("]r") == "review-mode ]r", "]r does not jump between threads")
 assert(desc("]c") == "review-mode ]c", "the mode layer is not installed")
 
+-- the action picker lists every action with the key bound to it
+local by_label = {}
+for _, item in ipairs(pr.action_items()) do
+  assert(type(item.run) == "function", "action has nothing to run: " .. item.label)
+  by_label[item.label] = item
+end
+assert(by_label["Resolve / unresolve thread"].key == "<leader>rx", "the resolve action does not show <leader>rx")
+assert(
+  by_label["Comment (reply if a thread is here)"].key == "<leader>rr",
+  "the comment action does not show <leader>rr"
+)
+assert(by_label["Next hunk"].key == "]c", "a mode key is not shown beside its action")
+assert(by_label["Toggle full-file diff"].key == nil, "an unbound action shows a key")
+
 -- step out: the mode layer goes, the session layer stays
 pr.leave()
 assert(desc("]c") ~= "review-mode ]c", "stepping out left ]c installed")
