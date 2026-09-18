@@ -730,8 +730,13 @@ replaces an open base diff, and toggling it again closes it.
 Trial apply: the panel's `a` key and |:ReviewModeApplySuggestion| write the
 suggestion into the buffer and leave it there, unsaved, with a "T" sign and a
 "trial suggestion" label over the changed range. Run the code, see how it
-behaves, then |:ReviewModeSuggestionRevert| to put the original lines back.
-Several trials can be live at once; |:ReviewModeSuggestionList| shows them.
+behaves, then press `a` again (or |:ReviewModeSuggestionRevert|) to put the
+original lines back. Several trials can be live at once;
+|:ReviewModeSuggestionList| shows them.
+
+Once a suggestion is applied, `p` shows what it replaced, as deletions above
+the applied lines, and the split view compares against the original. Applying
+takes down any preview of that suggestion first.
 
 Reverting does not rely on `u`. The applied range is tracked with an extmark,
 so it restores exactly the lines the suggestion replaced, wherever they have

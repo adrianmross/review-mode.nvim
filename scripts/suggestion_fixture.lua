@@ -89,6 +89,53 @@ assert(table.concat(lines(), "\n") == table.concat(original, "\n"), "the real bu
 assert(api.preview_suggestion(entries[2], { buf = buf, layout = "split" }) == false, "split preview should toggle off")
 assert(#vim.api.nvim_tabpage_list_wins(0) == 1, "toggling off should close the split")
 
+-- Preview meets trial -----------------------------------------------------------
+
+-- The reported sequence: preview a suggestion, apply it, preview again. The
+-- open preview must not outlive the apply (its deletion paint and ghost lines
+-- would sit over the applied text), and a second preview must not show the
+-- suggestion twice: once applied, preview shows what the trial replaced.
+local function preview_marks()
+  return vim.api.nvim_buf_get_extmarks(buf, preview_ns, 0, -1, { details = true })
+end
+assert(api.preview_suggestion(entries[2], { buf = buf }) == true, "preview should turn on")
+assert(api.accept_suggestion(entries[2], { buf = buf }), "applying over an open preview failed")
+assert(#preview_marks() == 0, "applying left the preview drawn over the applied lines")
+
+assert(api.preview_suggestion(entries[2], { buf = buf }) == true, "previewing an applied suggestion should turn on")
+local before = preview_marks()
+assert(#before == 1, "expected one preview of the applied suggestion, got " .. #before)
+local shown = before[1][4]
+assert(shown.virt_lines[1][1][1] == "base changed", "an applied suggestion should preview what it replaced")
+assert(shown.virt_lines[1][1][2] == "ReviewModeSuggestionDelete", "the replaced lines should read as a deletion")
+assert(shown.virt_lines_above, "the replaced lines belong above the applied ones, as in a diff")
+assert(shown.hl_group ~= "ReviewModeSuggestionDelete", "the applied lines are not a deletion")
+assert(lines()[4] == "base improved", "previewing must not touch the applied trial")
+assert(api.preview_suggestion(entries[2], { buf = buf }) == false, "the applied-suggestion preview should toggle off")
+assert(#preview_marks() == 0, "toggling off should clear it")
+
+-- side by side, an applied suggestion compares against the lines it replaced
+assert(api.preview_suggestion(entries[2], { buf = buf, layout = "split" }) == true, "split preview should open")
+local other
+for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+  local win_buf = vim.api.nvim_win_get_buf(win)
+  if win_buf ~= buf then
+    other = vim.api.nvim_buf_get_lines(win_buf, 0, -1, false)
+  end
+end
+assert(other and other[4] == "base changed", "the split of an applied suggestion should show the original")
+assert(api.preview_suggestion(entries[2], { buf = buf, layout = "split" }) == false, "split preview should close")
+
+-- the apply key toggles: on an applied suggestion it reverts
+vim.api.nvim_win_set_cursor(0, { 4, 0 })
+pr.apply_suggestion()
+assert(lines()[4] == "base changed", "applying an applied suggestion should revert it")
+assert(#api.suggestion_trials() == 0, "the toggle-off left a trial behind")
+pr.apply_suggestion()
+assert(lines()[4] == "base improved", "the apply key should apply again after a revert")
+assert(api.revert_suggestion(), "cleaning up the toggled trial failed")
+assert(table.concat(lines(), "\n") == table.concat(original, "\n"), "the buffer should be back to the original")
+
 -- Trial apply and revert ------------------------------------------------------
 
 local trial_ns = vim.api.nvim_get_namespaces().review_mode_suggestion_trial

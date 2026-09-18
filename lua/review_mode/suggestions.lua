@@ -35,6 +35,9 @@ local previews = {}
 -- the thread whose side-by-side preview is open, if any
 local split_thread = nil
 
+-- defined with the trials below; the previews need them first
+local trial_range, trial_for_thread
+
 -- Resolved at call time so requiring this module never cycles through the API.
 local function review_api()
   return require("review_mode.api")
@@ -158,12 +161,33 @@ function M.preview(entry, bufnr)
     return false
   end
 
+  review_api().ensure_highlights()
+  -- Applied already: the suggestion is in the text, so show what it replaced,
+  -- above it, as the deletion half of a diff.
+  local trial = trial_for_thread(bufnr, entry.id)
+  if trial then
+    local start_row = trial_range(trial)
+    local virt_lines = {}
+    for _, line in ipairs(trial.original) do
+      virt_lines[#virt_lines + 1] = { { line, "ReviewModeSuggestionDelete" } }
+    end
+    if #virt_lines == 0 then
+      virt_lines[1] = { { "(this trial only added lines)", "ReviewModeHint" } }
+    end
+    local id = vim.api.nvim_buf_set_extmark(bufnr, preview_ns, start_row, 0, {
+      virt_lines = virt_lines,
+      virt_lines_above = true,
+    })
+    previews[bufnr] = previews[bufnr] or {}
+    previews[bufnr][entry.id] = id
+    return true
+  end
+
   local first, last = anchored_range(entry, bufnr)
   if not first then
     return nil, "suggestion is not anchored to a line here"
   end
 
-  review_api().ensure_highlights()
   local virt_lines = {}
   for _, line in ipairs(entry.lines) do
     virt_lines[#virt_lines + 1] = { { line, "ReviewModeSuggestionAdd" } }
@@ -211,33 +235,55 @@ function M.preview_split(entry, bufnr)
     return false
   end
 
-  local first, last = anchored_range(entry, bufnr)
-  if not first then
-    return nil, "suggestion is not anchored to a line here"
-  end
-
   local win = vim.fn.bufwinid(bufnr)
   if win == -1 then
     return nil, string.format("%s is not in a window", tostring(entry.path))
   end
 
+  -- the other side: the file with the suggestion in, or, once it is applied,
+  -- the file with the lines it replaced put back
+  local first, last, replacement, name
+  local trial = trial_for_thread(bufnr, entry.id)
+  if trial then
+    local start_row, finish = trial_range(trial)
+    first, last, replacement, name = start_row + 1, finish, trial.original, "pr-suggestion-original://"
+  else
+    first, last = anchored_range(entry, bufnr)
+    if not first then
+      return nil, "suggestion is not anchored to a line here"
+    end
+    replacement, name = entry.lines, "pr-suggestion://"
+  end
+
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  local suggested = vim.list_slice(lines, 1, first - 1)
-  vim.list_extend(suggested, entry.lines)
-  vim.list_extend(suggested, vim.list_slice(lines, last + 1, #lines))
+  local other = vim.list_slice(lines, 1, first - 1)
+  vim.list_extend(other, replacement)
+  vim.list_extend(other, vim.list_slice(lines, last + 1, #lines))
 
   diff.open_scratch_side_by_side({
     path = entry.path,
     win = win,
     buf = bufnr,
-    lines = suggested,
-    name = "pr-suggestion://" .. entry.path,
+    lines = other,
+    name = name .. entry.path,
   })
   split_thread = entry.id
   return true
 end
 
 -- Trials ----------------------------------------------------------------------
+
+-- A trial's rows now, as (start_row, finish): 0-based start, exclusive end,
+-- so an all-deleting trial is the empty range (start_row, start_row).
+trial_range = function(trial)
+  local mark = vim.api.nvim_buf_get_extmark_by_id(trial.buf, trial_ns, trial.mark, { details = true })
+  local start_row = mark[1]
+  if not start_row then
+    return nil
+  end
+  local details = mark[3] or {}
+  return start_row, #trial.lines > 0 and ((details.end_row or start_row) + 1) or start_row
+end
 
 local function mark_alive(trial)
   if not vim.api.nvim_buf_is_valid(trial.buf) then
@@ -276,7 +322,7 @@ function M.trials()
   return out
 end
 
-local function trial_for_thread(bufnr, thread_id)
+trial_for_thread = function(bufnr, thread_id)
   for _, trial in ipairs(prune()) do
     if trial.buf == bufnr and trial.thread_id == thread_id then
       return trial
@@ -333,6 +379,18 @@ function M.accept(entry, bufnr)
 
   if trial_for_thread(bufnr, entry.id) then
     return nil, "this suggestion is already applied as a trial"
+  end
+
+  -- a preview drawn over the lines about to be replaced would stay behind on
+  -- the applied text, painted as a deletion with the suggestion again below it
+  local open = (previews[bufnr] or {})[entry.id]
+  if open then
+    pcall(vim.api.nvim_buf_del_extmark, bufnr, preview_ns, open)
+    previews[bufnr][entry.id] = nil
+  end
+  if split_thread == entry.id and diff.old_view_is_open() then
+    diff.close_old_view()
+    split_thread = nil
   end
 
   local first, last = anchored_range(entry, bufnr)
@@ -422,16 +480,18 @@ function M.revert(id)
     return nil, "no trial suggestion to revert"
   end
 
-  local mark = vim.api.nvim_buf_get_extmark_by_id(trial.buf, trial_ns, trial.mark, { details = true })
-  local start_row = mark[1]
+  -- Where the mark sits now, not where the suggestion was anchored: the user
+  -- may have added or removed lines above it since.
+  local start_row, finish = trial_range(trial)
   if not start_row then
     return nil, "this trial is no longer tracked"
   end
-
-  -- Where the mark sits now, not where the suggestion was anchored: the user
-  -- may have added or removed lines above it since.
-  local details = mark[3] or {}
-  local finish = #trial.lines > 0 and ((details.end_row or start_row) + 1) or start_row
+  -- a preview of what this trial replaced has nothing left to show
+  local open = (previews[trial.buf] or {})[trial.thread_id]
+  if open then
+    pcall(vim.api.nvim_buf_del_extmark, trial.buf, preview_ns, open)
+    previews[trial.buf][trial.thread_id] = nil
+  end
   vim.api.nvim_buf_set_lines(trial.buf, start_row, finish, false, trial.original)
   pcall(vim.api.nvim_buf_del_extmark, trial.buf, trial_ns, trial.mark)
   trial.mark = -1
