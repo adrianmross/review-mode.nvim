@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.12.1](https://github.com/adrianmross/review-mode.nvim/compare/v0.12.0...v0.12.1) (2026-09-17)
+
+
+### Features
+
+* **checkout:** review a PR without checking it out ([#64](https://github.com/adrianmross/review-mode.nvim/issues/64)) ([a654a24](https://github.com/adrianmross/review-mode.nvim/commit/a654a24536f50fa8aaff790b00ac39efb80c8bfd))
+* **comments:** add and remove reactions ([#65](https://github.com/adrianmross/review-mode.nvim/issues/65)) ([0428afd](https://github.com/adrianmross/review-mode.nvim/commit/0428afd169f7fb314df9d5ea16fe52a6e0e2da63))
+* **comments:** edit and delete your own review comments ([#61](https://github.com/adrianmross/review-mode.nvim/issues/61)) ([45bdd65](https://github.com/adrianmross/review-mode.nvim/commit/45bdd657a6c3b140496c0ca59c44c49f7af0b4d7))
+* **diagnostics:** expose review threads as diagnostics and quickfix ([#63](https://github.com/adrianmross/review-mode.nvim/issues/63)) ([89683a4](https://github.com/adrianmross/review-mode.nvim/commit/89683a4a7498a0853eb53748a146d2d4ecf4423f))
+* **providers:** review GitLab merge requests ([#66](https://github.com/adrianmross/review-mode.nvim/issues/66)) ([fd54c08](https://github.com/adrianmross/review-mode.nvim/commit/fd54c08d2ea55058a470455a956735f5645e5354))
+* **review:** submit reviews with batched pending comments ([#62](https://github.com/adrianmross/review-mode.nvim/issues/62)) ([94649ea](https://github.com/adrianmross/review-mode.nvim/commit/94649ea3ec6868baa13232ebd83b20124f1eaa5c))
+
+
+### Performance Improvements
+
+* **picker:** load the viewed-file diff preview asynchronously ([#67](https://github.com/adrianmross/review-mode.nvim/issues/67)) ([13b9034](https://github.com/adrianmross/review-mode.nvim/commit/13b9034c6748fd1725295e4fcd676be5f42c1711)), closes [#58](https://github.com/adrianmross/review-mode.nvim/issues/58)
+
 ## [0.12.0](https://github.com/adrianmross/review-mode.nvim/compare/v0.11.0...v0.12.0) (2026-09-16)
 
 
