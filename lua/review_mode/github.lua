@@ -301,13 +301,16 @@ end
 
 function M.load_comments_async(opts)
   opts = opts or {}
-  if
-    not state.config.comments.enabled
-    or not state.active
-    or state.comments_loading
-    or not state.repo
-    or not state.pr
-  then
+  if not state.config.comments.enabled or not state.active or state.comments_loading then
+    return
+  end
+
+  -- Local reviews: the store is a file next to the repo, read synchronously.
+  if state.provider == "local" then
+    return require("review_mode.providers.local").load_comments()
+  end
+
+  if not state.repo or not state.pr then
     return
   end
 

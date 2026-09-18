@@ -4,6 +4,9 @@
 -- lives in review_mode.providers.gitlab, and the few places that reach a forge
 -- (metadata, loading comments, posting, replying, resolving) branch to it when
 -- state.provider is "gitlab".
+--
+-- "local" is the third: no forge at all, refs and comments both come off disk.
+-- See review_mode.providers.local.
 local M = {}
 
 local core = require("review_mode.state")
@@ -39,7 +42,7 @@ end
 --- Pick the provider for a review starting in `root`.
 function M.select(root)
   local configured = state.config.provider
-  if configured == "github" or configured == "gitlab" then
+  if configured == "github" or configured == "gitlab" or configured == "local" then
     return configured
   end
   -- a launcher's handoff says which forge it came from
@@ -50,17 +53,28 @@ function M.select(root)
     return "github"
   end
   local url = util.system({ "git", "remote", "get-url", "origin" }, { cwd = root })
+  -- no remote, no forge to ask: review the local refs instead of failing on gh
+  if not url then
+    return "local"
+  end
   return M.detect(url, state.config.gitlab_hosts)
+end
+
+function M.is_local()
+  return state.provider == "local"
 end
 
 function M.is_gitlab()
   return state.provider == "gitlab"
 end
 
---- The error for a GitHub-only feature used against GitLab. Notifies, calls
---- `callback(false, err)` when given, and returns the message.
+-- how each non-GitHub provider finishes "X is not supported ..."
+local unsupported_targets = { gitlab = "on GitLab yet", ["local"] = "in a local review" }
+
+--- The error for a GitHub-only feature used against another provider. Notifies,
+--- calls `callback(false, err)` when given, and returns the message.
 function M.unsupported(feature, callback)
-  local err = string.format("%s is not supported on GitLab yet", feature)
+  local err = string.format("%s is not supported %s", feature, unsupported_targets[state.provider] or "here")
   vim.notify("Review Mode: " .. err, vim.log.levels.WARN)
   if callback then
     callback(false, err)
