@@ -20,6 +20,7 @@ end
 
 function M.system(args, opts)
   opts = opts or {}
+  M.count_call(args)
   local result = vim.system(args, { text = true, cwd = opts.cwd or state.root or vim.uv.cwd() }):wait()
   if result.code ~= 0 then
     return nil, M.trim(result.stderr ~= "" and result.stderr or result.stdout)
@@ -32,14 +33,16 @@ end
 
 function M.system_async(args, opts, callback)
   opts = opts or {}
+  M.count_call(args)
   vim.system(args, { text = true, cwd = opts.cwd or state.root or vim.uv.cwd() }, function(result)
     vim.schedule(function()
-      if result.code ~= 0 then
+      local failed = result.code ~= 0
+      if failed and not opts.any_exit then
         callback(nil, M.trim(result.stderr ~= "" and result.stderr or result.stdout))
         return
       end
-      if opts.raw then
-        callback(result.stdout, nil)
+      if opts.raw or opts.any_exit then
+        callback(result.stdout, failed and M.trim(result.stderr) or nil)
         return
       end
       callback(M.trim(result.stdout), nil)
@@ -62,6 +65,91 @@ function M.gh_json_async(args, callback)
     callback(decoded, nil)
   end)
 end
+
+-- API call accounting and conditional requests ---------------------------------
+-- Fewer API calls is only a claim until something counts them, so every gh (or
+-- glab) spawn is tallied here. review_mode.api.request_stats() reads this and
+-- :ReviewModeSummary prints it.
+--
+-- This counts processes, not network requests: `gh --cache` still spawns gh and
+-- still shows up in `calls`, it just answers from gh's own response cache
+-- instead of the API. `not_modified` is the one that is unambiguously free --
+-- a 304 costs nothing against the rate limit.
+M.stats = { calls = 0, not_modified = 0 }
+
+function M.count_call(args)
+  local bin = type(args) == "table" and args[1] or nil
+  if bin == "gh" or bin == "glab" then
+    M.stats.calls = M.stats.calls + 1
+  end
+end
+
+function M.request_stats()
+  return vim.deepcopy(M.stats)
+end
+
+--- The `--cache` flag for a read-only gh call that repeats and tolerates
+--- staleness, or nothing when the duration is unset, "0" or "0s".
+function M.gh_cache_args(duration)
+  duration = M.trim(duration or state.config.performance.gh_metadata_cache)
+  if duration == "" or duration:match("^0%a*$") then
+    return {}
+  end
+  return { "--cache", duration }
+end
+
+--- Split `gh api --include` output into its status, headers and body. gh writes
+--- the status line with a bare \n and the headers with CRLF, so accept either.
+--- Header names come back lowercased.
+function M.parse_http_response(text)
+  text = text or ""
+  local status = tonumber(text:match("^HTTP/[%d.]+ (%d+)"))
+  if not status then
+    return nil
+  end
+
+  local headers = {}
+  local offset = 1
+  while true do
+    local line_end = text:find("\n", offset, true)
+    if not line_end then
+      offset = #text + 1
+      break
+    end
+    local line = text:sub(offset, line_end - 1):gsub("\r$", "")
+    offset = line_end + 1
+    if line == "" then
+      break
+    end
+    local name, value = line:match("^([^:]+):%s*(.*)$")
+    if name then
+      headers[name:lower()] = value
+    end
+  end
+
+  return status, headers, text:sub(offset)
+end
+
+--- `gh api --include`, parsed. A conditional request that matches makes gh exit
+--- 1 with "gh: HTTP 304" on stderr while still printing the status line and
+--- headers on stdout, so this keeps the output whatever the exit code was and
+--- lets the caller decide what the status means.
+--- callback({ status, headers, body }, err)
+function M.gh_include_async(args, callback)
+  M.system_async(vim.list_extend({ "gh" }, args), { any_exit = true }, function(stdout, err)
+    local status, headers, body = M.parse_http_response(stdout)
+    if not status then
+      callback(nil, err or "gh printed no HTTP status line")
+      return
+    end
+    if status == 304 then
+      M.stats.not_modified = M.stats.not_modified + 1
+    end
+    callback({ status = status, headers = headers, body = body }, nil)
+  end)
+end
+
+-- End API call accounting ------------------------------------------------------
 
 function M.open_lines_preview(lines, filetype, opts)
   opts = opts or {}

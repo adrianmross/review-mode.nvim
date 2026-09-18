@@ -39,6 +39,15 @@ local defaults = {
     -- marked, in milliseconds. 0 turns the confirmation off.
     resolve_flash_ms = 1200,
     -- End resolve feedback ------------------------------------------------------
+    -- Conditional requests ----------------------------------------------------
+    -- Revalidate the REST comment list with If-None-Match instead of
+    -- re-downloading it once cache_ttl_seconds is up. A 304 costs nothing
+    -- against the rate limit and only refreshes the cache timestamp. ETags are
+    -- per page on GitHub, so one is stored per page and each page is
+    -- revalidated on its own. The GraphQL thread query is a POST and cannot do
+    -- this; it still goes by cache_ttl_seconds.
+    conditional_requests = true,
+    -- End conditional requests -------------------------------------------------
   },
   panel = {
     auto_open = false,
@@ -105,6 +114,19 @@ local defaults = {
       max_files = 5000,
       delay_ms = 250,
     },
+    -- gh response cache -------------------------------------------------------
+    -- Duration passed to `gh api --cache` for reads that repeat and cannot go
+    -- stale in a way that misleads. "0" or "" turns it off.
+    --
+    -- Today that is the PR's GraphQL node id, which never changes. Everything
+    -- else is deliberately left out: the PR's head SHA is re-read precisely to
+    -- notice that HEAD moved, :ReviewModeStatus and :ReviewModeChecks are run to
+    -- see what changed, the viewed-state query would resurrect stale marks, and
+    -- the comment list uses If-None-Match instead -- fresh *and* free.
+    -- `--cache` is a flag of `gh api` alone; `gh pr view` and `gh repo view`
+    -- reject it.
+    gh_metadata_cache = "10m",
+    -- End gh response cache ----------------------------------------------------
   },
   commands = true,
   -- review a PR without checking it out (:ReviewModeCheckout). Review worktrees

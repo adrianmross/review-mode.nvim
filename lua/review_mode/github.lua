@@ -44,8 +44,12 @@ function M.prune_comment_cache()
   end
 end
 
-function M.write_comment_cache_entry(key, grouped, threads)
-  pcall(util.write_json_file, M.cache_path(key), { fetched_at = os.time(), grouped = grouped, threads = threads or {} })
+function M.write_comment_cache_entry(key, grouped, threads, rest_pages)
+  pcall(
+    util.write_json_file,
+    M.cache_path(key),
+    { fetched_at = os.time(), grouped = grouped, threads = threads or {}, rest_pages = rest_pages }
+  )
 
   if comment_cache_pruned then
     return
@@ -145,34 +149,83 @@ function M.hydrate_comments()
   return (os.time() - tonumber(cached.fetched_at or 0)) < state.config.comments.cache_ttl_seconds
 end
 
-function M.rest_comments_async(generation, page, comments, callback)
+-- Conditional REST comment fetch -----------------------------------------------
+-- GitHub's ETags are per page, never per collection: a 304 on page 1 says
+-- nothing about pages 2..n, and each page's ETag changes only when that page's
+-- payload does. So every page keeps its own ETag *and* its own payload on disk,
+-- and revalidation is per page -- a page that answers 200 is replaced while its
+-- neighbours keep serving from the cache. That is why the cached bodies have to
+-- be stored: a 304 carries no body, so the only way to satisfy page 2 while
+-- page 1 changed is to already hold page 2's comments.
+--
+-- Page count is still driven by the responses, not by the cache: paging stops at
+-- the first page holding fewer than 100 comments, whether that page came back
+-- 200 or 304, and the pages written back are only the ones walked this time. A
+-- PR that lost a page therefore drops the stale tail instead of replaying it.
+local function cached_rest_pages()
+  local key = core.cache_key()
+  local cached = key and M.read_comment_cache(key) or nil
+  if not cached or type(cached.rest_pages) ~= "table" then
+    return {}
+  end
+  return cached.rest_pages
+end
+
+function M.rest_comments_async(generation, page, comments, callback, pages)
   if not state.repo or not state.pr then
     callback(nil, "could not determine GitHub repository or PR")
     return
   end
 
-  gh_json_async({
+  pages = pages or { cached = cached_rest_pages(), fresh = {} }
+  local cached_page = state.config.comments.conditional_requests and pages.cached[page] or nil
+
+  local args = {
     "api",
+    "--include",
     string.format("repos/%s/pulls/%s/comments?per_page=100&page=%d", state.repo, state.pr, page),
-  }, function(result, err)
+  }
+  if cached_page and cached_page.etag then
+    vim.list_extend(args, { "-H", "If-None-Match: " .. cached_page.etag })
+  end
+
+  util.gh_include_async(args, function(response, err)
     if not core.is_current(generation) then
       return
     end
 
-    if not result then
+    if not response then
       callback(nil, err)
       return
     end
 
-    vim.list_extend(comments, result)
-    if #result == 100 then
-      M.rest_comments_async(generation, page + 1, comments, callback)
+    local etag, list
+    if response.status == 304 then
+      etag, list = cached_page.etag, cached_page.comments or {}
+    elseif response.status >= 200 and response.status < 300 then
+      local ok, decoded = pcall(vim.json.decode, response.body)
+      if not ok or type(decoded) ~= "table" then
+        callback(nil, "Failed to decode gh JSON output")
+        return
+      end
+      etag, list = response.headers.etag, decoded
+    else
+      callback(nil, string.format("gh returned HTTP %d for the comment list", response.status))
       return
     end
 
-    callback(comments, nil)
+    pages.fresh[page] = { etag = etag, comments = list }
+    vim.list_extend(comments, list)
+    if #list == 100 then
+      M.rest_comments_async(generation, page + 1, comments, callback, pages)
+      return
+    end
+
+    callback(comments, nil, pages.fresh)
   end)
 end
+
+-- End conditional REST comment fetch -------------------------------------------
 
 function M.review_threads_async(generation, after, threads, callback)
   local owner, name = core.repo_parts()
@@ -278,7 +331,7 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
 end
 
 function M.load_comments_from_rest_async(generation)
-  M.rest_comments_async(generation, 1, {}, function(comments, err)
+  M.rest_comments_async(generation, 1, {}, function(comments, err, rest_pages)
     if not core.is_current(generation) then
       return
     end
@@ -293,7 +346,9 @@ function M.load_comments_from_rest_async(generation)
     state.comment_threads = {}
     local key = core.cache_key()
     if key then
-      M.write_comment_cache_entry(key, state.comments, state.comment_threads)
+      -- rewriting the entry is also what refreshes fetched_at after an all-304
+      -- revalidation, so the TTL restarts without anything being downloaded
+      M.write_comment_cache_entry(key, state.comments, state.comment_threads, rest_pages)
     end
     hooks.emit("comments_loaded", { repo = state.repo, pr = state.pr })
   end)
