@@ -168,7 +168,9 @@ until the draft is confirmed.
         :w      same as <C-s>
         <C-r>   quote the lines selected in the code window, with their path
                 and line numbers
-        <C-g>   seed a ```suggestion block from the lines the draft targets
+        <C-g>   edit the suggestion as code: the lines, or the draft's
+                ```suggestion block, open in a buffer with the file's
+                filetype; :w or <C-s> writes them back, q cancels
         <C-p>   queue the comment in the pending review instead of posting it
                 (new comments only) |review-mode-pending|
         q       discard the draft
