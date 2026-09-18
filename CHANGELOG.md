@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.12.2](https://github.com/adrianmross/review-mode.nvim/compare/v0.12.1...v0.12.2) (2026-09-18)
+
+
+### Features
+
+* **comments:** show when a thread's resolved state changes ([#70](https://github.com/adrianmross/review-mode.nvim/issues/70)) ([21196aa](https://github.com/adrianmross/review-mode.nvim/commit/21196aa7828ea52f14de46b5860dc74a336a94ef))
+* **local:** review local diffs with on-disk comments ([#72](https://github.com/adrianmross/review-mode.nvim/issues/72)) ([d851459](https://github.com/adrianmross/review-mode.nvim/commit/d851459801b21bc8d91960fb1ff5b4c2f9b6632a))
+* **suggestions:** preview, trial-apply and accept suggestions ([#74](https://github.com/adrianmross/review-mode.nvim/issues/74)) ([32930c5](https://github.com/adrianmross/review-mode.nvim/commit/32930c59bda8ed496cd82afbb6ffff09adf332c1))
+
+
+### Performance Improvements
+
+* **github:** cache the PR node id and revalidate comments with ETags ([#73](https://github.com/adrianmross/review-mode.nvim/issues/73)) ([ff8ca91](https://github.com/adrianmross/review-mode.nvim/commit/ff8ca9133106ac3af5eb27ad52302fbef1e0bae5))
+
 ## [0.12.1](https://github.com/adrianmross/review-mode.nvim/compare/v0.12.0...v0.12.1) (2026-09-17)
 
 
