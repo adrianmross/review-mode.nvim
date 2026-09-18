@@ -319,6 +319,9 @@ local unsubscribe = api.on("comments_loaded", function(ctx) ... end)
 -- quickfix (see Diagnostics and Quickfix)
 api.quickfix_items({ filter = "all" })   --> the items, without setting the list
 api.set_quickfix({ filter = "unresolved", open = false })
+
+-- API call accounting (see Fewer GitHub API calls)
+api.request_stats()   --> { calls = <gh processes spawned>, not_modified = <304 answers> }
 ```
 
 Writes take a `callback(ok, err)`. `api.reply` needs the id of the comment it
@@ -784,6 +787,7 @@ require("review_mode").setup({
   comments = {
     enabled = true,
     cache_ttl_seconds = 300,
+    conditional_requests = true, -- revalidate the REST comment list with If-None-Match
     sign_text = "", -- Nerd Font glyph, override if your font lacks it
     sign_hl_group = "DiagnosticInfo",
     virtual_text = true,
@@ -850,10 +854,37 @@ require("review_mode").setup({
       max_files = 5000,
       delay_ms = 250,
     },
+    gh_metadata_cache = "10m", -- `gh api --cache` duration; "0" turns it off
   },
   commands = true,
 })
 ```
+
+### Fewer GitHub API calls
+
+Two knobs keep a review off the rate limit.
+
+`comments.conditional_requests` (default `true`) revalidates the REST comment
+list with `If-None-Match` instead of re-downloading it once
+`comments.cache_ttl_seconds` is up. GitHub answers an unchanged page with
+`304 Not Modified`, which costs nothing against the rate limit at all, and the
+cached comments are served with their timestamp refreshed. GitHub's ETags are
+per page, not per collection, so one ETag and one payload are stored per page
+and each page is revalidated on its own: a page that answers `200` is replaced
+while its neighbours keep serving from the cache. The GraphQL review-thread
+query is the primary comment path and is a `POST`, which GitHub does not answer
+with `304`; it still goes by `comments.cache_ttl_seconds`.
+
+`performance.gh_metadata_cache` (default `"10m"`) is the duration passed to
+`gh api --cache` for reads that repeat and cannot go stale in a way that
+misleads - today the PR's GraphQL node id, which never changes. The PR head SHA
+is deliberately not cached (it is re-read precisely to notice that HEAD moved),
+nor are `:ReviewModeStatus` and `:ReviewModeChecks`, which are run to see what
+changed. Note that `--cache` is a flag of `gh api` alone; `gh pr view` and
+`gh repo view` do not accept it.
+
+`:ReviewModeSummary` and `review_mode.api.request_stats()` report how many `gh`
+invocations the session has spent and how many were answered `304`.
 
 `ReviewMode` loads PR metadata and changed-file status asynchronously. If
 `GH_REVIEW_BASE` is set by a launcher, changed-file loading starts immediately

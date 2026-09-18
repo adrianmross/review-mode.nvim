@@ -425,6 +425,7 @@ SETUP                                                        *review-mode-setup*
     comments = {
       enabled = true,
       cache_ttl_seconds = 300,
+      conditional_requests = true,
       sign_text = "", -- Nerd Font glyph
       sign_hl_group = "DiagnosticInfo",
       virtual_text = true,
@@ -490,10 +491,33 @@ SETUP                                                        *review-mode-setup*
         max_files = 5000,
         delay_ms = 250,
       },
+      gh_metadata_cache = "10m",
     },
     commands = true,
   })
 <
+
+FEWER GITHUB API CALLS                                  *review-mode-api-calls*
+
+comments.conditional_requests (default true) revalidates the REST comment list
+with If-None-Match once comments.cache_ttl_seconds is up, instead of
+re-downloading it. GitHub answers an unchanged page with 304 Not Modified,
+which costs nothing against the rate limit, and the cached comments are served
+with their timestamp refreshed. GitHub's ETags are per page, not per
+collection, so one ETag and one payload are stored per page and each page is
+revalidated on its own. The GraphQL review-thread query is the primary comment
+path and is a POST, which GitHub does not answer with 304; it still goes by
+comments.cache_ttl_seconds.
+
+performance.gh_metadata_cache (default "10m") is the duration passed to
+`gh api --cache` for reads that repeat and cannot go stale in a way that
+misleads - today the PR's GraphQL node id, which never changes. The PR head
+SHA, :ReviewModeStatus and :ReviewModeChecks are deliberately left uncached.
+`--cache` is a flag of `gh api` alone; `gh pr view` and `gh repo view` reject
+it.
+
+:ReviewModeSummary and review_mode.api.request_stats() report how many gh
+invocations the session spent and how many were answered 304.
 
 ReviewMode loads PR metadata and changed-file status asynchronously. If
 GH_REVIEW_BASE is set by a launcher, changed-file loading starts immediately

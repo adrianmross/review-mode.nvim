@@ -601,6 +601,20 @@ end
 
 -- End local reviews -------------------------------------------------------------
 
+-- API call accounting ----------------------------------------------------------
+
+--- How much this session has spent on the forge CLI:
+--- { calls = <gh/glab processes spawned>, not_modified = <304 answers> }.
+--- Counts processes, not network requests: a call served from `gh --cache`
+--- still shows in `calls`. A 304 is free -- it costs nothing against the rate
+--- limit -- so `not_modified` is the share of comment fetches that cost nothing.
+--- :ReviewModeSummary prints the same two numbers.
+function M.request_stats()
+  return util.request_stats()
+end
+
+-- End API call accounting ------------------------------------------------------
+
 -- Escape hatches --------------------------------------------------------------
 
 --- The raw session table. Unstable on purpose: reach for it only when the API

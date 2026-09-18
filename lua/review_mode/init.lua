@@ -1826,6 +1826,18 @@ function M.summary()
     string.format("Viewed sync: %s, %d queued", state.config.viewed.sync and "enabled" or "disabled", queued_sync),
   }
 
+  -- API calls ----------------------------------------------------------------
+  -- This line is a rate-limit report. A local review has no rate limit and never
+  -- spawns a forge CLI, so the honest thing is to have nothing to say rather
+  -- than print zero against a tool the session never intended to use.
+  -- api.request_stats() still answers, correctly, zero.
+  if state.provider ~= "local" then
+    local stats = util.request_stats()
+    lines[#lines + 1] =
+      string.format("API calls: %d gh invocations, %d answered 304 Not Modified", stats.calls, stats.not_modified)
+  end
+  -- End API calls --------------------------------------------------------------
+
   vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO)
 end
 

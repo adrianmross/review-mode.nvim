@@ -167,6 +167,32 @@ case "$1 $2" in
     fi
     printf '{"id":500,"state":"COMMENTED"}\n'
     ;;
+  # Conditional comment fetch. "--include" is passed immediately after "api", so
+  # this branch owns those calls without touching the plain ones above. Real gh
+  # prints the status line and headers ahead of the body, and answers a matched
+  # If-None-Match with 304 and exit code 1 (verified against gh 2.72.0).
+  "api --include")
+    endpoint=""
+    inm=""
+    for arg in "$@"; do
+      case "$arg" in
+        repos/*) endpoint="$arg" ;;
+        "If-None-Match: "*) inm="${arg#If-None-Match: }" ;;
+      esac
+    done
+    # per page, as GitHub's are: the page number is part of the ETag
+    etag="\"etag-${REVIEW_MODE_ETAG_GENERATION:-1}-${endpoint##*page=}\""
+    if [[ -n "${REVIEW_MODE_GH_LOG:-}" ]]; then
+      printf 'include %s if-none-match=%s\n' "$endpoint" "${inm:-none}" >> "$REVIEW_MODE_GH_LOG"
+    fi
+    if [[ "$inm" == "$etag" ]]; then
+      printf 'HTTP/2.0 304 Not Modified\nEtag: %s\r\n\r\n' "$etag"
+      exit 1
+    fi
+    printf 'HTTP/2.0 200 OK\nEtag: %s\r\nContent-Type: application/json; charset=utf-8\r\n\r\n' "$etag"
+    # reuse the payload the plain branch already answers with
+    "$0" api "$endpoint"
+    ;;
   *)
     echo "unexpected gh args: $*" >&2
     exit 1
@@ -367,3 +393,18 @@ REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/local_review_fixture.lua"
+
+# Metadata caching and per-page ETag revalidation of the REST comment fetch.
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/api-cache-cache" \
+XDG_STATE_HOME="$tmp/api-cache-state" \
+GH_REVIEW_REPO=owner/repo \
+GH_REVIEW_PR=123 \
+GH_REVIEW_BASE=main \
+GH_REVIEW_HEAD=abc123 \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+REVIEW_MODE_FORCE_REST_COMMENTS=1 \
+REVIEW_MODE_GH_LOG="$tmp/api-cache-gh.log" \
+nvim --headless -u NONE -i NONE \
+  -c "set noswapfile" \
+  -l "$repo_root/scripts/api_cache_fixture.lua"

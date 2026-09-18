@@ -269,7 +269,12 @@ query($owner: String!, $name: String!, $number: Int!) {
 }
 ]]
 
-  gh_json_async({
+  -- gh's own response cache. A PR's node id never changes, so this one is safe
+  -- to serve stale and is the only repeating gh read here that is: the viewed
+  -- state itself must not be, or a mark made on github.com would not show up.
+  -- (`--cache` is a flag of `gh api` alone -- `gh pr view` and `gh repo view`
+  -- reject it, verified against gh 2.72.0.)
+  local args = {
     "api",
     "graphql",
     "-f",
@@ -280,7 +285,9 @@ query($owner: String!, $name: String!, $number: Int!) {
     "name=" .. name,
     "-F",
     "number=" .. tostring(state.pr),
-  }, function(result, err)
+  }
+
+  gh_json_async(vim.list_extend(args, util.gh_cache_args()), function(result, err)
     if not core.is_current(generation) then
       return
     end
