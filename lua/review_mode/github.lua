@@ -149,6 +149,46 @@ function M.hydrate_comments()
   return (os.time() - tonumber(cached.fetched_at or 0)) < state.config.comments.cache_ttl_seconds
 end
 
+-- Cache-first start --------------------------------------------------------------
+-- The comment cache is keyed by PR, and a plain :ReviewMode only learns its PR
+-- once `gh pr view` answers, so a warm cache used to sit unread for that whole
+-- round trip. Each branch remembers the PR it last resolved to, and start draws
+-- that PR's cached comments while gh is still being asked; start reconciles
+-- against gh's answer when it arrives.
+local function branch_pointer(root)
+  local branch = util.system({ "git", "symbolic-ref", "--short", "-q", "HEAD" }, { cwd = root })
+  return branch and branch ~= "" and ("branch-" .. root .. "@" .. branch) or nil
+end
+
+function M.remember_branch(root)
+  local pointer, key = branch_pointer(root), core.cache_key()
+  if pointer and key then
+    pcall(util.write_json_file, M.cache_path(pointer), { key = key })
+  end
+end
+
+--- Draw the cached comments of the PR this branch last resolved to. Returns the
+--- cache key it drew, or nil when there was nothing to draw.
+function M.hydrate_for_branch(root)
+  if not state.config.comments.enabled then
+    return nil
+  end
+  local pointer = branch_pointer(root)
+  local entry = pointer and M.read_comment_cache(pointer)
+  local key = entry and entry.key
+  local cached = type(key) == "string" and M.read_comment_cache(key) or nil
+  if not cached or type(cached.grouped) ~= "table" then
+    return nil
+  end
+
+  state.comments = cached.grouped
+  state.comment_threads = cached.threads or {}
+  local repo, pr = key:match("^(.*)#(.-)$")
+  hooks.emit("comments_loaded", { repo = repo, pr = pr })
+  return key
+end
+-- End cache-first start ----------------------------------------------------------
+
 -- Conditional REST comment fetch -----------------------------------------------
 -- GitHub's ETags are per page, never per collection: a 304 on page 1 says
 -- nothing about pages 2..n, and each page's ETag changes only when that page's
