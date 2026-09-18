@@ -17,6 +17,7 @@ local function win_with_ft(ft)
 end
 
 vim.fn.system({ "git", "checkout", "-q", "feature" })
+assert(vim.v.shell_error == 0, "could not check out the feature branch for this fixture")
 
 -- A buffer-cycling plugin's keys, set before the review starts. The mode layer
 -- must leave them alone: that collision is why <Tab>/<S-Tab> left the defaults.
@@ -40,6 +41,9 @@ pr.setup({
 
 local config = pr.config()
 assert(config.comments.virtual_text == false, "end-of-line summaries should be off by default")
+-- a non-table comments value must not crash setup
+local ok_false = pcall(require("review_mode.state").normalize_config, { comments = false })
+assert(ok_false, "comments = false crashed normalize_config")
 assert(config.comments.compose == "panel", "comments should draft in the panel by default")
 assert(config.mode.keys["<Tab>"] == nil, "<Tab> is still a default mode key")
 assert(config.mode.keys["<S-Tab>"] == nil, "<S-Tab> is still a default mode key")

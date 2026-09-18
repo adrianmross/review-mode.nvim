@@ -2242,6 +2242,8 @@ function M.comment(command)
     if not panel.panel_is_open() then
       panel.open_panel()
     end
+    -- range is Vim's count of addresses given (0, 1 or 2), not a line count:
+    -- line1..line2 is two addresses, so this reads as ":2,4ReviewModeCompose"
     panel.compose_comment({ range = 2, line1 = start_line, line2 = end_line })
     return
   end

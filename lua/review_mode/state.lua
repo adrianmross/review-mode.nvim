@@ -271,6 +271,12 @@ function M.normalize_config(opts)
     config.no_pr = defaults.no_pr
   end
 
+  -- "force" lets a non-table (comments = false) replace the whole table; the
+  -- documented off switch is comments.enabled = false, so treat anything else
+  -- as the defaults rather than crash on the next field read
+  if type(config.comments) ~= "table" then
+    config.comments = vim.deepcopy(defaults.comments)
+  end
   if config.comments.compose ~= "panel" and config.comments.compose ~= "prompt" then
     config.comments.compose = defaults.comments.compose
   end

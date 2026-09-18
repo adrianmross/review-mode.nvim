@@ -28,6 +28,7 @@ local function reset()
 end
 
 vim.fn.system({ "git", "checkout", "-q", "feature" })
+assert(vim.v.shell_error == 0, "could not check out the feature branch for this fixture")
 
 local pr = require("review_mode")
 local api = require("review_mode.api")
