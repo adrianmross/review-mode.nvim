@@ -50,6 +50,9 @@ M.events = {
   -- pending review
   "pending_changed",
   "review_submitted",
+  -- suggestions
+  "suggestion_accepted",
+  "suggestion_reverted",
 }
 
 -- Session ---------------------------------------------------------------------
@@ -614,6 +617,70 @@ function M.request_stats()
 end
 
 -- End API call accounting ------------------------------------------------------
+
+-- Suggestions -----------------------------------------------------------------
+
+local function suggestions()
+  return require("review_mode.suggestions")
+end
+
+--- Suggestion-bearing threads in a file (or in the whole review when path is
+--- nil), first line first. An entry is { id, thread, path, start_line,
+--- end_line, lines } -- lines being what the suggestion puts in place of the
+--- range.
+function M.suggestions(path)
+  return suggestions().list(path)
+end
+
+--- The suggestions anchored over one line.
+function M.suggestions_at(path, line)
+  return suggestions().at(path, line)
+end
+
+--- Toggle a preview of one suggestion, which may be a thread from M.threads or
+--- an entry from M.suggestions. opts.layout is "inline" (virtual lines under
+--- the range it would replace, the default) or "split" (side by side against
+--- the file with the suggestion applied); opts.buf picks the buffer when the
+--- file is not the current one. Returns true when the preview is now up, false
+--- when it was taken down, or nil and an error.
+function M.preview_suggestion(entry, opts)
+  opts = opts or {}
+  if opts.layout == "split" then
+    return suggestions().preview_split(entry, opts.buf)
+  end
+  return suggestions().preview(entry, opts.buf)
+end
+
+--- Write a suggestion into the buffer as a trial: unsaved, visibly marked, and
+--- revertible through M.revert_suggestion. Emits "suggestion_accepted".
+--- Returns { id, buf, path, thread_id, line, added, removed }, or nil and err.
+function M.accept_suggestion(entry, opts)
+  opts = opts or {}
+  return suggestions().accept(entry, opts.buf)
+end
+
+--- Accept every suggestion in one file. Applied bottom-up, so an earlier
+--- application never moves the lines a later one is anchored to. Returns how
+--- many were applied, and the first error if any were refused.
+function M.accept_all_suggestions(path, opts)
+  opts = opts or {}
+  return suggestions().accept_all(path, opts.buf)
+end
+
+--- Undo a trial, restoring the exact lines it replaced even when the file has
+--- been edited around it since. id is an id from M.suggestion_trials, or nil
+--- for the trial under the cursor. Emits "suggestion_reverted".
+function M.revert_suggestion(id)
+  return suggestions().revert(id)
+end
+
+--- The trials that are applied but not saved:
+--- { { id, buf, path, thread_id, line, added, removed }, ... }.
+function M.suggestion_trials()
+  return suggestions().trials()
+end
+
+-- End suggestions ---------------------------------------------------------------
 
 -- Escape hatches --------------------------------------------------------------
 

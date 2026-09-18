@@ -320,9 +320,16 @@ local function apply_side_by_side_partial_diff_highlights(old_buf, old_lines, ne
   end
 end
 
-local function open_old_side_by_side(path, current_win, current_buf, current_filetype, base_content, base_missing)
+--- Side by side: a read-only scratch buffer holding opts.lines, against the
+--- real file in opts.win. The base version is one caller and the suggestion
+--- preview is another, so the window, fold and partial-highlight handling below
+--- is written once and both get it.
+---
+--- opts: path, win, buf, lines, name, filetype?
+function M.open_scratch_side_by_side(opts)
   M.close_old_view()
 
+  local current_win, current_buf = opts.win, opts.buf
   vim.api.nvim_set_current_win(current_win)
   vim.cmd("vsplit")
   state.old_win = vim.api.nvim_get_current_win()
@@ -330,16 +337,16 @@ local function open_old_side_by_side(path, current_win, current_buf, current_fil
   state.old_target_buf = current_buf
   state.old_buf = vim.api.nvim_create_buf(false, true)
   state.old_layout = "side_by_side"
-  state.old_path = path
+  state.old_path = opts.path
   vim.api.nvim_win_set_buf(state.old_win, state.old_buf)
-  vim.api.nvim_buf_set_name(state.old_buf, "pr-base://" .. core.base_ref() .. "/" .. path)
-  local base_lines = base_missing and {} or util.split_blob_lines(base_content)
-  vim.api.nvim_buf_set_lines(state.old_buf, 0, -1, false, base_lines)
+  vim.api.nvim_buf_set_name(state.old_buf, opts.name)
+  local other_lines = opts.lines or {}
+  vim.api.nvim_buf_set_lines(state.old_buf, 0, -1, false, other_lines)
   vim.bo[state.old_buf].buftype = "nofile"
   vim.bo[state.old_buf].bufhidden = "wipe"
   vim.bo[state.old_buf].modifiable = false
   vim.bo[state.old_buf].readonly = true
-  vim.bo[state.old_buf].filetype = current_filetype
+  vim.bo[state.old_buf].filetype = opts.filetype or vim.bo[current_buf].filetype
 
   apply_old_diffopt()
 
@@ -348,12 +355,23 @@ local function open_old_side_by_side(path, current_win, current_buf, current_fil
   vim.cmd("diffthis")
   apply_side_by_side_partial_diff_highlights(
     state.old_buf,
-    base_lines,
+    other_lines,
     current_buf,
     vim.api.nvim_buf_get_lines(current_buf, 0, -1, false)
   )
   apply_side_by_side_context()
   vim.api.nvim_set_current_win(current_win)
+end
+
+local function open_old_side_by_side(path, current_win, current_buf, current_filetype, base_content, base_missing)
+  M.open_scratch_side_by_side({
+    path = path,
+    win = current_win,
+    buf = current_buf,
+    filetype = current_filetype,
+    lines = base_missing and {} or util.split_blob_lines(base_content),
+    name = "pr-base://" .. core.base_ref() .. "/" .. path,
+  })
 end
 
 function M.is_added_file(path)

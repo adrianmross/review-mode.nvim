@@ -145,6 +145,7 @@ end
 
 local panel_hint = "r reply · c comment · e edit · D delete · + react · "
   .. "R resolve · a apply · S review · o open · <CR> jump · q close"
+  .. " · p preview · A accept all"
 
 local function render_panel()
   if not panel_is_open() then
@@ -488,29 +489,27 @@ local function comment_on_target(source)
   })
 end
 
+-- Applying goes through the trial machinery, so every application is marked and
+-- revertible. The buffer write itself is the same one this used to do inline.
 local function apply_thread_suggestion(thread, target)
   if not thread or not target then
     return
   end
 
-  local suggestion
-  for _, comment in ipairs(thread.comments or {}) do
-    suggestion = api.suggestion(comment) or suggestion
-  end
-  if not suggestion then
-    vim.notify("Review Mode: no suggestion in this thread", vim.log.levels.WARN)
+  local trial, err = api.accept_suggestion(thread, { buf = target.buf })
+  if not trial then
+    vim.notify("Review Mode: " .. tostring(err), vim.log.levels.WARN)
     return
   end
 
-  local last = math.min(thread.line or 0, vim.api.nvim_buf_line_count(target.buf))
-  local first = math.max(1, thread.start_line or last)
-  if last < 1 then
-    vim.notify("Review Mode: suggestion is not anchored to a line here", vim.log.levels.WARN)
-    return
-  end
-
-  vim.api.nvim_buf_set_lines(target.buf, first - 1, last, false, suggestion)
-  vim.notify(string.format("Applied suggestion to %s:%d-%d (unsaved)", target.path, first, first + #suggestion - 1))
+  vim.notify(
+    string.format(
+      "Applied suggestion to %s:%d as trial %d (unsaved; :ReviewModeSuggestionRevert undoes it)",
+      trial.path,
+      trial.line,
+      trial.id
+    )
+  )
 end
 
 local function jump_to_thread(thread, target)
@@ -645,6 +644,13 @@ local function apply_panel_keys(bufnr)
   end)
   map("a", function()
     apply_thread_suggestion(panel_thread_at_cursor(), ui.panel_target)
+  end)
+  -- suggestions
+  map("p", function()
+    M.preview_suggestion("inline")
+  end)
+  map("A", function()
+    M.accept_all_suggestions()
   end)
   map("o", function()
     open_thread_url(panel_thread_at_cursor())
@@ -806,6 +812,106 @@ function M.apply_suggestion()
     return
   end
   apply_thread_suggestion(thread, target)
+end
+
+-- Suggestions ----------------------------------------------------------------
+
+-- "Which file, in which window" for the suggestion commands, which -- unlike
+-- the thread ones -- also have something to do when no thread is on the line.
+local function suggestion_target()
+  if panel_is_open() and vim.api.nvim_get_current_win() == ui.panel_win then
+    return ui.panel_target
+  end
+
+  local path = current_relpath()
+  if not path then
+    return nil
+  end
+  return {
+    win = vim.api.nvim_get_current_win(),
+    buf = vim.api.nvim_get_current_buf(),
+    path = path,
+    line = vim.api.nvim_win_get_cursor(0)[1],
+  }
+end
+
+--- Toggle a preview of the suggestion under the cursor. layout is "inline"
+--- (virtual lines in the file) or "split" (side by side).
+function M.preview_suggestion(layout)
+  layout = (layout == "" or layout == nil) and "inline" or layout
+  local thread, target = focused_thread()
+  if not thread or not target then
+    vim.notify("No PR comment thread on current line", vim.log.levels.WARN)
+    return
+  end
+
+  local shown, err = api.preview_suggestion(thread, { buf = target.buf, layout = layout })
+  if shown == nil then
+    vim.notify("Review Mode: " .. tostring(err), vim.log.levels.WARN)
+  end
+end
+
+--- Apply every suggestion in the current file, after a confirmation saying how
+--- many and where.
+function M.accept_all_suggestions()
+  local target = suggestion_target()
+  if not target then
+    vim.notify("Review Mode: current buffer is not a PR file", vim.log.levels.WARN)
+    return
+  end
+
+  local entries = api.suggestions(target.path)
+  if #entries == 0 then
+    vim.notify(string.format("No suggestions in %s", target.path), vim.log.levels.WARN)
+    return
+  end
+
+  local prompt = string.format("Apply %d suggestion%s in %s?", #entries, #entries == 1 and "" or "s", target.path)
+  if vim.fn.confirm(prompt, "&Yes\n&No", 2) ~= 1 then
+    return
+  end
+
+  local applied, err = api.accept_all_suggestions(target.path, { buf = target.buf })
+  if applied == 0 then
+    vim.notify("Review Mode: " .. tostring(err or "nothing to apply"), vim.log.levels.WARN)
+    return
+  end
+  vim.notify(
+    string.format("Applied %d suggestion%s to %s (unsaved trials)", applied, applied == 1 and "" or "s", target.path)
+  )
+end
+
+--- Revert a trial: the one under the cursor, or the one with this id.
+function M.revert_suggestion(id)
+  local trial, err = api.revert_suggestion(tonumber(id))
+  if not trial then
+    vim.notify("Review Mode: " .. tostring(err), vim.log.levels.WARN)
+    return
+  end
+  vim.notify(string.format("Reverted trial %d in %s:%d", trial.id, trial.path, trial.line))
+end
+
+--- List the trials that are applied but not saved.
+function M.list_trials()
+  local trials = api.suggestion_trials()
+  if #trials == 0 then
+    vim.notify("No trial suggestions are live")
+    return
+  end
+
+  local lines = { string.format("%d trial suggestion(s), applied but not saved:", #trials) }
+  for _, trial in ipairs(trials) do
+    lines[#lines + 1] = string.format(
+      "  %d  %s:%d  +%d -%d  (:ReviewModeSuggestionRevert %d)",
+      trial.id,
+      trial.path,
+      trial.line,
+      trial.added,
+      trial.removed,
+      trial.id
+    )
+  end
+  util.open_lines_preview(lines, "review-trials")
 end
 
 --- Comment on the current line or visual range through the draft buffer.

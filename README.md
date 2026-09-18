@@ -186,6 +186,8 @@ Keys inside the panel:
 | `D` | delete your comment under the cursor, after a confirmation |
 | `S` | open the pending review buffer |
 | `q` | close the panel |
+| `p` | preview the thread's suggestion in the code, without applying it |
+| `A` | apply every suggestion in the file, after a confirmation |
 
 ### Replies are drafted, not typed into a prompt
 
@@ -322,6 +324,18 @@ api.set_quickfix({ filter = "unresolved", open = false })
 
 -- API call accounting (see Fewer GitHub API calls)
 api.request_stats()   --> { calls = <gh processes spawned>, not_modified = <304 answers> }
+
+-- suggestions (see Suggestions)
+api.suggestions("src/a.ts")          --> { { id, thread, path, start_line, end_line, lines }, ... }
+api.suggestions()                    --> every suggestion in the review, grouped by file, including
+                                     --  paths a local review carries comments on but did not change
+api.suggestions_at("src/a.ts", 42)   --> the ones anchored over a line
+api.preview_suggestion(entry)                        -- toggle virtual lines in the file
+api.preview_suggestion(entry, { layout = "split" })  -- toggle the side-by-side view
+api.accept_suggestion(entry)   --> the trial { id, buf, path, thread_id, line, added, removed }
+api.accept_all_suggestions("src/a.ts")   --> how many were applied, and the first error
+api.revert_suggestion(trial_id)          -- or nil for the trial under the cursor
+api.suggestion_trials()                  --> the trials applied but not saved
 ```
 
 Writes take a `callback(ok, err)`. `api.reply` needs the id of the comment it
@@ -372,6 +386,8 @@ prefer.
 | `on_comment_deleted` | `ReviewModeCommentDeleted` | you delete one of your comments |
 | `on_pending_changed` | `ReviewModePendingChanged` | a pending review comment is added, dropped, or submitted |
 | `on_review_submitted` | `ReviewModeReviewSubmitted` | a review is submitted (`{ event, count }`) |
+| `on_suggestion_accepted` | `ReviewModeSuggestionAccepted` | a suggestion is applied as a trial (`{ id, path, line, thread_id, added, removed }`) |
+| `on_suggestion_reverted` | `ReviewModeSuggestionReverted` | a trial suggestion is reverted |
 
 **Overrides** are asked *how* something should be done, and what they return
 replaces the built-in behavior. Return `nil` to fall back to the default, so an
@@ -566,6 +582,54 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeDiagnosticsToggle` toggles review threads as diagnostics
 - `:ReviewModeLocal [<base>] [<head>]` reviews two local refs, with no PR and no network
 - `:ReviewModeLocalComments` opens the local comments buffer
+- `:ReviewModeSuggestionPreview [inline|split]` toggles a preview of the suggestion on the current line, in the code or side by side
+- `:ReviewModeSuggestionAcceptAll` applies every suggestion in the current file as trials, after a confirmation
+- `:ReviewModeSuggestionRevert [id]` reverts a trial suggestion: the one under the cursor, or one from `:ReviewModeSuggestionList`
+- `:ReviewModeSuggestionList` lists the trial suggestions that are applied but not saved
+
+## Suggestions
+
+A `suggestion` block in a review comment is a concrete replacement for the lines
+it hangs off. Four ways to deal with one, over the same core. None of it is
+GitHub-specific: a local review's threads carry suggestion blocks too, and the
+same keys work on them.
+
+**See it in the code.** `p` in the panel, or `:ReviewModeSuggestionPreview`,
+draws the suggested lines as virtual lines directly under the lines they would
+replace, in the panel's diff colours, with the replaced range painted as a
+deletion. Nothing is written and no window opens; press it again to take it down.
+
+**See it side by side.** `:ReviewModeSuggestionPreview split` puts the file with
+the suggestion applied against the file as it stands, in the same side-by-side
+diff the base version uses, folds and partial-line highlights included. It
+replaces an open base diff, and toggling it again closes it.
+
+**Try it for real.** `a` in the panel, or `:ReviewModeApplySuggestion`, writes
+the suggestion into the buffer and leaves it there, unsaved, with a `T` sign and
+a "trial suggestion" label so it is obvious which lines are not yours. Run the
+code, see how it behaves, then `:ReviewModeSuggestionRevert` to put the original
+lines back. Several trials can be live at once, and `:ReviewModeSuggestionList`
+shows them with their ids.
+
+Reverting does not lean on `u`. The applied range is tracked with an extmark, so
+it restores exactly the lines the suggestion replaced, wherever they have moved
+to since, and edits you have made elsewhere in the file are left alone.
+
+**Take them all.** `A` in the panel, or `:ReviewModeSuggestionAcceptAll`, applies
+every suggestion in the current file after a confirmation saying how many and in
+which file. They go in bottom-up, because a suggestion can replace one line with
+three: applying the top one first would move every line number below it and land
+the next suggestion on the wrong lines.
+
+Trials are buffer state, not review state, and the plugin does not track git:
+
+- **Save or commit with a trial live and it becomes an ordinary edit.** Nothing
+  is unwound, and reverting afterwards only changes the buffer again -- it does
+  not touch what you wrote to disk or committed.
+- Reloading the buffer (`:e!`, or an autoread re-read) drops its trials and
+  previews. Whatever the file holds at that point is what you have.
+- Stopping the session forgets every trial for the same reason. It does not undo
+  them.
 
 ## Diagnostics and Quickfix
 
