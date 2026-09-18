@@ -190,7 +190,7 @@ Keys inside the panel:
 | `r` | reply to the thread under the cursor (a new thread when the panel is empty) |
 | `R` | start a new thread on the line the code window is on |
 | `x` | resolve or unresolve the thread |
-| `a` | apply the thread's suggestion to the buffer |
+| `a` | apply the thread's suggestion to the buffer as a trial; again to revert it |
 | `o` | open the comment on GitHub |
 | `<CR>` | jump to the thread's line in the code window |
 | `]r` / `[r` | next / previous thread in the panel |
@@ -200,7 +200,7 @@ Keys inside the panel:
 | `dd` | delete your comment under the cursor, after a confirmation |
 | `s` | open the pending review buffer |
 | `q` | close the panel |
-| `p` | preview the thread's suggestion in the code, without applying it |
+| `p` | preview the thread's suggestion in the code, without applying it (once applied: what it replaced) |
 | `A` | apply every suggestion in the file, after a confirmation |
 
 ### Replies are drafted, not typed into a prompt
@@ -623,9 +623,14 @@ replaces an open base diff, and toggling it again closes it.
 **Try it for real.** `a` in the panel, or `:ReviewModeApplySuggestion`, writes
 the suggestion into the buffer and leaves it there, unsaved, with a `T` sign and
 a "trial suggestion" label so it is obvious which lines are not yours. Run the
-code, see how it behaves, then `:ReviewModeSuggestionRevert` to put the original
-lines back. Several trials can be live at once, and `:ReviewModeSuggestionList`
-shows them with their ids.
+code, see how it behaves, then press `a` again (or `:ReviewModeSuggestionRevert`)
+to put the original lines back. Several trials can be live at once, and
+`:ReviewModeSuggestionList` shows them with their ids.
+
+Once a suggestion is applied, `p` shows the other half: the lines it replaced,
+as deletions above the applied ones, and the split view compares against the
+original. Applying takes down any preview of that suggestion first, so nothing
+is drawn twice.
 
 Reverting does not lean on `u`. The applied range is tracked with an extmark, so
 it restores exactly the lines the suggestion replaced, wherever they have moved
