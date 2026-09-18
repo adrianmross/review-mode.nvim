@@ -40,7 +40,13 @@ end
 -- widened by its context, overlapping windows merged, as GitHub draws them.
 local function diff_windows(path, head)
   local merge_base = git_lines({ "merge-base", core.base_ref(), "HEAD" })
-  local base = merge_base and git_lines({ "show", merge_base[1] .. ":" .. path }) or {}
+  if not merge_base or not merge_base[1] then
+    -- fail closed: with no base to diff against, no line is known to be in
+    -- the PR diff, and guessing would post suggestions GitHub rejects
+    return {}
+  end
+  -- a path missing at the base is an added file: every line is in the diff
+  local base = git_lines({ "show", merge_base[1] .. ":" .. path }) or {}
   local windows = {}
   for _, hunk in ipairs(vim.diff(joined(base), joined(head), { result_type = "indices" })) do
     local first = math.max(1, hunk[3] - DIFF_CONTEXT + (hunk[4] == 0 and 1 or 0))
@@ -82,11 +88,16 @@ function M.list(bufnr, path)
     return {}
   end
   local current = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local hunks = vim.diff(joined(head), joined(current), { result_type = "indices" })
+  if #hunks == 0 then
+    return {}
+  end
   local trials = require("review_mode.suggestions").trial_ranges(bufnr)
+  -- only now, with edits to place, is the PR diff worth two more git calls
   local windows = state.provider ~= "local" and diff_windows(path, head) or nil
 
   local out = {}
-  for _, hunk in ipairs(vim.diff(joined(head), joined(current), { result_type = "indices" })) do
+  for _, hunk in ipairs(hunks) do
     local start_a, count_a, start_b, count_b = hunk[1], hunk[2], hunk[3], hunk[4]
     -- buffer rows the edit occupies, 0-based and end-exclusive; a pure
     -- deletion is the empty range where the lines used to be

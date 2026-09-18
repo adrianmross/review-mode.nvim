@@ -103,6 +103,16 @@ assert(draft() == nil, "an edit outside the diff should not open a suggestion dr
 assert(noted("outside the PR diff"), "an edit outside the diff should say why nothing happened")
 reset()
 
+-- no merge-base (a missing base ref): fail closed, nothing is "in the diff"
+local core = require("review_mode.state")
+local real_base = core.state.base
+core.state.base = "refs/heads/no-such-base"
+set(4, "base changed twice")
+edits = api.edits()
+assert(#edits == 1 and not edits[1].in_diff, "with no merge-base an edit must not count as in the diff")
+core.state.base = real_base
+reset()
+
 -- trial suggestions are the reviewer's lines, not your edits
 local trial = assert(
   api.accept_suggestion({ id = "t", path = "file.txt", start_line = 2, end_line = 2, lines = { "two trialled" } }),

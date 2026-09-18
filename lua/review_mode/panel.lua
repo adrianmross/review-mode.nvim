@@ -869,8 +869,11 @@ function M.suggest_edit(edit)
           vim.notify("Review Mode suggestion failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
           return
         end
-        api.undo_edit(edit)
-        vim.notify("Posted suggestion on " .. range .. " and undid your edit")
+        if api.undo_edit(edit) then
+          vim.notify("Posted suggestion on " .. range .. " and undid your edit")
+        else
+          vim.notify("Posted suggestion on " .. range .. ", but could not undo your edit", vim.log.levels.WARN)
+        end
       end)
     end,
     pend = function(body)
@@ -879,8 +882,11 @@ function M.suggest_edit(edit)
         vim.notify("Review Mode pending: " .. tostring(err), vim.log.levels.ERROR)
         return
       end
-      api.undo_edit(edit)
-      vim.notify(string.format("Queued suggestion on %s and undid your edit (%d pending)", range, #api.pending()))
+      if api.undo_edit(edit) then
+        vim.notify(string.format("Queued suggestion on %s and undid your edit (%d pending)", range, #api.pending()))
+      else
+        vim.notify("Queued suggestion on " .. range .. ", but could not undo your edit", vim.log.levels.WARN)
+      end
     end,
   })
 end
