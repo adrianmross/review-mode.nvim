@@ -256,12 +256,21 @@ end
 -- already being wiped, which crashes Neovim.
 local function close_composer()
   local win, bufnr = ui.composer_win, ui.composer_buf
+  local source = ui.composer_source
+  -- only when the draft had focus: closing the panel from the code window must
+  -- not move the cursor anywhere
+  local was_current = win ~= nil and win == vim.api.nvim_get_current_win()
   ui.composer_win, ui.composer_buf, ui.composer_source = nil, nil, nil
   ui.composer_submit, ui.composer_prompt, ui.composer_pend = nil, nil, nil
   if win and vim.api.nvim_win_is_valid(win) then
     pcall(vim.api.nvim_win_close, win, true)
   elseif bufnr and vim.api.nvim_buf_is_valid(bufnr) then
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+  end
+  -- The draft is a split under the panel, so Vim would hand focus to the panel.
+  -- Posting or discarding a comment should leave you back in the code.
+  if was_current and source and source.win and vim.api.nvim_win_is_valid(source.win) then
+    vim.api.nvim_set_current_win(source.win)
   end
 end
 

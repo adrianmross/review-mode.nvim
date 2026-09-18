@@ -47,12 +47,27 @@ Keys installed while in the mode (see mode.keys to change them):
         ]h / [h         next / previous PR hunk
         ]c / [c         next / previous PR comment
         ]f / [f         next / previous changed file
-        gt              toggle the thread panel |review-mode-panel|
-        <Tab>           mark viewed, jump to next unviewed file
-        <S-Tab>         toggle viewed
         <Esc>           step out of the mode
 
 A mapping shadowed by the layer is saved on entry and restored on exit.
+
+Session keys are installed by :ReviewMode and removed by :ReviewModeStop. They
+stay while you step out of the mode, since <leader> keys shadow nothing in stock
+Vim (see session.keys to change them):
+
+        <leader>rt      toggle the thread panel |review-mode-panel|
+        <leader>rc      comment on line/range, drafting in the panel
+        <leader>rr      reply to the thread on this line
+        <leader>rR      resolve / unresolve the thread on this line
+        <leader>rl      changed files with viewed state and comment counts
+        <leader>rv      toggle this file viewed
+        <leader>rd      base diff (rD layout, rf full file)
+        <leader>ra      actions picker
+        <leader>rS      pending review and submit
+        <leader>rq      end the review
+
+mode.keys and session.keys merge over the defaults; false removes one key and
+{} installs none.
 
 A commit made during the review joins it: the reflog is watched, and on the
 next FocusGained, BufEnter or TermLeave the changed files and hunks are rebuilt
@@ -463,7 +478,8 @@ SETUP                                                        *review-mode-setup*
       conditional_requests = true,
       sign_text = "", -- Nerd Font glyph
       sign_hl_group = "DiagnosticInfo",
-      virtual_text = true,
+      virtual_text = false,
+      compose = "panel",
       show_resolved = false,
       resolve_flash_ms = 1200, -- 0 turns the confirmation off
       diagnostics = {

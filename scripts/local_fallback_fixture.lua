@@ -28,6 +28,7 @@ local function reset()
 end
 
 vim.fn.system({ "git", "checkout", "-q", "feature" })
+assert(vim.v.shell_error == 0, "could not check out the feature branch for this fixture")
 
 local pr = require("review_mode")
 local api = require("review_mode.api")
@@ -63,6 +64,9 @@ end, "an auth failure was not reported as an error")
 vim.wait(300)
 assert(not api.is_active(), "an auth failure left a session running")
 assert(not notified("reviewing it locally"), "an auth failure fell back to a local review")
+-- start installed its keys before it knew it would fail
+assert(vim.fn.maparg("<leader>rt", "n") == "", "a failed start left the session keys installed")
+assert(vim.fn.maparg("]h", "n", false, true).desc ~= "review-mode ]h", "a failed start left the mode keys installed")
 
 -- 3. no_pr = "error" opts out: report there is no PR instead
 pr.setup({

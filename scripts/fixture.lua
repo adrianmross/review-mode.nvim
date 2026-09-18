@@ -169,7 +169,8 @@ local api = require("review_mode.api")
 pr.setup({
   gitsigns = { enabled = false },
   nvim_tree = { enabled = false, show_viewed = true },
-  comments = { enabled = true },
+  -- end-of-line summaries are opt-in; this fixture covers them explicitly
+  comments = { enabled = true, virtual_text = true },
   viewed = { enabled = true, sync = true },
   auto_open_first_change = false,
 })
