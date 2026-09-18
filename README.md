@@ -212,6 +212,14 @@ comments loaded through the REST fallback are refused rather than guessed at.
 Resolved threads are hidden in the panel and the float unless a line has
 nothing else on it; set `comments.show_resolved = true` to always show them.
 
+Resolving or unresolving a thread briefly marks the line it sat on, in the
+colour of its new state, so the change is confirmed where you made it instead
+of the comment merely disappearing. The mark rides the `thread_resolved` event,
+so the panel's `R`, `:ReviewModeResolveThread`, `:ReviewModeUnresolveThread`
+and the GitLab provider all show it, and it sits in its own namespace so it
+never disturbs the comment signs or virtual text. `comments.resolve_flash_ms`
+is how long it lasts in milliseconds; `0` turns it off.
+
 ### Reactions
 
 `+` in the panel, or `:ReviewModeReact`, toggles one of GitHub's eight
@@ -669,6 +677,7 @@ require("review_mode").setup({
     sign_hl_group = "DiagnosticInfo",
     virtual_text = true,
     show_resolved = false,
+    resolve_flash_ms = 1200, -- 0 turns the resolve/unresolve confirmation off
     diagnostics = {
       enabled = false,
       severity = { unresolved = "INFO", outdated = "HINT", resolved = "HINT" },
