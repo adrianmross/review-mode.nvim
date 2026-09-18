@@ -2327,6 +2327,31 @@ function M.action_items()
         require("review_mode.local_buffer").open()
       end,
     },
+    -- suggestions
+    {
+      category = "Review",
+      label = "Preview suggestion on line",
+      run = function()
+        panel.preview_suggestion("inline")
+      end,
+    },
+    {
+      category = "Review",
+      label = "Preview suggestion side by side",
+      run = function()
+        panel.preview_suggestion("split")
+      end,
+    },
+    { category = "Review", label = "Accept all suggestions in file", run = panel.accept_all_suggestions },
+    {
+      category = "Review",
+      label = "Revert trial suggestion",
+      run = function()
+        panel.revert_suggestion(nil)
+      end,
+    },
+    { category = "Review", label = "List trial suggestions", run = panel.list_trials },
+    -- end suggestions (Summary stays last: scripts/fixture.lua selects it)
     { category = "PR", label = "Summary", run = M.summary },
   }
 end
@@ -2614,6 +2639,30 @@ function M.setup(opts)
       end,
       desc = "Submit the pending review",
     })
+    -- suggestions
+    vim.api.nvim_create_user_command("ReviewModeSuggestionPreview", function(command)
+      panel.preview_suggestion(command.args)
+    end, {
+      nargs = "?",
+      complete = function()
+        return { "inline", "split" }
+      end,
+      desc = "Toggle a preview of the suggestion on the current line",
+    })
+    vim.api.nvim_create_user_command(
+      "ReviewModeSuggestionAcceptAll",
+      panel.accept_all_suggestions,
+      { desc = "Apply every suggestion in the current file, after a confirmation" }
+    )
+    vim.api.nvim_create_user_command("ReviewModeSuggestionRevert", function(command)
+      panel.revert_suggestion(command.args)
+    end, { nargs = "?", desc = "Revert a trial suggestion: the one under the cursor, or one by id" })
+    vim.api.nvim_create_user_command(
+      "ReviewModeSuggestionList",
+      panel.list_trials,
+      { desc = "List the trial suggestions applied but not saved" }
+    )
+    -- end suggestions
   end
 
   if setup_done then

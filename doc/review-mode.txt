@@ -13,6 +13,7 @@ CONTENTS                                                  *review-mode-contents*
 7. Setup                                         |review-mode-setup|
 8. GitLab                                        |review-mode-gitlab|
 9. Local Reviews                                 |review-mode-local|
+10. Suggestions                                  |review-mode-suggestions|
 
 ==============================================================================
 OVERVIEW                                                  *review-mode-overview*
@@ -107,6 +108,8 @@ Keys inside the panel:
         D       delete your comment under the cursor, after a confirmation
         S       open the pending review buffer |review-mode-pending|
         q       close the panel
+        p       preview the suggestion in the code |review-mode-suggestions|
+        A       apply every suggestion in the file, after a confirmation
 
 Resolved threads are hidden in the panel and in |:ReviewModeThread| unless a
 line has nothing else on it. Set comments.show_resolved = true to always show
@@ -386,6 +389,31 @@ COMMANDS                                                  *review-mode-commands*
 :ReviewModeDiagnosticsToggle
         Toggle review threads as vim.diagnostic entries.
 
+                                                        *:ReviewModeSuggestionPreview*
+:ReviewModeSuggestionPreview [inline|split]
+        Toggle a preview of the suggestion on the current line without
+        applying it. "inline" (the default) draws the suggested lines as
+        virtual lines under the lines they replace; "split" shows the file
+        with the suggestion applied side by side against the file as it
+        stands. See |review-mode-suggestions|.
+
+                                                        *:ReviewModeSuggestionAcceptAll*
+:ReviewModeSuggestionAcceptAll
+        Apply every suggestion in the current file as a trial, after a
+        confirmation saying how many and in which file. Applied bottom-up, so
+        an earlier application cannot move the lines a later one is anchored
+        to.
+
+                                                        *:ReviewModeSuggestionRevert*
+:ReviewModeSuggestionRevert [id]
+        Put back the lines a trial suggestion replaced: the trial under the
+        cursor, or the one with this id from |:ReviewModeSuggestionList|.
+
+                                                        *:ReviewModeSuggestionList*
+:ReviewModeSuggestionList
+        List the trial suggestions that are applied but not saved, with the
+        file and line each one now sits on.
+
 ==============================================================================
 KEYMAPS                                                    *review-mode-keymaps*
 
@@ -651,5 +679,51 @@ For example: >
 <
 local_comment's author defaults to git config user.name and falls back to
 "agent"; it is never a GitHub login.
+==============================================================================
+SUGGESTIONS                                            *review-mode-suggestions*
+
+A `suggestion` block in a review comment is a concrete replacement for the
+lines it hangs off. Four ways to deal with one, over the same core. None of it
+is GitHub-specific: a local review's threads (|review-mode-local|) carry
+suggestion blocks like any other, and the same keys work on them.
+
+In the code: the panel's `p` key and |:ReviewModeSuggestionPreview| draw the
+suggested lines as virtual lines under the lines they would replace, in the
+panel's diff colours, with the replaced range painted as a deletion. Nothing is
+written and no window opens.
+
+Side by side: |:ReviewModeSuggestionPreview| split shows the file with the
+suggestion applied against the file as it stands, in the same side-by-side diff
+|:ReviewModeOldToggle| uses, folds and partial-line highlights included. It
+replaces an open base diff, and toggling it again closes it.
+
+Trial apply: the panel's `a` key and |:ReviewModeApplySuggestion| write the
+suggestion into the buffer and leave it there, unsaved, with a "T" sign and a
+"trial suggestion" label over the changed range. Run the code, see how it
+behaves, then |:ReviewModeSuggestionRevert| to put the original lines back.
+Several trials can be live at once; |:ReviewModeSuggestionList| shows them.
+
+Reverting does not rely on `u`. The applied range is tracked with an extmark,
+so it restores exactly the lines the suggestion replaced, wherever they have
+moved to since, and leaves edits elsewhere in the file alone.
+
+Accept all: the panel's `A` key and |:ReviewModeSuggestionAcceptAll| apply every
+suggestion in the file after a confirmation. Bottom-up, because a suggestion can
+replace one line with three, and applying the top one first would move every
+line number below it.
+
+Trials are buffer state, not review state, and the plugin does not track git:
+
+- Save or commit while a trial is live and it becomes an ordinary edit. Nothing
+  is unwound, and reverting afterwards only changes the buffer again; it does
+  not touch what was written to disk or committed.
+- Reloading the buffer (:e!, or an autoread re-read) drops its trials and
+  previews. Whatever the file holds then is what you have.
+- Stopping the session forgets every trial for the same reason, and does not
+  undo them.
+
+The hooks on_suggestion_accepted and on_suggestion_reverted, and the API calls
+behind all of this, are in |review-mode-setup| and the README.
+
 
  vim:tw=78:ts=8:noet:ft=help:norl:

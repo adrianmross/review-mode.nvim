@@ -111,6 +111,10 @@ case "$1 $2" in
         printf 'graphql reviewThreads\n' >> "$REVIEW_MODE_GH_LOG"
       fi
       printf '%s\n' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"id":"thread_ed","path":"file.txt","line":2,"originalLine":2,"startLine":null,"diffSide":"RIGHT","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_10","databaseId":10,"path":"file.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r10","state":"SUBMITTED","authorAssociation":"MEMBER","viewerDidAuthor":false,"body":"Please rename this","author":{"login":"alice"},"reactionGroups":[]},{"id":"comment_11","databaseId":11,"path":"file.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-03T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r11","state":"SUBMITTED","authorAssociation":"OWNER","viewerDidAuthor":true,"body":"Renamed in the next push\nsecond line","author":{"login":"adrian"},"reactionGroups":[]}]}}]}}}}}'
+    elif [[ "$args" == *"reviewThreads"* && "${REVIEW_MODE_FIXTURE:-}" == "suggestions" ]]; then
+      # Several suggestions in one file, at different lines and of different
+      # lengths, so accept-all has something to get the ordering wrong on.
+      printf '%s\n' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"id":"thread_s1","path":"file.txt","line":2,"originalLine":2,"startLine":null,"diffSide":"RIGHT","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_s1","databaseId":21,"path":"file.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r21","state":"SUBMITTED","authorAssociation":"OWNER","viewerDidAuthor":false,"body":"Two needs more\n\n```suggestion\ntwo improved\ntwo extra\n```","author":{"login":"reviewer"},"reactionGroups":[]}]}},{"id":"thread_s2","path":"file.txt","line":4,"originalLine":4,"startLine":null,"diffSide":"RIGHT","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_s2","databaseId":22,"path":"file.txt","line":4,"originalLine":4,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r22","state":"SUBMITTED","authorAssociation":"OWNER","viewerDidAuthor":false,"body":"```suggestion\nbase improved\n```","author":{"login":"reviewer"},"reactionGroups":[]}]}},{"id":"thread_s3","path":"file.txt","line":6,"originalLine":6,"startLine":null,"diffSide":"RIGHT","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_s3","databaseId":23,"path":"file.txt","line":6,"originalLine":6,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r23","state":"SUBMITTED","authorAssociation":"OWNER","viewerDidAuthor":false,"body":"No suggestion in this one","author":{"login":"reviewer"},"reactionGroups":[]}]}},{"id":"thread_s4","path":"file.txt","line":10,"originalLine":10,"startLine":null,"diffSide":"RIGHT","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_s4","databaseId":24,"path":"file.txt","line":10,"originalLine":10,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r24","state":"SUBMITTED","authorAssociation":"OWNER","viewerDidAuthor":false,"body":"```suggestion\ntail improved\n```","author":{"login":"reviewer"},"reactionGroups":[]}]}}]}}}}}'
     elif [[ "$args" == *"reviewThreads"* ]]; then
       if [[ "${REVIEW_MODE_FORCE_REST_COMMENTS:-}" == "1" ]]; then
         echo "forced reviewThreads failure" >&2
@@ -408,3 +412,19 @@ REVIEW_MODE_GH_LOG="$tmp/api-cache-gh.log" \
 nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/api_cache_fixture.lua"
+
+# Suggestion preview, trial apply and accept-all. Its own mock branch: the
+# default one carries a single suggestion, and accept-all ordering needs
+# several in one file.
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/suggestion-cache" \
+XDG_STATE_HOME="$tmp/suggestion-state" \
+GH_REVIEW_REPO=owner/repo \
+GH_REVIEW_PR=123 \
+GH_REVIEW_BASE=main \
+GH_REVIEW_HEAD=abc123 \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+REVIEW_MODE_FIXTURE=suggestions \
+nvim --headless -u NONE -i NONE \
+  -c "set noswapfile" \
+  -l "$repo_root/scripts/suggestion_fixture.lua"
