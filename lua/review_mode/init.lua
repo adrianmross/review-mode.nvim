@@ -2416,53 +2416,28 @@ function M.goto_file(path, line)
   return jump_to_path(path, line)
 end
 
+-- Every action, grouped by what you are doing. The picker shows the key bound
+-- to an action beside it, so it doubles as the key reference.
 function M.action_items()
-  return {
-    { category = "PR", label = "Open in browser", run = M.open_browser },
-    { category = "PR", label = "Copy PR URL", run = M.copy_url },
-    { category = "PR", label = "Show PR status", run = M.status },
-    { category = "PR", label = "Show PR checks", run = M.checks },
-    { category = "Thread", label = "Toggle thread panel", run = panel.toggle_panel },
-    { category = "Thread", label = "Show current thread", run = panel.show_thread },
-    { category = "Thread", label = "Reply to current thread", run = panel.reply },
-    { category = "Thread", label = "Resolve current thread", run = M.resolve_thread },
-    { category = "Thread", label = "Unresolve current thread", run = M.unresolve_thread },
-    -- Reactions --
+  local items = {
+    -- Comment --
+    { category = "Comment", label = "Comment (reply if a thread is here)", run = M.comment_or_reply },
+    { category = "Comment", label = "New thread on line/range", run = M.comment },
+    { category = "Comment", label = "Suggest change for line/range", run = M.suggest },
+    { category = "Comment", label = "Edit my comment on line", run = panel.edit_comment },
+    { category = "Comment", label = "Delete my comment on line", run = panel.delete_comment },
     {
-      category = "Thread",
-      label = "React to current comment",
+      category = "Comment",
+      label = "React to comment on line",
       run = function()
         panel.react()
       end,
-    },
-    -- edit and delete
-    { category = "Thread", label = "Edit my comment on line", run = panel.edit_comment },
-    { category = "Thread", label = "Delete my comment on line", run = panel.delete_comment },
-    { category = "Review", label = "Comment on line/range", run = M.comment },
-    { category = "Review", label = "Draft comment on line/range", run = panel.compose_comment },
-    { category = "Review", label = "Apply suggestion on line", run = panel.apply_suggestion },
-    { category = "Review", label = "Suggest change for line/range", run = M.suggest },
-    { category = "Files", label = "Toggle viewed", run = M.toggle_viewed },
-    { category = "Files", label = "Toggle full-file diff", run = M.toggle_diff_full_file },
-    {
-      category = "Files",
-      label = "Viewed file list",
-      run = function()
-        M.list_viewed("all")
-      end,
-    },
-    {
-      category = "PR",
-      label = "Review a PR without checking it out",
-      run = function()
-        vim.ui.input({ prompt = "PR number or URL: " }, function(target)
-          if target and target ~= "" then
-            M.review_pr({ pr = target })
-          end
-        end)
-      end,
-    },
-    -- Diagnostics and quickfix
+    }, -- Thread --
+    { category = "Thread", label = "Toggle thread panel", run = M.toggle_panel },
+    { category = "Thread", label = "Show threads on line", run = panel.show_thread },
+    { category = "Thread", label = "Resolve / unresolve thread", run = M.toggle_resolve },
+    { category = "Thread", label = "Next thread", run = M.next_comment },
+    { category = "Thread", label = "Previous thread", run = M.prev_comment },
     {
       category = "Thread",
       label = "Threads to quickfix",
@@ -2477,14 +2452,50 @@ function M.action_items()
         require("review_mode.diagnostics").toggle()
       end,
     },
-    -- pending review (Summary stays last: scripts/fixture.lua selects the last action)
+    { category = "Thread", label = "Toggle comment signs", run = M.toggle_comments },
+    -- Suggestion --
+    { category = "Suggest", label = "Apply suggestion on line", run = panel.apply_suggestion },
     {
-      category = "Review",
-      label = "Pending review",
+      category = "Suggest",
+      label = "Preview suggestion on line",
       run = function()
-        require("review_mode.review_buffer").open()
+        panel.preview_suggestion("inline")
       end,
     },
+    {
+      category = "Suggest",
+      label = "Preview suggestion side by side",
+      run = function()
+        panel.preview_suggestion("split")
+      end,
+    },
+    { category = "Suggest", label = "Accept all suggestions in file", run = panel.accept_all_suggestions },
+    {
+      category = "Suggest",
+      label = "Revert trial suggestion",
+      run = function()
+        panel.revert_suggestion(nil)
+      end,
+    },
+    { category = "Suggest", label = "List trial suggestions", run = panel.list_trials },
+    -- Files --
+    { category = "Files", label = "Changed files", run = M.list_viewed },
+    { category = "Files", label = "Toggle file viewed", run = M.toggle_viewed },
+    { category = "Files", label = "Mark viewed, go to next unviewed", run = M.mark_viewed_next },
+    { category = "Files", label = "Next changed file", run = M.next_file },
+    { category = "Files", label = "Previous changed file", run = M.prev_file },
+    { category = "Files", label = "Next hunk", run = M.next_hunk },
+    { category = "Files", label = "Previous hunk", run = M.prev_hunk },
+    { category = "Files", label = "Pull viewed state from GitHub", run = M.sync_viewed },
+    { category = "Files", label = "Toggle GitHub viewed sync", run = M.toggle_viewed_sync },
+    { category = "Files", label = "Clear viewed state", run = M.clear_viewed },
+    { category = "Files", label = "Toggle viewed tracking", run = M.toggle_viewed_feature },
+    -- Diff --
+    { category = "Diff", label = "Toggle base diff", run = M.old_toggle },
+    { category = "Diff", label = "Toggle diff layout", run = M.toggle_diff_layout },
+    { category = "Diff", label = "Toggle full-file diff", run = M.toggle_diff_full_file },
+    -- Review --
+    { category = "Review", label = "Pending review", run = M.open_pending },
     {
       category = "Review",
       label = "Submit review",
@@ -2495,8 +2506,29 @@ function M.action_items()
           end
         end)
       end,
+    }, -- PR --
+    { category = "PR", label = "Open in browser", run = M.open_browser },
+    { category = "PR", label = "Copy PR URL", run = M.copy_url },
+    { category = "PR", label = "Show PR status", run = M.status },
+    { category = "PR", label = "Show PR checks", run = M.checks },
+    {
+      category = "PR",
+      label = "Review a PR without checking it out",
+      run = function()
+        vim.ui.input({ prompt = "PR number or URL: " }, function(target)
+          if target and target ~= "" then
+            M.review_pr({ pr = target })
+          end
+        end)
+      end,
     },
-    -- Local reviews
+    {
+      category = "PR",
+      label = "Remove clean review worktrees",
+      run = function()
+        M.checkout_clean(nil)
+      end,
+    },
     {
       category = "Local",
       label = "Review local changes",
@@ -2510,34 +2542,29 @@ function M.action_items()
       run = function()
         require("review_mode.local_buffer").open()
       end,
-    },
-    -- suggestions
-    {
-      category = "Review",
-      label = "Preview suggestion on line",
-      run = function()
-        panel.preview_suggestion("inline")
-      end,
-    },
-    {
-      category = "Review",
-      label = "Preview suggestion side by side",
-      run = function()
-        panel.preview_suggestion("split")
-      end,
-    },
-    { category = "Review", label = "Accept all suggestions in file", run = panel.accept_all_suggestions },
-    {
-      category = "Review",
-      label = "Revert trial suggestion",
-      run = function()
-        panel.revert_suggestion(nil)
-      end,
-    },
-    { category = "Review", label = "List trial suggestions", run = panel.list_trials },
-    -- end suggestions (Summary stays last: scripts/fixture.lua selects it)
+    }, -- Session --
+    { category = "Session", label = "Step out of review mode", run = M.leave },
+    { category = "Session", label = "Refresh the review", run = M.refresh },
+    { category = "Session", label = "End the review", run = M.stop },
+    -- Summary stays last: scripts/fixture.lua selects the last action
     { category = "PR", label = "Summary", run = M.summary },
   }
+
+  -- the key bound to each action, found by the function it runs
+  local keys = {}
+  for _, layer in ipairs({ "session", "mode" }) do
+    for lhs, value in pairs(state.config[layer].keys or {}) do
+      local action = value and session_key_spec(value)
+      local fn = type(action) == "string" and M[action] or action
+      if type(fn) == "function" and (not keys[fn] or #lhs < #keys[fn]) then
+        keys[fn] = lhs
+      end
+    end
+  end
+  for _, item in ipairs(items) do
+    item.key = keys[item.run]
+  end
+  return items
 end
 
 -- Local reviews -------------------------------------------------------------------

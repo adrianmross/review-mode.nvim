@@ -481,8 +481,14 @@ function M.list_viewed(filter)
   open_viewed_picker(filter)
 end
 
+-- the bound key goes last, so the picker is also the key reference and typing
+-- "rx" finds the action behind <leader>rx
 local function action_item_label(item)
-  return string.format("%-8s %s", item.category or "Review", item.label)
+  local label = string.format("%-8s %s", item.category or "Review", item.label)
+  if item.key then
+    label = string.format("%-46s %s", label, item.key)
+  end
+  return label
 end
 
 local function run_action_item(item)
@@ -546,7 +552,7 @@ local function open_telescope_actions_picker(items)
           return {
             value = item,
             display = action_item_label(item),
-            ordinal = table.concat({ item.category or "Review", item.label }, " "),
+            ordinal = action_item_label(item),
           }
         end,
       }),

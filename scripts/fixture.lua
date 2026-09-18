@@ -264,8 +264,10 @@ _G.Snacks = {
     pick = function(opts)
       if opts.source == "review_mode_actions" then
         snacks_actions_opts = opts
-        assert(opts.items[1].text:find("PR", 1, true), "snacks action category missing")
-        assert(opts.items[1].preview.text:find("Open in browser", 1, true), "snacks action preview missing")
+        assert(opts.items[1].text:find("Comment", 1, true), "snacks action category missing")
+        assert(opts.items[1].preview.text:find("Comment (reply", 1, true), "snacks action preview missing")
+        -- the bound key rides in the searchable text
+        assert(opts.items[1].text:find("<leader>rr", 1, true), "snacks action text lacks its key")
       elseif opts.source == "review_mode_files" then
         snacks_files_opts = opts
         if type(opts.preview) == "function" then
