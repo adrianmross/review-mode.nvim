@@ -65,7 +65,7 @@ Vim (see session.keys to change them):
         <leader>rx      resolve / unresolve the thread on this line
         <leader>rf      changed files with viewed state and comment counts
         <leader>rv      toggle this file viewed
-        <leader>rd      base diff (rD layout; full file is in the actions)
+        <leader>rd      base diff (rD layout; zR / zM show / fold unchanged lines)
         <leader>ra      actions picker (every action, with its key)
         <leader>rs      pending review and submit
         <leader>rq      end the review
@@ -283,7 +283,8 @@ COMMANDS                                                  *review-mode-commands*
 
                                                   *:ReviewModeDiffFullToggle*
 :ReviewModeDiffFullToggle
-        Toggle the open diff between condensed context and full-file context.
+        Open or close every unchanged fold in the diff, as zR / zM do, and set
+        how the next diff opens.
 
                                                         *:ReviewModeThread*
 :ReviewModeThread
@@ -608,10 +609,10 @@ viewed state at startup and push local viewed/unviewed toggles back to GitHub.
 ReviewModeOldToggle uses the built-in Neovim side-by-side diff backend by
 default. Set diff.layout = "unified" or run :ReviewModeDiffLayoutToggle to use an
 inline unified diff buffer in the current window instead. Closing unified mode
-restores the original file buffer. Set diff.full_file = true or run
-:ReviewModeDiffFullToggle to show full-file context. Condensed unified diffs use
-diff.unified_context common lines around each hunk, and condensed side-by-side
-diffs fold unchanged regions in both diff windows. When diff.use_fast_diffopt is
+restores the original file buffer. Both layouts hold the whole file and fold
+the unchanged regions, so zR shows everything, zM condenses again and zo / zc
+open or close one gap. Unified diffs keep diff.unified_context lines visible
+around each change; diff.full_file = true opens diffs with every fold open. When diff.use_fast_diffopt is
 enabled, side-by-side diffs temporarily apply diff.fast_diffopt and restore the
 previous diffopt when the split closes. Unified diffs highlight changed spans
 inside modified lines with DiffText; set diff.partial_line_highlights = false

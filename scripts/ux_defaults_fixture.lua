@@ -85,7 +85,7 @@ assert(
   "the comment action does not show <leader>rr"
 )
 assert(by_label["Next hunk"].key == "]c", "a mode key is not shown beside its action")
-assert(by_label["Toggle full-file diff"].key == nil, "an unbound action shows a key")
+assert(by_label["Expand / collapse unchanged lines (zR / zM)"].key == nil, "an unbound action shows a key")
 
 -- step out: the mode layer goes, the session layer stays
 pr.leave()

@@ -2493,7 +2493,7 @@ function M.action_items()
     -- Diff --
     { category = "Diff", label = "Toggle base diff", run = M.old_toggle },
     { category = "Diff", label = "Toggle diff layout", run = M.toggle_diff_layout },
-    { category = "Diff", label = "Toggle full-file diff", run = M.toggle_diff_full_file },
+    { category = "Diff", label = "Expand / collapse unchanged lines (zR / zM)", run = M.toggle_diff_full_file },
     -- Review --
     { category = "Review", label = "Pending review", run = M.open_pending },
     {

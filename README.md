@@ -138,7 +138,7 @@ layer goes.
 | `<leader>rx` | resolve / unresolve the thread on this line |
 | `<leader>rf` | changed files, with viewed state and comment counts |
 | `<leader>rv` | toggle this file viewed |
-| `<leader>rd` / `<leader>rD` | base diff / diff layout (full-file diff is in the actions picker) |
+| `<leader>rd` / `<leader>rD` | base diff / diff layout — in either, unchanged lines are folds: `zR` / `zM` show and hide them, `zo` opens one |
 | `<leader>ra` | actions picker: every action, grouped, with its key beside it |
 | `<leader>rs` | pending review and submit |
 | `<leader>rq` | end the review |
@@ -568,7 +568,7 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModePrevFile` jumps to the previous changed file
 - `:ReviewModeOldToggle` toggles the base version or unified diff for the current file
 - `:ReviewModeDiffLayoutToggle` switches between side-by-side and unified layout, opening the diff if none is open
-- `:ReviewModeDiffFullToggle` switches between condensed context and full-file context, opening the diff if none is open
+- `:ReviewModeDiffFullToggle` opens or closes every unchanged fold in the diff (as `zR` / `zM`) and sets how the next one opens, opening the diff if none is open
 - `:ReviewModeThread` shows comments on the current line
 - `:ReviewModePanel` toggles the thread panel beside the current file
 - `:ReviewModeCompose` drafts a PR comment for the current line or visual range
@@ -1006,10 +1006,11 @@ back to GitHub.
 The built-in side-by-side old-version split remains the default diff backend.
 Set `diff.layout = "unified"` or run `:ReviewModeDiffLayoutToggle` to use an
 inline unified diff buffer in the current window instead. Closing unified mode
-restores the original file buffer. Set `diff.full_file = true` or run
-`:ReviewModeDiffFullToggle` to show full-file context; condensed unified diffs use
-`diff.unified_context` common lines around each hunk, and condensed side-by-side
-diffs fold unchanged regions in both diff windows. When `diff.use_fast_diffopt`
+restores the original file buffer. Both layouts hold the whole file and fold
+the unchanged regions, so Vim's fold keys condense and expand them: `zR` shows
+everything, `zM` condenses again, `zo` / `zc` open or close one gap. Unified
+diffs keep `diff.unified_context` lines visible around each change;
+`diff.full_file = true` opens diffs with every fold open. When `diff.use_fast_diffopt`
 is enabled, side-by-side diffs temporarily apply `diff.fast_diffopt`, then
 restore the previous `diffopt` when the split closes. Unified diffs highlight
 changed spans inside modified lines with `DiffText`; set
