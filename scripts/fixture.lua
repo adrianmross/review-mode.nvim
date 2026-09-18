@@ -1065,7 +1065,7 @@ end, "closing added file base buffer did not close side-by-side pair")
 pr.stop()
 
 -- the mode is a key layer over a live session: flipping it must not reload
-vim.keymap.set("n", "]h", "<Nop>", { desc = "user mapping" })
+vim.keymap.set("n", "]c", "<Nop>", { desc = "user mapping" })
 local mode_events = {}
 vim.api.nvim_create_autocmd("User", {
   pattern = { "ReviewModeStart", "ReviewModeEnter", "ReviewModeLeave", "ReviewModeStop" },
@@ -1086,7 +1086,7 @@ assert(pr.is_in_mode(), "review mode was not entered on start")
 assert(vim.g.review_mode == "mode", "review mode flag was wrong inside the mode")
 assert(pr.mode_text() == "REVIEW", "mode text did not report REVIEW inside the mode")
 assert(pr.mode_text({ label = "PR" }) == "PR", "mode text ignored a custom label")
-assert(vim.fn.maparg("]h", "n", false, true).desc == "review-mode ]h", "mode key was not installed")
+assert(vim.fn.maparg("]c", "n", false, true).desc == "review-mode ]c", "mode key was not installed")
 assert(has_value(mode_events, "ReviewModeStart"), "ReviewModeStart event did not fire")
 
 pr.leave()
@@ -1094,7 +1094,7 @@ assert(not pr.is_in_mode(), "leaving did not clear the mode")
 assert(api.is_active(), "leaving the mode must not end the review session")
 assert(api.comment_count("file.txt") == 3, "leaving the mode dropped loaded comments")
 assert(#comment_marks() == 2, "leaving the mode dropped comment signs")
-assert(vim.fn.maparg("]h", "n", false, true).desc == "user mapping", "the user's own mapping was not restored on leave")
+assert(vim.fn.maparg("]c", "n", false, true).desc == "user mapping", "the user's own mapping was not restored on leave")
 assert(vim.g.review_mode == "session", "review mode flag was wrong outside the mode")
 assert(pr.mode_text() == "NORMAL", "mode text did not fall back to the vim mode when stepped out")
 assert(pr.statusline():find("review", 1, true), "statusline lost the session while stepped out")
@@ -1102,7 +1102,7 @@ assert(has_value(mode_events, "ReviewModeLeave"), "ReviewModeLeave event did not
 
 pr.enter()
 assert(pr.is_in_mode(), "re-entering the mode failed")
-assert(vim.fn.maparg("]h", "n", false, true).desc == "review-mode ]h", "mode key was not reinstalled")
+assert(vim.fn.maparg("]c", "n", false, true).desc == "review-mode ]c", "mode key was not reinstalled")
 assert(has_value(mode_events, "ReviewModeEnter"), "ReviewModeEnter event did not fire")
 pr.toggle()
 assert(not pr.is_in_mode(), "toggle did not step out of the mode")
@@ -1127,11 +1127,11 @@ assert(not vim.api.nvim_tabpage_is_valid(review_tab), "stopping did not close th
 assert(has_value(mode_events, "ReviewModeStop"), "ReviewModeStop event did not fire")
 assert(vim.g.review_mode == nil, "review mode flag was not cleared when the session ended")
 assert(
-  vim.fn.maparg("]h", "n", false, true).desc == "user mapping",
+  vim.fn.maparg("]c", "n", false, true).desc == "user mapping",
   "the user's own mapping was not restored when the session ended"
 )
 pr.config().mode.workspace = "inplace"
-pcall(vim.keymap.del, "n", "]h")
+pcall(vim.keymap.del, "n", "]c")
 
 -- the gutter base is global, so ending the session has to hand it back
 local gitsigns_bases = {}

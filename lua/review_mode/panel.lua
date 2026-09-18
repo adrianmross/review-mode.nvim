@@ -143,8 +143,8 @@ local function suggestion_context(target, thread)
   return vim.api.nvim_buf_get_lines(target.buf, first - 1, last, false)
 end
 
-local panel_hint = "r reply · c comment · e edit · D delete · + react · "
-  .. "R resolve · a apply · S review · o open · <CR> jump · q close"
+local panel_hint = "r reply · R new thread · e edit · dd delete · + react · "
+  .. "x resolve · a apply · s review · o open · <CR> jump · q close"
   .. " · p preview · A accept all"
 
 local function render_panel()
@@ -639,13 +639,19 @@ local function apply_panel_keys(bufnr)
   map("<CR>", function()
     jump_to_thread(panel_thread_at_cursor(), ui.panel_target)
   end)
+  -- r comments, as <leader>rr does: a reply here, a new thread on an empty panel
   map("r", function()
-    reply_to_thread(panel_thread_at_cursor(), ui.panel_target)
-  end)
-  map("c", function()
-    comment_on_target(panel_source(nil, ui.panel_target))
+    local thread = panel_thread_at_cursor()
+    if thread then
+      reply_to_thread(thread, ui.panel_target)
+    else
+      comment_on_target(panel_source(nil, ui.panel_target))
+    end
   end)
   map("R", function()
+    comment_on_target(panel_source(nil, ui.panel_target))
+  end)
+  map("x", function()
     local thread = panel_thread_at_cursor()
     if thread then
       api.resolve(thread.id, not thread.is_resolved)
@@ -664,13 +670,13 @@ local function apply_panel_keys(bufnr)
   map("o", function()
     open_thread_url(panel_thread_at_cursor())
   end)
-  map("]c", function()
+  map("]r", function()
     panel_move(1)
   end)
-  map("[c", function()
+  map("[r", function()
     panel_move(-1)
   end)
-  map("gr", function()
+  map("<C-l>", function()
     api.reload_comments()
   end)
   -- Reactions --
@@ -683,11 +689,11 @@ local function apply_panel_keys(bufnr)
     local thread, comment = panel_comment_at_cursor()
     edit_comment(thread, comment, ui.panel_target)
   end)
-  map("D", function()
+  map("dd", function()
     delete_comment(select(2, panel_comment_at_cursor()))
   end)
   -- the review buffer is a sibling UI module, loaded lazily
-  map("S", function()
+  map("s", function()
     require("review_mode.review_buffer").open()
   end)
 end
@@ -811,6 +817,11 @@ function M.reply()
     return
   end
   reply_to_thread(thread, target)
+end
+
+--- Reply to a given thread, e.g. one picked from several on a line.
+function M.reply_to(thread)
+  reply_to_thread(thread, select(2, focused_thread()))
 end
 
 --- Replace the lines a suggestion is anchored to with the suggested lines.
