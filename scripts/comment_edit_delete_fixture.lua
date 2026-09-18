@@ -109,13 +109,13 @@ local function panel_key(row, key)
   vim.cmd("normal " .. key)
 end
 
--- D on alice's comment (cursor on her body line) is refused before any prompt
-panel_key(alice_row + 1, "D")
+-- dd on alice's comment (cursor on her body line) is refused before any prompt
+panel_key(alice_row + 1, "dd")
 assert(#confirm_prompts == 0, "delete prompted for someone else's comment")
 assert(notified("own comments"), "panel delete did not refuse someone else's comment")
 
--- D on your own comment, declined: nothing is sent
-panel_key(adrian_row, "D")
+-- dd on your own comment, declined: nothing is sent
+panel_key(adrian_row, "dd")
 assert(#confirm_prompts == 1, "delete was not confirmed first")
 assert(confirm_prompts[1]:find("Renamed in the next push", 1, true), "delete prompt did not show the body")
 assert(not confirm_prompts[1]:find("second line", 1, true), "delete prompt showed more than the first line")
@@ -166,7 +166,7 @@ assert(vim.deep_equal(events[1], { "comment_edited", 11 }), "comment_edited did 
 
 -- confirmed delete: the empty 204 body is a success, not a JSON error
 fetches = gh_calls("graphql reviewThreads")
-panel_key(adrian_row, "D")
+panel_key(adrian_row, "dd")
 wait_for(function()
   return notified("Deleted PR comment") or notified("delete failed")
 end, "confirmed delete did not finish")

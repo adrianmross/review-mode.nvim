@@ -105,9 +105,9 @@ wait_for(function()
   return #flash_marks() == 0
 end, "the command's flash never cleared")
 
--- panel R is the other entry point, and it goes through the same event. The
+-- panel x is the other entry point, and it goes through the same event. The
 -- mock always answers the same payload, so the reloaded thread reads unresolved
--- and R resolves it again.
+-- and x resolves it again.
 vim.api.nvim_win_set_cursor(0, { 2, 0 })
 pr.open_panel()
 local panel_win = pr.panel_win()
@@ -126,9 +126,9 @@ end, "the panel never rendered the thread")
 after_resolve(function()
   vim.api.nvim_set_current_win(panel_win)
   vim.api.nvim_win_set_cursor(panel_win, { thread_row, 0 })
-  vim.cmd("normal R")
+  vim.cmd("normal x")
 end)
-assert_flash(2, "resolved", "ReviewModeResolved", "panel R")
+assert_flash(2, "resolved", "ReviewModeResolved", "panel x")
 pr.close_panel()
 vim.api.nvim_set_current_win(vim.fn.win_findbuf(bufnr)[1])
 wait_for(function()

@@ -1020,7 +1020,8 @@ end
 -- Readable names for which-key and :map, keyed by action
 local session_key_desc = {
   toggle_panel = "Review: toggle thread panel",
-  comment = "Review: comment on line/range",
+  comment_or_reply = "Review: comment (replies to a thread on the line)",
+  comment = "Review: new thread on line/range",
   reply = "Review: reply to thread",
   toggle_resolve = "Review: resolve/unresolve thread",
   list_viewed = "Review: changed files",
@@ -1695,11 +1696,18 @@ M.old_toggle = diff.old_toggle
 M.toggle_diff_layout = diff.toggle_diff_layout
 M.toggle_diff_full_file = diff.toggle_diff_full_file
 
+-- In a diff window ]c already means "next change"; leave that to Vim.
 function M.next_hunk()
+  if vim.wo.diff then
+    return vim.cmd("normal! " .. vim.v.count1 .. "]c")
+  end
   jump_hunk(1)
 end
 
 function M.prev_hunk()
+  if vim.wo.diff then
+    return vim.cmd("normal! " .. vim.v.count1 .. "[c")
+  end
   jump_hunk(-1)
 end
 
@@ -2257,6 +2265,50 @@ function M.comment(command)
   end)
 end
 
+--- The one comment key: reply to the thread on the line, or start a thread
+--- when there is none. A visual range always starts one, since a reply has no
+--- range of its own. :ReviewModeComment and :ReviewModeReply stay explicit.
+function M.comment_or_reply(command)
+  local mode = vim.fn.mode()
+  if (command and command.range and command.range > 0) or mode == "v" or mode == "V" or mode == "\22" then
+    return M.comment(command)
+  end
+
+  local path = current_relpath()
+  if not path then
+    -- the thread panel, which knows its own thread
+    return panel.reply()
+  end
+  api.ensure_comments()
+  local threads = api.threads({ path = path, line = vim.api.nvim_win_get_cursor(0)[1] })
+  if #threads == 0 then
+    return M.comment(command)
+  end
+  if #threads == 1 then
+    return panel.reply_to(threads[1])
+  end
+
+  -- a line can carry several threads; say which, or start another
+  local choices = vim.list_extend({}, threads)
+  table.insert(choices, "new")
+  vim.ui.select(choices, {
+    prompt = "Comment on",
+    format_item = function(item)
+      if item == "new" then
+        return "New thread"
+      end
+      local first = item.comments[1] or {}
+      return string.format("Reply to %s: %s", first.author or "?", (first.body or ""):match("[^\n]*"))
+    end,
+  }, function(choice)
+    if choice == "new" then
+      M.comment()
+    elseif choice then
+      panel.reply_to(choice)
+    end
+  end)
+end
+
 function M.suggest(command)
   local path = current_relpath()
   if not path then
@@ -2391,6 +2443,7 @@ function M.action_items()
     { category = "Review", label = "Apply suggestion on line", run = panel.apply_suggestion },
     { category = "Review", label = "Suggest change for line/range", run = M.suggest },
     { category = "Files", label = "Toggle viewed", run = M.toggle_viewed },
+    { category = "Files", label = "Toggle full-file diff", run = M.toggle_diff_full_file },
     {
       category = "Files",
       label = "Viewed file list",

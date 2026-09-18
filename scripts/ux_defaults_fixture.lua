@@ -63,16 +63,22 @@ assert(vim.fn.maparg("gt", "n") == "", "the mode layer took over Vim's gt")
 
 -- session layer: leader actions are live for the whole review
 assert(desc("<leader>rt") == "Review: toggle thread panel", "<leader>rt is not the thread panel in a review")
-assert(desc("<leader>rl") == "Review: changed files", "<leader>rl is not installed in a review")
-assert(desc("<leader>rc", "v") == "Review: comment on line/range", "<leader>rc is not mapped in visual mode")
-assert(desc("]h") == "review-mode ]h", "the mode layer is not installed")
+assert(desc("<leader>rf") == "Review: changed files", "<leader>rf is not installed in a review")
+-- r is the comment letter: rr comments (in visual mode too), rR forces a new thread
+local rr = "Review: comment (replies to a thread on the line)"
+assert(desc("<leader>rr") == rr, "<leader>rr is not the comment key")
+assert(desc("<leader>rr", "v") == rr, "<leader>rr is not mapped in visual mode")
+assert(desc("<leader>rR", "v") == "Review: new thread on line/range", "<leader>rR is not mapped in visual mode")
+assert(vim.fn.maparg("<leader>rc", "n") == "", "<leader>rc is still a default key")
+assert(desc("]r") == "review-mode ]r", "]r does not jump between threads")
+assert(desc("]c") == "review-mode ]c", "the mode layer is not installed")
 
 -- step out: the mode layer goes, the session layer stays
 pr.leave()
-assert(desc("]h") ~= "review-mode ]h", "stepping out left ]h installed")
+assert(desc("]c") ~= "review-mode ]c", "stepping out left ]c installed")
 assert(desc("<leader>rt") == "Review: toggle thread panel", "stepping out dropped the session keys")
 pr.enter()
-assert(desc("]h") == "review-mode ]h", "stepping back in did not reinstall ]h")
+assert(desc("]c") == "review-mode ]c", "stepping back in did not reinstall ]c")
 
 -- the comment sign stays; the end-of-line text does not
 vim.cmd.edit("file.txt")
@@ -107,7 +113,50 @@ pr.comment({ range = 2, line1 = 2, line2 = 4 })
 draft = win_with_ft("markdown")
 assert(draft and vim.wo[draft].winbar:find("file.txt:2-4", 1, true), "the draft lost the range")
 pr.composer_cancel()
+
+-- the one comment key replies where a thread is, and starts one where none is
+local function draft_title()
+  local win = win_with_ft("markdown")
+  local title = win and vim.wo[win].winbar or ""
+  if win then
+    vim.api.nvim_set_current_win(win)
+    pr.composer_cancel()
+  end
+  return title
+end
+vim.api.nvim_set_current_win(code_win)
+assert(#api.threads({ path = "file.txt", line = 2 }) > 0, "fixture: expected a thread on line 2")
+vim.api.nvim_win_set_cursor(code_win, { 2, 0 })
+pr.comment_or_reply()
+assert(draft_title():find("Reply to", 1, true), "<leader>rr on a thread did not reply")
+local bare
+for line = 1, vim.api.nvim_buf_line_count(0) do
+  if #api.threads({ path = "file.txt", line = line }) == 0 then
+    bare = line
+    break
+  end
+end
+assert(bare, "fixture: expected a line without a thread")
+vim.api.nvim_win_set_cursor(code_win, { bare, 0 })
+pr.comment_or_reply()
+local title = draft_title()
+assert(title:find("file.txt:" .. bare, 1, true), "<leader>rr on a bare line did not start a thread: " .. title)
+-- a range never replies, even over a thread
+pr.comment_or_reply({ range = 2, line1 = 2, line2 = 3 })
+title = draft_title()
+assert(title:find("file.txt:2-3", 1, true), "<leader>rr on a range did not start a thread: " .. title)
 pr.close_panel()
+
+-- in a diff window ]c stays Vim's change jump
+vim.cmd("tabnew")
+vim.api.nvim_buf_set_lines(0, 0, -1, false, { "a", "b", "c", "d", "e" })
+vim.cmd("diffthis | vnew")
+vim.api.nvim_buf_set_lines(0, 0, -1, false, { "a", "b", "c", "X", "e" })
+vim.cmd("diffthis")
+vim.api.nvim_win_set_cursor(0, { 1, 0 })
+pr.next_hunk()
+assert(vim.api.nvim_win_get_cursor(0)[1] == 4, "]c in a diff window did not jump to the change")
+vim.cmd("diffoff! | tabclose!")
 
 -- compose = "prompt" keeps the one-line prompt, with no panel
 pr.setup({
@@ -127,7 +176,7 @@ pr.comment()
 assert(prompted and prompted:find("file.txt:2-2", 1, true), 'compose = "prompt" did not use the prompt')
 assert(not pr.panel_is_open(), 'compose = "prompt" opened the panel anyway')
 
--- <leader>rR toggles the thread on the current line
+-- <leader>rx toggles the thread on the current line
 vim.api.nvim_win_set_cursor(0, { 2, 0 })
 local seen = {}
 local notify = vim.notify
@@ -153,7 +202,7 @@ assert(resolved, "toggle_resolve did not resolve the open thread")
 -- the session ends: its keys go, and the user's own mapping comes back
 pr.stop()
 assert(desc("<leader>rt") == "user rt", "ending the review did not restore the user's <leader>rt")
-assert(vim.fn.maparg("<leader>rl", "n") == "", "ending the review left <leader>rl mapped")
+assert(vim.fn.maparg("<leader>rf", "n") == "", "ending the review left <leader>rf mapped")
 
 -- session.keys = {} installs none
 pr.setup({
@@ -168,7 +217,7 @@ vim.wait(2000, function()
   return api.is_active()
 end, 20)
 assert(desc("<leader>rt") == "user rt", "session.keys = {} still installed <leader>rt")
-assert(vim.fn.maparg("<leader>rl", "n") == "", "session.keys = {} still installed <leader>rl")
+assert(vim.fn.maparg("<leader>rf", "n") == "", "session.keys = {} still installed <leader>rf")
 pr.stop()
 
 -- mode.keys = {} installs none (documented, but never honored before)
@@ -185,7 +234,7 @@ pr.start()
 vim.wait(2000, function()
   return api.is_active()
 end, 20)
-assert(desc("]h") ~= "review-mode ]h", "mode.keys = {} still installed ]h")
+assert(desc("]c") ~= "review-mode ]c", "mode.keys = {} still installed ]c")
 -- a false value drops just that key and keeps the rest
 assert(vim.fn.maparg("<leader>rq", "n") == "", "session key set to false was still installed")
 assert(desc("<leader>rt") == "Review: toggle thread panel", "dropping one session key dropped the others")

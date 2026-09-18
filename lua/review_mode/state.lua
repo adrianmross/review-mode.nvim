@@ -82,14 +82,15 @@ local defaults = {
     workspace = "inplace",
     signs_when_out = true,
     gitsigns_follows = true,
+    -- ]c is a hunk, as in stock Vim and gitsigns (in a diff window it stays
+    -- Vim's own change jump); ]r is a thread, since r is the comment letter.
     keys = {
-      ["]h"] = "next_hunk",
-      ["[h"] = "prev_hunk",
-      ["]c"] = "next_comment",
-      ["[c"] = "prev_comment",
+      ["]c"] = "next_hunk",
+      ["[c"] = "prev_hunk",
+      ["]r"] = "next_comment",
+      ["[r"] = "prev_comment",
       ["]f"] = "next_file",
       ["[f"] = "prev_file",
-      ["<Esc>"] = "leave",
     },
   },
   -- Keys for the whole session: installed by :ReviewMode, removed by
@@ -101,16 +102,16 @@ local defaults = {
   session = {
     keys = {
       ["<leader>rt"] = "toggle_panel",
-      ["<leader>rc"] = { "comment", mode = { "n", "v" } },
-      ["<leader>rr"] = "reply",
-      ["<leader>rR"] = "toggle_resolve",
-      ["<leader>rl"] = "list_viewed",
+      -- one comment key: replies when a thread is on the line, else starts one
+      ["<leader>rr"] = { "comment_or_reply", mode = { "n", "v" } },
+      ["<leader>rR"] = { "comment", mode = { "n", "v" } },
+      ["<leader>rx"] = "toggle_resolve",
+      ["<leader>rf"] = "list_viewed",
       ["<leader>rv"] = "toggle_viewed",
       ["<leader>rd"] = "old_toggle",
       ["<leader>rD"] = "toggle_diff_layout",
-      ["<leader>rf"] = "toggle_diff_full_file",
       ["<leader>ra"] = "actions",
-      ["<leader>rS"] = "open_pending",
+      ["<leader>rs"] = "open_pending",
       ["<leader>rq"] = "stop",
     },
   },

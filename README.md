@@ -58,8 +58,8 @@ With `lazy.nvim`:
 }
 ```
 
-Once a review is running you get `<leader>r…` keys for its actions and `]h`
-`]c` `]f` to move through it — no `keys` block needed. See "Keys" under "The Mode".
+Once a review is running you get `<leader>r…` keys for its actions and `]c`
+`]r` `]f` to move through it — no `keys` block needed. See "Keys" under "The Mode".
 
 ## nvim-tree Integration
 
@@ -114,7 +114,7 @@ Keys come in two layers, split by whether they shadow something:
 
 | layer | live | keys |
 |---|---|---|
-| **mode** | while you are in the mode | `]h` `]c` `]f`, `<Esc>` — these shadow real keys (`]c` is Vim's own diff-hunk jump), so they go when you step out |
+| **mode** | while you are in the mode | `]c` `]r` `]f` — these shadow real keys, so they go when you step out (`<leader>rm` steps in and out) |
 | **session** | from `:ReviewMode` to `:ReviewModeStop`, in or out of the mode | `<leader>r…` — these shadow nothing in stock Vim, so they stay while you step out |
 
 Either way, any mapping of yours a layer shadows is saved and put back when the
@@ -124,25 +124,29 @@ layer goes.
 
 | key | action |
 |---|---|
-| `]h` / `[h` | next / previous PR hunk |
-| `]c` / `[c` | next / previous PR comment |
+| `]c` / `[c` | next / previous PR hunk (Vim's own change jump in a diff window) |
+| `]r` / `[r` | next / previous PR comment thread |
 | `]f` / `[f` | next / previous changed file |
-| `<Esc>` | step out of the mode |
 
 **Session layer:**
 
 | key | action |
 |---|---|
 | `<leader>rt` | toggle the thread panel |
-| `<leader>rc` | comment on the line or visual range (drafts in the panel) |
-| `<leader>rr` | reply to the thread on this line |
-| `<leader>rR` | resolve / unresolve the thread on this line |
-| `<leader>rl` | changed files, with viewed state and comment counts |
+| `<leader>rr` | comment: replies to the thread on this line, or starts one where there is none (a visual range always starts one) |
+| `<leader>rR` | start a new thread here, even over an existing one |
+| `<leader>rx` | resolve / unresolve the thread on this line |
+| `<leader>rf` | changed files, with viewed state and comment counts |
 | `<leader>rv` | toggle this file viewed |
-| `<leader>rd` / `<leader>rD` / `<leader>rf` | base diff / diff layout / full-file diff |
+| `<leader>rd` / `<leader>rD` | base diff / diff layout (full-file diff is in the actions picker) |
 | `<leader>ra` | actions picker |
-| `<leader>rS` | pending review and submit |
+| `<leader>rs` | pending review and submit |
 | `<leader>rq` | end the review |
+
+`r` is the comment letter throughout: `<leader>rr` comments, `]r` moves between
+threads, and the panel's keys are the session keys without `<leader>r` (`r`,
+`R`, `x`, `s`). A line with several threads asks which to reply to, or whether
+to start another. `:ReviewModeComment` and `:ReviewModeReply` stay explicit.
 
 Neither layer takes `<Tab>`/`<S-Tab>` or `gt`: buffer-cycling plugins such as
 bufferline use the first two, `gt` is Vim's `:tabnext`, and a checkout review
@@ -156,6 +160,7 @@ over the defaults; `false` removes one key, and `{}` installs none:
 mode = {
   keys = {
     ["]h"] = "next_hunk",           -- any function name on the module
+    ["<Esc>"] = "leave",            -- the old step-out key, if you want it back
     ["gR"] = function() ... end,    -- or a function
   },
 },
@@ -163,7 +168,7 @@ session = {
   keys = {
     ["<leader>rq"] = false,                          -- drop one
     ["<leader>rp"] = "toggle_panel",                 -- add or move one
-    ["<leader>rc"] = { "comment", mode = { "n", "v" } },
+    ["<leader>rc"] = { "comment", mode = { "n", "v" } }, -- always a new thread
   },
 },
 ```
@@ -182,25 +187,25 @@ Keys inside the panel:
 
 | key | action |
 |---|---|
-| `r` | reply to the thread under the cursor |
-| `c` | comment on the line the code window is on |
-| `R` | resolve or unresolve the thread |
+| `r` | reply to the thread under the cursor (a new thread when the panel is empty) |
+| `R` | start a new thread on the line the code window is on |
+| `x` | resolve or unresolve the thread |
 | `a` | apply the thread's suggestion to the buffer |
 | `o` | open the comment on GitHub |
 | `<CR>` | jump to the thread's line in the code window |
-| `]c` / `[c` | next / previous thread in the panel |
-| `gr` | reload comments from GitHub |
+| `]r` / `[r` | next / previous thread in the panel |
+| `<C-l>` | reload comments from GitHub |
 | `+` | react to the comment under the cursor |
 | `e` | edit your comment under the cursor in a draft buffer |
-| `D` | delete your comment under the cursor, after a confirmation |
-| `S` | open the pending review buffer |
+| `dd` | delete your comment under the cursor, after a confirmation |
+| `s` | open the pending review buffer |
 | `q` | close the panel |
 | `p` | preview the thread's suggestion in the code, without applying it |
 | `A` | apply every suggestion in the file, after a confirmation |
 
 ### Replies are drafted, not typed into a prompt
 
-`r`, `c`, `:ReviewModeComment`, `:ReviewModeCompose` and `:ReviewModeReply` open
+`r`, `R`, `:ReviewModeComment`, `:ReviewModeCompose` and `:ReviewModeReply` open
 a real markdown buffer instead of `vim.ui.input` — `:ReviewModeComment` opens the
 thread panel first and drafts under it (set `comments.compose = "prompt"` for
 the old one-line prompt), so a reply can be more than one line and can
@@ -218,7 +223,7 @@ be edited before it goes out. Nothing is sent until you confirm:
 anchored to: select the lines in the code window, come back to the draft, and
 press it.
 
-`e`, `D`, `:ReviewModeEditComment` and `:ReviewModeDeleteComment` only act on
+`e`, `dd`, `:ReviewModeEditComment` and `:ReviewModeDeleteComment` only act on
 comments you wrote. GitHub says who that is only through the GraphQL query, so
 comments loaded through the REST fallback are refused rather than guessed at.
 
@@ -228,7 +233,7 @@ nothing else on it; set `comments.show_resolved = true` to always show them.
 Resolving or unresolving a thread briefly marks the line it sat on, in the
 colour of its new state, so the change is confirmed where you made it instead
 of the comment merely disappearing. The mark rides the `thread_resolved` event,
-so the panel's `R`, `:ReviewModeResolveThread`, `:ReviewModeUnresolveThread`
+so the panel's `x`, `:ReviewModeResolveThread`, `:ReviewModeUnresolveThread`
 and the GitLab provider all show it, and it sits in its own namespace so it
 never disturbs the comment signs or virtual text. `comments.resolve_flash_ms`
 is how long it lasts in milliseconds; `0` turns it off.
@@ -248,7 +253,7 @@ is refused with a message rather than silently doing nothing.
 ## Pending Reviews
 
 A comment can wait for the rest of the review instead of going out on its own.
-`<C-p>` in the draft buffer queues it; `:ReviewModePending` (or `S` in the
+`<C-p>` in the draft buffer queues it; `:ReviewModePending` (or `s` in the
 panel) opens the review buffer, which lists every queued comment, takes the
 review body below the marker line, and submits the lot in one GitHub review:
 
@@ -815,7 +820,7 @@ Comments load into the same normalized shape GitHub and GitLab comments load
 into, so signs, virtual text, the panel, `api.threads()`, diagnostics and
 quickfix work on them unchanged. `:ReviewModeLocalComments` opens a
 `review-mode://local` buffer listing every one of them, grouped by file with
-counts: `<CR>` jumps, `r` replies, `R` resolves, `e` edits, `dd` deletes.
+counts: `<CR>` jumps, `r` replies, `x` resolves, `e` edits, `dd` deletes.
 
 ### For agents
 

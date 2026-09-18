@@ -44,10 +44,12 @@ ends the session.
 
 Keys installed while in the mode (see mode.keys to change them):
 
-        ]h / [h         next / previous PR hunk
-        ]c / [c         next / previous PR comment
+        ]c / [c         next / previous PR hunk (in a diff window, Vim's own
+                        change jump)
+        ]r / [r         next / previous PR comment thread
         ]f / [f         next / previous changed file
-        <Esc>           step out of the mode
+
+<leader>rm (or |:ReviewModeEnter| / |:ReviewModeLeave|) steps in and out.
 
 A mapping shadowed by the layer is saved on entry and restored on exit.
 
@@ -56,14 +58,16 @@ stay while you step out of the mode, since <leader> keys shadow nothing in stock
 Vim (see session.keys to change them):
 
         <leader>rt      toggle the thread panel |review-mode-panel|
-        <leader>rc      comment on line/range, drafting in the panel
-        <leader>rr      reply to the thread on this line
-        <leader>rR      resolve / unresolve the thread on this line
-        <leader>rl      changed files with viewed state and comment counts
+        <leader>rr      comment: reply to the thread on this line, or start
+                        one where there is none; a visual range always
+                        starts one, and several threads on a line ask which
+        <leader>rR      start a new thread, even over an existing one
+        <leader>rx      resolve / unresolve the thread on this line
+        <leader>rf      changed files with viewed state and comment counts
         <leader>rv      toggle this file viewed
-        <leader>rd      base diff (rD layout, rf full file)
+        <leader>rd      base diff (rD layout; full file is in the actions)
         <leader>ra      actions picker
-        <leader>rS      pending review and submit
+        <leader>rs      pending review and submit
         <leader>rq      end the review
 
 mode.keys and session.keys merge over the defaults; false removes one key and
@@ -116,18 +120,19 @@ the diff it would apply: the lines it replaces above the lines it proposes.
 
 Keys inside the panel:
 
-        r       reply to the thread under the cursor
-        c       comment on the line the code window is on
-        R       resolve or unresolve the thread
+        r       reply to the thread under the cursor (a new thread when
+                the panel is empty)
+        R       start a new thread on the line the code window is on
+        x       resolve or unresolve the thread
         a       apply the thread's suggestion to the buffer
         o       open the comment on GitHub
         <CR>    jump to the thread's line in the code window
-        ]c [c   next / previous thread in the panel
-        gr      reload comments from GitHub
+        ]r [r   next / previous thread in the panel
+        <C-l>   reload comments from GitHub
         +       react to the comment under the cursor
         e       edit your comment under the cursor in a draft buffer
-        D       delete your comment under the cursor, after a confirmation
-        S       open the pending review buffer |review-mode-pending|
+        dd      delete your comment under the cursor, after a confirmation
+        s       open the pending review buffer |review-mode-pending|
         q       close the panel
         p       preview the suggestion in the code |review-mode-suggestions|
         A       apply every suggestion in the file, after a confirmation
@@ -139,7 +144,7 @@ them.
 Resolving or unresolving a thread briefly marks the line it sat on, in the
 colour of its new state, so the change is confirmed where you made it instead
 of the comment merely disappearing. The mark rides the thread_resolved event,
-so the panel's `R`, |:ReviewModeResolveThread|, |:ReviewModeUnresolveThread|
+so the panel's `x`, |:ReviewModeResolveThread|, |:ReviewModeUnresolveThread|
 and the GitLab provider all show it, and it uses its own namespace so it never
 disturbs the comment signs or virtual text. comments.resolve_flash_ms is how
 long it lasts in milliseconds; 0 turns it off.
@@ -153,7 +158,7 @@ Comments loaded through the REST fallback can only gain a reaction; removing
 one needs a GraphQL id they do not carry, so removal is refused.
 
                                                            *review-mode-draft*
-|:ReviewModeReply|, |:ReviewModeCompose| and the panel's `r` and `c` keys open a
+|:ReviewModeReply|, |:ReviewModeCompose| and the panel's `r` and `R` keys open a
 markdown draft buffer rather than a vim.ui.input prompt, so a reply can be more
 than one line and can be edited before it goes out. Nothing reaches GitHub
 until the draft is confirmed.
@@ -441,10 +446,10 @@ KEYMAPS                                                    *review-mode-keymaps*
 Suggested navigation uses hunk keys for changed regions and comment keys for
 review discussion:
 >
-  ]h    next PR hunk
-  [h    previous PR hunk
-  ]c    next PR comment
-  [c    previous PR comment
+  ]c    next PR hunk
+  [c    previous PR hunk
+  ]r    next PR comment thread
+  [r    previous PR comment thread
   ]f    next changed file
   [f    previous changed file
 <
