@@ -133,7 +133,7 @@ layer goes.
 | key | action |
 |---|---|
 | `<leader>rt` | toggle the thread panel |
-| `<leader>rr` | comment: replies to the thread on this line, or starts one where there is none (a visual range always starts one) |
+| `<leader>rr` | comment: on a line you edited, suggests your edit; else replies to the thread on this line, or starts one where there is none (a visual range always starts one) |
 | `<leader>rR` | start a new thread here, even over an existing one |
 | `<leader>rx` | resolve / unresolve the thread on this line |
 | `<leader>rf` | changed files, with viewed state and comment counts |
@@ -580,7 +580,8 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeEditComment` edits your most recent comment on the current line in a draft buffer
 - `:ReviewModeDeleteComment` deletes your most recent comment on the current line, after a confirmation
 - `:ReviewModeComment` creates a PR comment on the current line or visual range
-- `:ReviewModeSuggest` creates a GitHub suggestion comment on the current line or visual range
+- `:ReviewModeSuggest` suggests your edit on the current line, or drafts a suggestion over the line or visual range starting from the lines as they are
+- `:ReviewModeSuggestEdits` queues every edit in the current file as a pending suggestion, and undoes the edits
 - `:ReviewModeViewedToggle` toggles viewed state for the current PR file
 - `:ReviewModeViewedNext` marks the current PR file viewed and jumps to the next unviewed file
 - `:ReviewModeViewedFeatureToggle` toggles viewed-state tracking on or off
@@ -604,6 +605,29 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeSuggestionList` lists the trial suggestions that are applied but not saved
 
 ## Suggestions
+
+### Writing one: edit the code
+
+The easiest way to write a suggestion is to make the change. Edit the PR's code
+in the file, with your LSP, formatter and completion, then press `<leader>rr` on
+an edited line: the draft opens with the ```` ```suggestion ```` block already
+filled in from your edit, and you write a message above it. Post it (`<C-s>`) or
+queue it into the pending review (`<C-p>`), and your edit is undone: the change
+lives on as the suggestion, and the file matches the PR again.
+
+`:ReviewModeSuggestEdits` (also in the actions picker) does every edit in the
+file at once, queueing each into the pending review, where
+`:ReviewModePending` lets you add messages before submitting.
+
+Edits are what the buffer says that HEAD, the PR head, does not. A pure
+insertion takes the line above into the suggestion, since it has no line of its
+own; a deletion suggests nothing in place of the lines. GitHub only takes a
+suggestion on lines inside the PR diff (the changes and three lines around
+them), so an edit elsewhere is refused with a message rather than posted
+somewhere else. Lines you applied as trial suggestions are not your edits and
+are left out.
+
+### Reading one
 
 A `suggestion` block in a review comment is a concrete replacement for the lines
 it hangs off. Four ways to deal with one, over the same core. None of it is

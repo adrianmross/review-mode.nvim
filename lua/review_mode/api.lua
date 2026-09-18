@@ -680,6 +680,45 @@ function M.suggestion_trials()
   return suggestions().trials()
 end
 
+-- Your edits, as suggestions: each hunk of the buffer that differs from HEAD,
+-- as { path, start_line, end_line, lines, in_diff, ... }. opts.buf picks the
+-- buffer (default: the current one).
+local function edits()
+  return require("review_mode.edits")
+end
+
+local function edit_buffer(opts)
+  local bufnr = (opts or {}).buf or vim.api.nvim_get_current_buf()
+  return bufnr, util.buf_relpath(bufnr)
+end
+
+--- The edited hunks in a buffer, top to bottom, trial suggestions left out.
+function M.edits(opts)
+  local bufnr, path = edit_buffer(opts)
+  return path and edits().list(bufnr, path) or {}
+end
+
+--- The edit covering a line, or nil.
+function M.edit_at(line, opts)
+  local bufnr, path = edit_buffer(opts)
+  return path and edits().at(bufnr, path, line) or nil
+end
+
+--- The comment body that suggests an edit, with an optional message above it.
+function M.edit_suggestion_body(edit, message)
+  return edits().body(edit, message)
+end
+
+--- Pin an edit to its buffer range, so a later undo_edit finds it.
+function M.track_edit(edit)
+  return edits().track(edit)
+end
+
+--- Put HEAD's lines back over an edit, once it lives on as a suggestion.
+function M.undo_edit(edit)
+  return edits().undo(edit)
+end
+
 -- End suggestions ---------------------------------------------------------------
 
 -- Escape hatches --------------------------------------------------------------

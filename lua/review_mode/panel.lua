@@ -832,6 +832,59 @@ function M.reply()
   reply_to_thread(thread, target)
 end
 
+--- Draft a suggestion from an edit you made in the file (see api.edits). The
+--- suggestion block is filled in from the edit; write a message above it.
+--- Posting or queueing it puts HEAD's lines back, since the change lives on as
+--- the suggestion.
+function M.suggest_edit(edit)
+  local range = string.format("%s:%d-%d", edit.path, edit.start_line, edit.end_line)
+  if not edit.in_diff then
+    vim.notify(
+      string.format("Review Mode: %s is outside the PR diff, so it cannot carry a suggestion", range),
+      vim.log.levels.WARN
+    )
+    return
+  end
+
+  api.track_edit(edit)
+  local default = { "" }
+  vim.list_extend(default, vim.split(api.edit_suggestion_body(edit), "\n"))
+  local where = { path = edit.path, start_line = edit.start_line, end_line = edit.end_line }
+  open_composer({
+    name = "suggestion",
+    title = "Suggest your edit on " .. range,
+    prompt = string.format("Post this suggestion on %s and undo your edit?", range),
+    source = {
+      buf = edit.buf,
+      win = vim.fn.bufwinid(edit.buf),
+      path = edit.path,
+      line = edit.end_line,
+      start_line = edit.start_line,
+      end_line = edit.end_line,
+    },
+    default = default,
+    submit = function(body)
+      api.comment(vim.tbl_extend("force", where, { body = body }), function(ok, err)
+        if not ok then
+          vim.notify("Review Mode suggestion failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
+          return
+        end
+        api.undo_edit(edit)
+        vim.notify("Posted suggestion on " .. range .. " and undid your edit")
+      end)
+    end,
+    pend = function(body)
+      local draft, err = api.add_pending(vim.tbl_extend("force", where, { body = body }))
+      if not draft then
+        vim.notify("Review Mode pending: " .. tostring(err), vim.log.levels.ERROR)
+        return
+      end
+      api.undo_edit(edit)
+      vim.notify(string.format("Queued suggestion on %s and undid your edit (%d pending)", range, #api.pending()))
+    end,
+  })
+end
+
 --- Reply to a given thread, e.g. one picked from several on a line.
 function M.reply_to(thread)
   reply_to_thread(thread, select(2, focused_thread()))
