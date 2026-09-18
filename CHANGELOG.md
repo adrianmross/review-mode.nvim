@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.13.0](https://github.com/adrianmross/review-mode.nvim/compare/v0.12.4...v0.13.0) (2026-09-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* **keys:** default review keys are renamed; <leader>rc, ]h/[h and <Esc> are gone.
+
+### Features
+
+* **keys:** make r the one comment key ([#81](https://github.com/adrianmross/review-mode.nvim/issues/81)) ([3d1ee99](https://github.com/adrianmross/review-mode.nvim/commit/3d1ee9968fbfea43a1735d5ef313ca54766290d9))
+
 ## [0.12.4](https://github.com/adrianmross/review-mode.nvim/compare/v0.12.3...v0.12.4) (2026-09-18)
 
 
