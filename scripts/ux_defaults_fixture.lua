@@ -65,7 +65,9 @@ assert(vim.fn.maparg("gt", "n") == "", "the mode layer took over Vim's gt")
 assert(desc("<leader>rt") == "Review: toggle thread panel", "<leader>rt is not the thread panel in a review")
 assert(desc("<leader>rf") == "Review: changed files", "<leader>rf is not installed in a review")
 -- r is the comment letter: rr comments (in visual mode too), rR forces a new thread
-assert(desc("<leader>rr", "v") == desc("<leader>rr"), "<leader>rr is not mapped in visual mode")
+local rr = "Review: comment (replies to a thread on the line)"
+assert(desc("<leader>rr") == rr, "<leader>rr is not the comment key")
+assert(desc("<leader>rr", "v") == rr, "<leader>rr is not mapped in visual mode")
 assert(desc("<leader>rR", "v") == "Review: new thread on line/range", "<leader>rR is not mapped in visual mode")
 assert(vim.fn.maparg("<leader>rc", "n") == "", "<leader>rc is still a default key")
 assert(desc("]r") == "review-mode ]r", "]r does not jump between threads")
