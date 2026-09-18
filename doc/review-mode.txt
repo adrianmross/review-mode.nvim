@@ -58,7 +58,8 @@ stay while you step out of the mode, since <leader> keys shadow nothing in stock
 Vim (see session.keys to change them):
 
         <leader>rt      toggle the thread panel |review-mode-panel|
-        <leader>rr      comment: reply to the thread on this line, or start
+        <leader>rr      comment: on a line you edited, suggest the edit;
+                        else reply to the thread on this line, or start
                         one where there is none; a visual range always
                         starts one, and several threads on a line ask which
         <leader>rR      start a new thread, even over an existing one
@@ -338,7 +339,14 @@ COMMANDS                                                  *review-mode-commands*
 
                                                         *:ReviewModeSuggest*
 :ReviewModeSuggest
-        Create a GitHub suggestion comment on the current line or visual range.
+        On a line you edited, draft a suggestion from your edit. Otherwise draft
+        one over the current line or visual range, starting from the lines as
+        they are. See |review-mode-edit-suggestions|.
+
+                                                    *:ReviewModeSuggestEdits*
+:ReviewModeSuggestEdits
+        Queue every edit in the current file as a pending suggestion, and undo
+        the edits. Edits outside the PR diff are left alone.
 
                                                         *:ReviewModeViewedToggle*
 :ReviewModeViewedToggle
@@ -711,6 +719,19 @@ local_comment's author defaults to git config user.name and falls back to
 "agent"; it is never a GitHub login.
 ==============================================================================
 SUGGESTIONS                                            *review-mode-suggestions*
+
+                                                *review-mode-edit-suggestions*
+To write a suggestion, make the change in the file, with your LSP and
+formatter, then press <leader>rr on an edited line. The draft opens with the
+suggestion block filled in from your edit; write a message above it. Posting
+it, or queueing it with <C-p>, undoes your edit: the change lives on as the
+suggestion. |:ReviewModeSuggestEdits| queues every edit in the file at once.
+
+An edit is what the buffer says that HEAD does not. A pure insertion takes the
+line above into the suggestion; a deletion suggests no lines. GitHub only takes
+a suggestion inside the PR diff (the changes and three lines around them), so
+an edit elsewhere is refused with a message. Lines applied as trial
+suggestions are not your edits and are left out.
 
 A `suggestion` block in a review comment is a concrete replacement for the
 lines it hangs off. Four ways to deal with one, over the same core. None of it

@@ -304,6 +304,21 @@ local function prune()
   return live
 end
 
+--- The rows each live trial in a buffer covers, as { start_row, finish_row }
+--- (0-based, end-exclusive), for code that must leave trial lines alone.
+function M.trial_ranges(bufnr)
+  local out = {}
+  for _, trial in ipairs(prune()) do
+    if trial.buf == bufnr then
+      local start_row, finish = trial_range(trial)
+      if start_row then
+        out[#out + 1] = { start_row, finish }
+      end
+    end
+  end
+  return out
+end
+
 --- The live trials, oldest first, each with the line it now sits on.
 function M.trials()
   local out = {}

@@ -454,14 +454,25 @@ wait_for(function()
 end, "reply command did not post a thread reply")
 vim.fn.confirm = original_confirm
 
-local original_input = vim.ui.input
-vim.ui.input = function(opts, callback)
-  assert(opts.default and opts.default:find("two", 1, true), "suggestion default text missing")
-  callback("two improved")
-end
+-- :ReviewModeSuggest drafts a suggestion block from the lines as they are,
+-- in the draft buffer rather than a one-line prompt
 vim.api.nvim_win_set_cursor(0, { 2, 0 })
 pr.suggest()
-vim.ui.input = original_input
+local suggest_win
+for _, win in ipairs(vim.api.nvim_list_wins()) do
+  if vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(win)):find("review%-mode://comment") then
+    suggest_win = win
+  end
+end
+assert(suggest_win, "suggest did not open a draft")
+local suggest_buf = vim.api.nvim_win_get_buf(suggest_win)
+local suggest_lines = vim.api.nvim_buf_get_lines(suggest_buf, 0, -1, false)
+assert(has_line(suggest_lines, "```suggestion") and has_line(suggest_lines, "two"), "suggestion block was not drafted")
+vim.fn.confirm = function()
+  return 1
+end
+pr.composer_submit()
+vim.fn.confirm = original_confirm
 wait_for(function()
   return last_notification():find("Submitted PR comment on file.txt:2", 1, true) ~= nil
 end, "suggest command did not create a PR comment")

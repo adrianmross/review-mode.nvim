@@ -459,3 +459,17 @@ REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/ux_defaults_fixture.lua"
+
+# Your edits, as suggestions: found against HEAD, checked against the PR diff,
+# posted or queued, then undone.
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/edits-cache" \
+XDG_STATE_HOME="$tmp/edits-state" \
+GH_REVIEW_REPO=owner/repo \
+GH_REVIEW_PR=123 \
+GH_REVIEW_BASE=main \
+GH_REVIEW_HEAD=abc123 \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+nvim --headless -u NONE -i NONE \
+  -c "set noswapfile" \
+  -l "$repo_root/scripts/edit_suggestion_fixture.lua"
