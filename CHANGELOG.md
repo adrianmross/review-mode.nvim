@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.0...v0.13.1) (2026-09-18)
+
+
+### Features
+
+* **actions:** list every action, grouped, with its key ([#83](https://github.com/adrianmross/review-mode.nvim/issues/83)) ([67414a4](https://github.com/adrianmross/review-mode.nvim/commit/67414a49ad66bf607a4ac88e880f7da0ef3b68bf))
+
 ## [0.13.0](https://github.com/adrianmross/review-mode.nvim/compare/v0.12.4...v0.13.0) (2026-09-18)
 
 
