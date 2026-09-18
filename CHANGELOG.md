@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.3](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.2...v0.13.3) (2026-09-18)
+
+
+### Bug Fixes
+
+* **suggestions:** keep preview and trial apply from drawing over each other ([#88](https://github.com/adrianmross/review-mode.nvim/issues/88)) ([d3bf113](https://github.com/adrianmross/review-mode.nvim/commit/d3bf113130dad7747a52651ef67265f17229bddb))
+
 ## [0.13.2](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.1...v0.13.2) (2026-09-18)
 
 
