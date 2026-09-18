@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.4](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.3...v0.13.4) (2026-09-18)
+
+
+### Features
+
+* **suggestions:** write a suggestion by editing the code ([#90](https://github.com/adrianmross/review-mode.nvim/issues/90)) ([2e12ad7](https://github.com/adrianmross/review-mode.nvim/commit/2e12ad788c6e260745d12157d894075b2dee9772))
+
 ## [0.13.3](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.2...v0.13.3) (2026-09-18)
 
 
