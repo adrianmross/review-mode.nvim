@@ -893,6 +893,11 @@ function head_watch.stamp()
   return string.format("%d:%d:%d", stat.size or 0, mtime.sec or 0, mtime.nsec or 0)
 end
 
+-- ponytail: the baseline is stamped when rev-parse returns, not when the changed
+-- maps were built, so a commit landing in that window is baked into the baseline
+-- and not followed until HEAD next moves. Closing it without blocking start
+-- means also returning HEAD's sha here and reloading if it differs from the sha
+-- the maps were built from; not worth it unless someone actually hits it.
 function head_watch.start(generation)
   state.head_log_path = nil
   state.head_log_stamp = nil

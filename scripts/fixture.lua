@@ -1166,6 +1166,11 @@ end, "changed file map did not load for follow-HEAD checks")
 wait_for(function()
   return vim.g.review_mode ~= nil
 end, "review session did not start for follow-HEAD checks")
+-- the reflog baseline is resolved by an async git rev-parse; committing before
+-- it lands bakes the commit into the baseline and HEAD never looks moved
+wait_for(function()
+  return require("review_mode.state").state.head_log_stamp ~= nil
+end, "follow-HEAD watcher did not record its reflog baseline")
 assert(not api.is_changed_file("followed.txt"), "follow-HEAD fixture file already existed")
 vim.fn.writefile({ "brand new" }, "followed.txt")
 vim.system({ "git", "add", "followed.txt" }, { text = true }):wait()
