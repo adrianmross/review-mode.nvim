@@ -986,8 +986,11 @@ end, "side-by-side diff did not reopen after next-file navigation")
 pr.toggle_diff_full_file()
 wait_for(function()
   local windows = vim.api.nvim_list_wins()
-  return #windows == 2 and not vim.wo[windows[1]].foldenable and not vim.wo[windows[2]].foldenable
-end, "full side-by-side diff did not open folds in both windows")
+  return #windows == 2
+    and vim.wo[windows[1]].foldenable
+    and vim.wo[windows[2]].foldenable
+    and pr.config().diff.full_file
+end, "full side-by-side diff turned folding off instead of opening the folds")
 pr.toggle_diff_full_file()
 wait_for(function()
   local windows = vim.api.nvim_list_wins()
@@ -1028,6 +1031,12 @@ assert(changed_span_found, "unified diff partial changed span missing")
 
 pr.toggle_diff_full_file()
 assert(not fold_closed(distant_row), "full unified diff did not open the fold")
+assert(vim.wo[diff_win].foldenable, "full unified diff turned folding off, so zc cannot close a gap")
+vim.api.nvim_win_call(diff_win, function()
+  vim.api.nvim_win_set_cursor(diff_win, { distant_row, 0 })
+  vim.cmd("normal! zc")
+end)
+assert(fold_closed(distant_row), "zc did not close one gap in a full unified diff")
 assert(select(2, buffer_lines_matching("pr%-diff://")) == diff_buf, "the full-file toggle re-rendered the diff")
 assert(pr.config().diff.full_file, "diff full-file toggle did not update config")
 -- the folds are Vim's, so the stock fold keys drive them too

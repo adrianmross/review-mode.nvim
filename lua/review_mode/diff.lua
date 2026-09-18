@@ -98,15 +98,10 @@ local function apply_diff_context()
         if state.old_layout == "side_by_side" then
           vim.wo[win].foldmethod = "diff"
         end
-        vim.wo[win].foldenable = condensed
-        if condensed then
-          vim.api.nvim_set_current_win(win)
-          vim.cmd("silent! normal! zM")
-        else
-          vim.wo[win].foldlevel = 99
-          vim.api.nvim_set_current_win(win)
-          vim.cmd("silent! normal! zR")
-        end
+        -- folding stays on either way, so zc / zo still work in a full diff
+        vim.wo[win].foldenable = true
+        vim.api.nvim_set_current_win(win)
+        vim.cmd(condensed and "silent! normal! zM" or "silent! normal! zR")
       end)
     end
   end
