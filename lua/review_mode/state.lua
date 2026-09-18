@@ -89,8 +89,29 @@ local defaults = {
       ["[c"] = "prev_comment",
       ["]f"] = "next_file",
       ["[f"] = "prev_file",
-      ["gt"] = "toggle_panel",
       ["<Esc>"] = "leave",
+    },
+  },
+  -- Keys for the whole session: installed by :ReviewMode, removed by
+  -- :ReviewModeStop, and kept while you step out of the mode. Everything here is
+  -- <leader>-prefixed, so it shadows nothing in stock Vim; the mode layer above
+  -- holds the keys that do (]c is Vim's own diff jump), which is why only those
+  -- go away when you step out. A value is an action name, a function, or
+  -- { action, mode = { "n", "v" } }. Set session.keys = {} to install none.
+  session = {
+    keys = {
+      ["<leader>rt"] = "toggle_panel",
+      ["<leader>rc"] = { "comment", mode = { "n", "v" } },
+      ["<leader>rr"] = "reply",
+      ["<leader>rR"] = "toggle_resolve",
+      ["<leader>rl"] = "list_viewed",
+      ["<leader>rv"] = "toggle_viewed",
+      ["<leader>rd"] = "old_toggle",
+      ["<leader>rD"] = "toggle_diff_layout",
+      ["<leader>rf"] = "toggle_diff_full_file",
+      ["<leader>ra"] = "actions",
+      ["<leader>rS"] = "open_pending",
+      ["<leader>rq"] = "stop",
     },
   },
   picker = {
@@ -204,6 +225,7 @@ local state = {
   head_log_path = nil,
   head_log_stamp = nil,
   saved_keys = {},
+  saved_session_keys = {},
   workspace_tab = nil,
   return_tab = nil,
   -- per-session override of config.mode.workspace ("tab" for checkout reviews)
@@ -251,6 +273,21 @@ function M.normalize_config(opts)
 
   if config.comments.compose ~= "panel" and config.comments.compose ~= "prompt" then
     config.comments.compose = defaults.comments.compose
+  end
+
+  config.session = config.session or {}
+  if type(config.session.keys) ~= "table" then
+    config.session.keys = {}
+  end
+
+  -- tbl_deep_extend merges an empty table as "nothing to add", so an explicit
+  -- keys = {} used to leave every default in place. Honor it as "none"; any
+  -- other table merges over the defaults, and a false value drops one key.
+  for _, layer in ipairs({ "mode", "session" }) do
+    local given = opts[layer] and opts[layer].keys
+    if type(given) == "table" and next(given) == nil then
+      config[layer].keys = {}
+    end
   end
 
   if type(config.hooks) ~= "table" then

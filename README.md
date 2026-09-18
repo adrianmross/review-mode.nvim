@@ -50,42 +50,16 @@ With `lazy.nvim`:
   },
   opts = {},
   keys = {
+    -- The one key you bind yourself: it starts the review, so it has to exist
+    -- before one does. Everything else is installed by the review; see
+    -- "Keys" below.
     { "<leader>rm", "<cmd>ReviewMode<cr>", desc = "Review mode (toggle)" },
-    { "<leader>rN", "<cmd>ReviewModeStop<cr>", desc = "Review mode stop (end session)" },
-    { "<leader>ra", "<cmd>ReviewModeActions<cr>", desc = "Review actions" },
-    { "<leader>rd", "<cmd>ReviewModeOldToggle<cr>", desc = "Review diff" },
-    { "<leader>rD", "<cmd>ReviewModeDiffLayoutToggle<cr>", desc = "Review diff layout" },
-    { "<leader>rf", "<cmd>ReviewModeDiffFullToggle<cr>", desc = "Review diff full file" },
-    { "<leader>rv", "<cmd>ReviewModeViewedToggle<cr>", desc = "Toggle file viewed" },
-    { "<leader>rl", "<cmd>ReviewModeViewedList<cr>", desc = "Review viewed files list" },
-    { "<leader>rV", "<cmd>ReviewModeViewedFeatureToggle<cr>", desc = "Review toggle viewed state" },
-    { "<leader>rC", "<cmd>ReviewModeCommentsToggle<cr>", desc = "Review toggle comments" },
-    { "<leader>rs", "<cmd>ReviewModeViewedSync<cr>", desc = "Review sync viewed" },
-    { "<leader>rS", "<cmd>ReviewModeViewedSyncToggle<cr>", desc = "Review toggle viewed sync" },
-    { "<leader>rc", "<cmd>ReviewModeThread<cr>", desc = "Review line comments" },
-    { "<leader>rt", "<cmd>ReviewModePanel<cr>", desc = "Review thread panel" },
-    { "<leader>rr", "<cmd>ReviewModeReply<cr>", desc = "Review reply" },
-    { "<leader>rR", "<cmd>ReviewModeResolveThread<cr>", desc = "Review resolve thread" },
-    {
-      "<leader>rp",
-      function()
-        require("review_mode").comment()
-      end,
-      mode = { "n", "v" },
-      desc = "Review comment",
-    },
-    -- ]h/[h, ]c/[c, ]f/[f and <Esc> come from the mode layer
-    -- while you are in the mode; see "The Mode" below.
   },
 }
 ```
 
-Navigation keys are installed by the mode itself and removed when you step out,
-so they only exist while you are reviewing:
-
-- `]h` / `[h` jump to the next/previous PR hunk
-- `]c` / `[c` jump to the next/previous PR comment
-- `]f` / `[f` jump to the next/previous changed file
+Once a review is running you get `<leader>r…` keys for its actions and `]h`
+`]c` `]f` to move through it — no `keys` block needed. See "Keys" under "The Mode".
 
 ## nvim-tree Integration
 
@@ -134,37 +108,69 @@ calls, no re-fetch — so you can drop out mid-review, stage and commit with you
 own keys and a normal gutter, and step straight back in with the review intact.
 `:ReviewModeStop` is what actually ends the session.
 
-While you are in the mode, these keys are live and nothing else is touched. Any
-mapping of yours that they shadow is saved on entry and restored on exit:
+### Keys
+
+Keys come in two layers, split by whether they shadow something:
+
+| layer | live | keys |
+|---|---|---|
+| **mode** | while you are in the mode | `]h` `]c` `]f`, `<Esc>` — these shadow real keys (`]c` is Vim's own diff-hunk jump), so they go when you step out |
+| **session** | from `:ReviewMode` to `:ReviewModeStop`, in or out of the mode | `<leader>r…` — these shadow nothing in stock Vim, so they stay while you step out |
+
+Either way, any mapping of yours a layer shadows is saved and put back when the
+layer goes.
+
+**Mode layer:**
 
 | key | action |
 |---|---|
 | `]h` / `[h` | next / previous PR hunk |
 | `]c` / `[c` | next / previous PR comment |
 | `]f` / `[f` | next / previous changed file |
-| `gt` | toggle the thread panel |
 | `<Esc>` | step out of the mode |
 
-`<Tab>`/`<S-Tab>` are deliberately not defaults: buffer-cycling plugins such as
-bufferline use them, and the layer would shadow them for the whole review.
-`:ReviewModeViewedNext` and `:ReviewModeViewedToggle` do the same jobs; bind
-them in `mode.keys` if you want keys for them.
+**Session layer:**
 
-Replace them with `mode.keys`, or set `mode.keys = {}` to install none:
+| key | action |
+|---|---|
+| `<leader>rt` | toggle the thread panel |
+| `<leader>rc` | comment on the line or visual range (drafts in the panel) |
+| `<leader>rr` | reply to the thread on this line |
+| `<leader>rR` | resolve / unresolve the thread on this line |
+| `<leader>rl` | changed files, with viewed state and comment counts |
+| `<leader>rv` | toggle this file viewed |
+| `<leader>rd` / `<leader>rD` / `<leader>rf` | base diff / diff layout / full-file diff |
+| `<leader>ra` | actions picker |
+| `<leader>rS` | pending review and submit |
+| `<leader>rq` | end the review |
+
+Neither layer takes `<Tab>`/`<S-Tab>` or `gt`: buffer-cycling plugins such as
+bufferline use the first two, `gt` is Vim's `:tabnext`, and a checkout review
+opens in its own tabpage. `:ReviewModeViewedNext` / `:ReviewModeViewedToggle`
+still do what `<Tab>`/`<S-Tab>` used to.
+
+Override either layer through `mode.keys` / `session.keys`. Your table merges
+over the defaults; `false` removes one key, and `{}` installs none:
 
 ```lua
 mode = {
   keys = {
     ["]h"] = "next_hunk",           -- any function name on the module
-    ["<Esc>"] = "leave",
     ["gR"] = function() ... end,    -- or a function
+  },
+},
+session = {
+  keys = {
+    ["<leader>rq"] = false,                          -- drop one
+    ["<leader>rp"] = "toggle_panel",                 -- add or move one
+    ["<leader>rc"] = { "comment", mode = { "n", "v" } },
   },
 },
 ```
 
 ## The Thread Panel
 
-`:ReviewModePanel` (or `gt` in the mode) opens a vertical split beside the file.
+`:ReviewModePanel` (or `<leader>rt` during a review) opens a vertical split beside the file.
 It follows the cursor: threads anchored to the current line, or every thread in
 the file when the cursor is not on one. Each thread shows who wrote it, their
 association with the repo, how long ago, the reply chain, emoji reactions, and

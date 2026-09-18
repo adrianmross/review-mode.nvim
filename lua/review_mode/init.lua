@@ -1004,13 +1004,70 @@ end
 local function apply_mode_keys()
   state.saved_keys = {}
   for lhs, action in pairs(state.config.mode.keys or {}) do
+    if action == false then
+      goto continue
+    end
     -- keep whatever the user had, so leaving the mode is invisible to them
     state.saved_keys[lhs] = vim.fn.maparg(lhs, "n", false, true)
     vim.keymap.set("n", lhs, mode_action(action), {
       desc = "review-mode " .. lhs,
       silent = true,
     })
+    ::continue::
   end
+end
+
+-- Readable names for which-key and :map, keyed by action
+local session_key_desc = {
+  toggle_panel = "Review: toggle thread panel",
+  comment = "Review: comment on line/range",
+  reply = "Review: reply to thread",
+  toggle_resolve = "Review: resolve/unresolve thread",
+  list_viewed = "Review: changed files",
+  toggle_viewed = "Review: toggle file viewed",
+  old_toggle = "Review: base diff",
+  toggle_diff_layout = "Review: diff layout",
+  toggle_diff_full_file = "Review: full-file diff",
+  actions = "Review: actions",
+  open_pending = "Review: pending review",
+  stop = "Review: stop",
+}
+
+local function session_key_spec(value)
+  if type(value) == "table" and value[1] ~= nil then
+    return value[1], value.mode or "n"
+  end
+  return value, "n"
+end
+
+local function apply_session_keys()
+  state.saved_session_keys = {}
+  for lhs, value in pairs(state.config.session.keys or {}) do
+    if value == false then
+      goto continue
+    end
+    local action, modes = session_key_spec(value)
+    modes = type(modes) == "table" and modes or { modes }
+    for _, mode in ipairs(modes) do
+      -- keep whatever the user had, so ending the review hands it back
+      table.insert(state.saved_session_keys, { mode = mode, lhs = lhs, saved = vim.fn.maparg(lhs, mode, false, true) })
+    end
+    vim.keymap.set(modes, lhs, mode_action(action), {
+      desc = type(action) == "string" and session_key_desc[action] or ("review-mode " .. lhs),
+      silent = true,
+    })
+    ::continue::
+  end
+end
+
+local function clear_session_keys()
+  for _, entry in ipairs(state.saved_session_keys or {}) do
+    pcall(vim.keymap.del, entry.mode, entry.lhs)
+    if entry.saved and not vim.tbl_isempty(entry.saved) then
+      pcall(vim.fn.mapset, entry.saved)
+    end
+  end
+  state.saved_session_keys = {}
 end
 
 local function clear_mode_keys()
@@ -1342,6 +1399,7 @@ function M.start(opts)
   state.active = true
   -- restarting while already in the mode must not capture our own mappings
   clear_mode_keys()
+  clear_session_keys()
   state.in_mode = state.config.mode.enabled
   state.metadata_loaded = false
   state.repo = opts.repo or util.env_value("GH_REVIEW_REPO")
@@ -1361,6 +1419,7 @@ function M.start(opts)
   if state.in_mode then
     apply_mode_keys()
   end
+  apply_session_keys()
   focus_workspace()
   if opts.root and state.workspace_tab == vim.api.nvim_get_current_tabpage() then
     -- tab-local, so the rest of the editor keeps its own cwd
@@ -1400,6 +1459,11 @@ function M.start(opts)
         return
       end
       state.active = false
+      -- start installed both layers before it knew it would fail; a session
+      -- that never started must not leave its keys behind
+      clear_mode_keys()
+      clear_session_keys()
+      state.in_mode = false
 
       -- No PR for this branch is an answer, not a failure, so review it
       -- locally. Only that answer: anything else (auth, network, a named PR
@@ -1583,6 +1647,7 @@ end
 
 function M.stop()
   M.leave()
+  clear_session_keys()
   close_workspace()
   state.workspace = nil
   core.next_generation()
@@ -1976,6 +2041,20 @@ end
 
 function M.resolve_thread(thread_id)
   set_thread_resolved(true, thread_id)
+end
+
+--- Resolve the thread on the current line, or unresolve it if it is resolved.
+function M.toggle_resolve()
+  local target, err = thread_comment_on_current_line()
+  if not target then
+    vim.notify("Review Mode thread: " .. tostring(err), vim.log.levels.WARN)
+    return
+  end
+  set_thread_resolved(not target.is_resolved, target.thread_id)
+end
+
+function M.open_pending()
+  require("review_mode.review_buffer").open()
 end
 
 function M.unresolve_thread(thread_id)
