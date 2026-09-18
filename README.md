@@ -327,6 +327,8 @@ api.request_stats()   --> { calls = <gh processes spawned>, not_modified = <304 
 
 -- suggestions (see Suggestions)
 api.suggestions("src/a.ts")          --> { { id, thread, path, start_line, end_line, lines }, ... }
+api.suggestions()                    --> every suggestion in the review, grouped by file, including
+                                     --  paths a local review carries comments on but did not change
 api.suggestions_at("src/a.ts", 42)   --> the ones anchored over a line
 api.preview_suggestion(entry)                        -- toggle virtual lines in the file
 api.preview_suggestion(entry, { layout = "split" })  -- toggle the side-by-side view

@@ -67,19 +67,33 @@ function M.entry(thread)
   }
 end
 
---- Every suggestion-bearing thread in a file (or in the whole PR), first first.
+--- Every suggestion-bearing thread in a file, first line first -- or, with no
+--- path, in the whole review, grouped by file.
+---
+--- The whole-review case asks for comment_paths() rather than letting
+--- api.threads walk the changed-file list: a local review can anchor a comment
+--- to a path the review did not change, and an agent asking what suggestions
+--- exist must not quietly miss those. comment_paths() already yields each path
+--- once, changed files first in review order, so the grouping is stable and
+--- nothing is listed twice.
 function M.list(path)
-  local out = {}
-  for _, thread in ipairs(review_api().threads({ path = path })) do
-    local entry = M.entry(thread)
-    if entry then
-      out[#out + 1] = entry
-    end
-  end
+  local api = review_api()
+  local paths = path and { path } or api.comment_paths()
 
-  table.sort(out, function(left, right)
-    return left.start_line < right.start_line
-  end)
+  local out = {}
+  for _, target in ipairs(paths) do
+    local found = {}
+    for _, thread in ipairs(api.threads({ path = target })) do
+      local entry = M.entry(thread)
+      if entry then
+        found[#found + 1] = entry
+      end
+    end
+    table.sort(found, function(left, right)
+      return left.start_line < right.start_line
+    end)
+    vim.list_extend(out, found)
+  end
   return out
 end
 

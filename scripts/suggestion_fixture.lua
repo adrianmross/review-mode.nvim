@@ -226,3 +226,70 @@ assert(#api.suggestion_trials() == 1, "expected one live trial before stopping")
 pr.stop()
 assert(#api.suggestion_trials() == 0, "stopping the session forgets its trials")
 assert(lines()[2] == "two improved", "stopping does not undo what was already written")
+
+-- Local reviews ------------------------------------------------------------------
+
+-- A local review keeps its comments on disk and can anchor one to a path the
+-- review did not change. api.suggestions(nil) -- "every suggestion in this
+-- review", the call an agent driving a headless review makes -- has to find
+-- those too, so it walks the paths that carry comments rather than the
+-- changed-file list.
+local function git(args)
+  return vim.trim(vim.fn.system(vim.list_extend({ "git" }, args)))
+end
+
+git({ "checkout", "-q", "-b", "suggestion-local", "feature" })
+vim.fn.writefile({ "new one", "new two", "new three" }, "new.txt")
+git({ "add", "new.txt" })
+git({ "commit", "-q", "-m", "local head" })
+
+pr.review_local({ "feature..suggestion-local" })
+wait_for(function()
+  return api.is_active() and api.is_changed_file("new.txt")
+end, "the local review did not load")
+assert(api.session().provider == "local", "expected a local review")
+assert(not api.is_changed_file("file.txt"), "file.txt has to be outside this review's changed files")
+
+local posted = 0
+local function post(path, line, body)
+  api.comment({ path = path, line = line, body = body }, function()
+    posted = posted + 1
+  end)
+end
+post("new.txt", 1, "```suggestion\nnew one local\n```")
+post("file.txt", 2, "```suggestion\ntwo local\n```")
+wait_for(function()
+  return posted == 2
+end, "the local comments were not stored")
+
+-- new.txt is a changed file that carries comments and file.txt is not, so this
+-- is also the case where the two sources could overlap.
+local seen = {}
+for _, entry in ipairs(api.comment_paths()) do
+  assert(not seen[entry], "comment_paths listed " .. entry .. " twice")
+  seen[entry] = true
+end
+assert(seen["new.txt"] and seen["file.txt"], "comment_paths should cover the changed and the unchanged path")
+
+local all = api.suggestions(nil)
+assert(#all == 2, "api.suggestions(nil) should find both local suggestions, got " .. #all)
+assert(all[1].path == "new.txt", "changed files come first, in review order, got " .. all[1].path)
+assert(all[2].path == "file.txt", "the unchanged path's suggestion is missing, got " .. all[2].path)
+local by_id = {}
+for _, entry in ipairs(all) do
+  assert(not by_id[entry.id], "api.suggestions(nil) listed a suggestion twice")
+  by_id[entry.id] = true
+end
+
+-- The rest of the machinery is provider-agnostic, so prove it on a local thread.
+local outside = api.suggestions("file.txt")
+assert(#outside == 1 and table.concat(outside[1].lines, "|") == "two local", "unexpected local suggestion body")
+vim.cmd("edit! file.txt")
+local local_buf = vim.api.nvim_get_current_buf()
+local local_trial = assert(api.accept_suggestion(outside[1], { buf = local_buf }), "a local suggestion should apply")
+assert(vim.api.nvim_buf_get_lines(local_buf, 1, 2, false)[1] == "two local", "the local suggestion was not applied")
+assert(api.revert_suggestion(local_trial.id), "a local trial should revert")
+assert(vim.api.nvim_buf_get_lines(local_buf, 1, 2, false)[1] == "two", "reverting a local trial restores the line")
+
+pr.stop()
+git({ "checkout", "-q", "feature" })
