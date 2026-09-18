@@ -1004,8 +1004,18 @@ assert(diff_buf and vim.bo[diff_buf].filetype == "diff", "unified diff buffer fi
 assert(has_line(condensed_lines, "diff --git base/file.txt head/file.txt"), "unified diff header was wrong")
 assert(has_line(condensed_lines, "-base"), "unified diff old line missing")
 assert(has_line(condensed_lines, "+base changed"), "unified diff new line missing")
-assert(not has_line(condensed_lines, "same5"), "condensed unified diff included distant common line")
+-- condensed is folded, not cut: the distant line is there, behind a closed fold
+local diff_win = vim.fn.bufwinid(diff_buf)
+local distant_row = line_number(condensed_lines, " same5")
+assert(distant_row, "the unified diff no longer holds the whole file")
+local function fold_closed(row)
+  return vim.api.nvim_win_call(diff_win, function()
+    return vim.fn.foldclosed(row) ~= -1
+  end)
+end
+assert(fold_closed(distant_row), "condensed unified diff did not fold the distant common line")
 local changed_row = line_number(condensed_lines, "+base changed")
+assert(not fold_closed(changed_row), "condensed unified diff folded a changed line")
 assert(changed_row, "unified diff changed line row missing")
 local changed_span_found = false
 for _, mark in ipairs(diff_marks(diff_buf)) do
@@ -1017,11 +1027,17 @@ end
 assert(changed_span_found, "unified diff partial changed span missing")
 
 pr.toggle_diff_full_file()
-wait_for(function()
-  local full_lines = buffer_lines_matching("pr%-diff://")
-  return full_lines and #full_lines > #condensed_lines and has_line(full_lines, "same5")
-end, "full unified diff did not include distant common line")
+assert(not fold_closed(distant_row), "full unified diff did not open the fold")
+assert(select(2, buffer_lines_matching("pr%-diff://")) == diff_buf, "the full-file toggle re-rendered the diff")
 assert(pr.config().diff.full_file, "diff full-file toggle did not update config")
+-- the folds are Vim's, so the stock fold keys drive them too
+vim.api.nvim_win_call(diff_win, function()
+  vim.cmd("normal! zM")
+end)
+assert(fold_closed(distant_row), "zM did not close the unified diff's fold")
+vim.api.nvim_win_call(diff_win, function()
+  vim.cmd("normal! zR")
+end)
 
 pr.old_toggle()
 wait_for(function()

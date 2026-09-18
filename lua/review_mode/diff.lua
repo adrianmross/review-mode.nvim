@@ -85,14 +85,19 @@ local function clear_old_diff_highlights()
   end
 end
 
-local function apply_side_by_side_context()
+-- Condensed and full file are fold states in both layouts, so zR / zM / zo / zc
+-- work on a review diff as on any other: side by side folds with Vim's own diff
+-- folds, unified with manual folds over the unchanged stretches.
+local function apply_diff_context()
   local condensed = not state.config.diff.full_file
   local previous_win = vim.api.nvim_get_current_win()
   for _, win in ipairs({ state.old_target_win, state.old_win }) do
     if win and vim.api.nvim_win_is_valid(win) then
       capture_fold_options(win)
       pcall(function()
-        vim.wo[win].foldmethod = "diff"
+        if state.old_layout == "side_by_side" then
+          vim.wo[win].foldmethod = "diff"
+        end
         vim.wo[win].foldenable = condensed
         if condensed then
           vim.api.nvim_set_current_win(win)
@@ -148,12 +153,45 @@ function M.close_old_view()
   restore_old_diffopt()
 end
 
-local function diff_context_lines()
-  if state.config.diff.full_file then
-    return 1000000
+-- Unchanged runs in a whole-file unified diff that sit more than `context` lines
+-- from any change, as { first, last } rows (1-based). Header lines never fold.
+local function unified_fold_ranges(lines, context)
+  local body = nil
+  local changed = {}
+  for index, line in ipairs(lines) do
+    if not body and line:find("^@@") then
+      body = index + 1
+    elseif body and (line:find("^[+-]") or line:find("^@@")) then
+      changed[#changed + 1] = index
+    end
   end
-  return state.config.diff.unified_context
+  if not body then
+    return {}
+  end
+
+  local keep = {}
+  for _, row in ipairs(changed) do
+    for near = row - context, row + context do
+      keep[near] = true
+    end
+  end
+
+  local ranges, first = {}, nil
+  for row = body, #lines + 1 do
+    if row <= #lines and not keep[row] then
+      first = first or row
+    elseif first then
+      -- a one-line fold hides nothing
+      if row - 1 > first then
+        ranges[#ranges + 1] = { first, row - 1 }
+      end
+      first = nil
+    end
+  end
+  return ranges
 end
+
+M._unified_fold_ranges = unified_fold_ranges
 
 local function write_temp_diff_file(tmpdir, side, path, lines)
   local rel = vim.fs.joinpath(side, path)
@@ -359,7 +397,7 @@ function M.open_scratch_side_by_side(opts)
     current_buf,
     vim.api.nvim_buf_get_lines(current_buf, 0, -1, false)
   )
-  apply_side_by_side_context()
+  apply_diff_context()
   vim.api.nvim_set_current_win(current_win)
 end
 
@@ -383,10 +421,9 @@ local function open_old_unified(path, current_win, current_buf, base_content, ge
   local head_rel = write_temp_diff_file(tmpdir, "head", path, vim.api.nvim_buf_get_lines(current_buf, 0, -1, false))
   local base_rel = base_missing and "/dev/null"
     or write_temp_diff_file(tmpdir, "base", path, util.split_blob_lines(base_content))
-  local context = diff_context_lines()
-
+  -- the whole file, always: condensing is folding, so zR shows it all
   vim.system(
-    { "git", "diff", "--no-index", "--no-color", "--unified=" .. tostring(context), "--", base_rel, head_rel },
+    { "git", "diff", "--no-index", "--no-color", "--unified=1000000", "--", base_rel, head_rel },
     { text = true, cwd = tmpdir },
     function(result)
       vim.schedule(function()
@@ -419,7 +456,8 @@ local function open_old_unified(path, current_win, current_buf, base_content, ge
         state.old_path = path
         vim.api.nvim_win_set_buf(current_win, state.old_buf)
         vim.api.nvim_buf_set_name(state.old_buf, "pr-diff://" .. core.base_ref() .. "/" .. path)
-        vim.api.nvim_buf_set_lines(state.old_buf, 0, -1, false, unified_diff_lines(result.stdout or "", path))
+        local lines = unified_diff_lines(result.stdout or "", path)
+        vim.api.nvim_buf_set_lines(state.old_buf, 0, -1, false, lines)
         apply_partial_diff_highlights(state.old_buf)
         vim.bo[state.old_buf].buftype = "nofile"
         vim.bo[state.old_buf].bufhidden = "wipe"
@@ -427,6 +465,14 @@ local function open_old_unified(path, current_win, current_buf, base_content, ge
         vim.bo[state.old_buf].readonly = true
         vim.bo[state.old_buf].filetype = "diff"
         vim.api.nvim_set_current_win(current_win)
+
+        capture_fold_options(current_win)
+        vim.wo[current_win].foldmethod = "manual"
+        vim.cmd("silent! normal! zE")
+        for _, range in ipairs(unified_fold_ranges(lines, state.config.diff.unified_context)) do
+          vim.cmd(string.format("silent! %d,%dfold", range[1], range[2]))
+        end
+        apply_diff_context()
       end)
     end
   )
@@ -635,11 +681,13 @@ function M.toggle_diff_layout()
   util.redraw_status()
 end
 
+--- Open or close every unchanged fold (zR / zM), and open the next diff the
+--- same way.
 function M.toggle_diff_full_file()
   state.config.diff.full_file = not state.config.diff.full_file
   local label = "Review Mode diff context: " .. (state.config.diff.full_file and "full file" or "condensed")
-  if state.old_layout == "side_by_side" and M.old_view_is_open() then
-    apply_side_by_side_context()
+  if M.old_view_is_open() then
+    apply_diff_context()
     vim.notify(label)
     util.redraw_status()
     return
