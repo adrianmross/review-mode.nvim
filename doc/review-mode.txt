@@ -12,6 +12,7 @@ CONTENTS                                                  *review-mode-contents*
 6. Picker Providers                              |review-mode-pickers|
 7. Setup                                         |review-mode-setup|
 8. GitLab                                        |review-mode-gitlab|
+9. Local Reviews                                 |review-mode-local|
 
 ==============================================================================
 OVERVIEW                                                  *review-mode-overview*
@@ -568,5 +569,54 @@ comment edit and delete, pending comments and review submission,
 :ReviewModeCheckout, :ReviewModeStatus and :ReviewModeChecks. Review diagnostics
 and :ReviewModeQuickfix are forge-independent and work on GitLab too. :ReviewModeSuggest posts GitHub suggestion syntax, which
 GitLab does not read the same way.
+
+==============================================================================
+LOCAL REVIEWS                                                *review-mode-local*
+
+:ReviewModeLocal [<base>] [<head>] reviews two refs in this checkout, with no
+PR, no remote and no network. <base> defaults to the merge base with the repo's
+default branch; <head> defaults to the working tree, so uncommitted edits are
+part of the review. One argument may be a range ("main..feature"). The base is
+always resolved to the merge base with the head, so a local review compares what
+a PR would.
+
+provider = "local" selects it explicitly, and a repo with no origin remote
+selects it on its own. The changed-file list, hunk navigation, the diff views,
+viewed state, the panel, diagnostics and the quickfix list are unchanged.
+:ReviewModeChecks, :ReviewModeStatus, :ReviewModeBrowser and :ReviewModeCopyUrl
+report that they are not supported in a local review instead of calling gh.
+
+Comments are kept on disk, at:
+
+    <git-dir>/review-mode/<branch-or-head>.json
+
+<git-dir> is `git rev-parse --git-dir`: .git in a normal checkout and
+.git/worktrees/<name> in a linked worktree, so parallel worktrees never share
+review comments. It is not --git-common-dir, which is shared, and git never
+tracks any of it. The file is indented with a stable key order so a human or an
+agent can read it. Comments load into the same normalized shape GitHub and
+GitLab comments do.
+
+:ReviewModeLocalComments opens a review-mode://local buffer with every local
+comment grouped by file: <CR> jumps, r replies, R resolves, e edits, dd deletes.
+
+For agents, the whole loop works headless through |review_mode.api|:
+
+    api.review_local(args)                    start the session
+    api.local_comment(opts, cb)               create a thread; cb(true, thread)
+    api.threads(opts)                         read them back
+    api.reply / api.resolve                   add to, or resolve, a thread
+    api.edit_comment / api.delete_comment     change or remove a comment
+    api.local_store()                         the JSON file's path
+
+For example: >
+    nvim --headless -u NONE -c 'lua require("review_mode").setup()' \
+      -c 'lua require("review_mode.api").review_local({ "main" })' \
+      -c 'lua require("review_mode.api").local_comment({
+            path = "init.lua", line = 10, body = "why?", author = "agent" })' \
+      -c qa
+<
+local_comment's author defaults to git config user.name and falls back to
+"agent"; it is never a GitHub login.
 
  vim:tw=78:ts=8:noet:ft=help:norl:

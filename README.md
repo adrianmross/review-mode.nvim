@@ -553,6 +553,8 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeCheckoutClean [pr]` removes clean review worktrees, after a confirmation.
 - `:ReviewModeQuickfix [unresolved|all]` fills the quickfix list with review threads and opens it
 - `:ReviewModeDiagnosticsToggle` toggles review threads as diagnostics
+- `:ReviewModeLocal [<base>] [<head>]` reviews two local refs, with no PR and no network
+- `:ReviewModeLocalComments` opens the local comments buffer
 
 ## Diagnostics and Quickfix
 
@@ -639,6 +641,115 @@ work on GitLab too. Local
 viewed state, the diff views and navigation are forge-independent and work as
 usual. A comment on a range anchors to its last line, and `:ReviewModeSuggest`
 posts GitHub's suggestion syntax, which GitLab does not read the same way.
+
+## Local Reviews
+
+`:ReviewModeLocal` reviews two refs in this checkout. No PR, no remote, no
+network, no `gh`:
+
+```vim
+:ReviewModeLocal                  " the merge base with the default branch, vs the working tree
+:ReviewModeLocal develop          " vs the working tree
+:ReviewModeLocal main feature     " two refs
+:ReviewModeLocal main..feature    " the same, as a range
+```
+
+The base is always resolved to the merge base with the head, so a local review
+compares what a PR would. With no `<head>` the right-hand side is the **working
+tree**, so uncommitted edits are part of the review. Naming a `<head>` diffs that
+ref instead; the buffers you edit are still the working tree, the same as for a
+PR whose head is not checked out.
+
+Everything else is what it always was: the changed-file list, hunk navigation,
+the side-by-side and unified diffs, viewed state, the thread panel, diagnostics
+and the quickfix list. `provider = "local"` picks it explicitly, and a repo with
+no `origin` remote picks it on its own. The PR-only actions (`:ReviewModeChecks`,
+`:ReviewModeStatus`, `:ReviewModeBrowser`, `:ReviewModeCopyUrl`) say they are not
+supported in a local review rather than asking `gh` about your branch.
+
+### Comments on disk
+
+A local review has no forge to keep comments on, so it keeps them in a file:
+
+```text
+<git-dir>/review-mode/<branch-or-head>.json
+```
+
+`<git-dir>` is what `git rev-parse --git-dir` answers: `.git` in a normal
+checkout, and `.git/worktrees/<name>` in a linked worktree. That is deliberate —
+it is the per-worktree git dir, not the shared `--git-common-dir` — so parallel
+worktrees of the same repo never see each other's review comments, and the
+filename keys them by branch on top of that. Nothing is ever tracked by git.
+
+The file is indented, with a stable key order, because it is meant to be read:
+
+```json
+{
+  "next_id": 3,
+  "threads": [
+    {
+      "comments": [
+        {
+          "author": "agent",
+          "body": "why two?",
+          "created_at": "2026-09-17T09:41:02Z",
+          "id": "c1"
+        }
+      ],
+      "id": "t1",
+      "line": 2,
+      "path": "file.txt",
+      "resolved": false,
+      "start_line": 2
+    }
+  ],
+  "version": 1
+}
+```
+
+Comments load into the same normalized shape GitHub and GitLab comments load
+into, so signs, virtual text, the panel, `api.threads()`, diagnostics and
+quickfix work on them unchanged. `:ReviewModeLocalComments` opens a
+`review-mode://local` buffer listing every one of them, grouped by file with
+counts: `<CR>` jumps, `r` replies, `R` resolves, `e` edits, `dd` deletes.
+
+### For agents
+
+The whole loop is reachable from a headless Neovim, which is the point of the
+on-disk store: an agent can leave review comments a human reads in the editor,
+and read the ones a human left.
+
+```bash
+# leave a comment
+nvim --headless -u NONE -c 'lua require("review_mode").setup()' \
+  -c 'lua require("review_mode.api").review_local({ "main" })' \
+  -c 'lua require("review_mode.api").local_comment({
+        path = "lua/review_mode/api.lua", start_line = 40, end_line = 44,
+        body = "This reads the state table directly.", author = "agent" })' \
+  -c qa
+
+# read what is there
+nvim --headless -u NONE -c 'lua require("review_mode").setup()' \
+  -c 'lua local api = require("review_mode.api")
+      api.review_local({ "main" })
+      print(vim.inspect(api.threads({})))' \
+  -c qa
+```
+
+| Call | Does |
+| --- | --- |
+| `api.review_local(args)` | starts the session; `args` is `{}`, `{ base }`, `{ base, head }` or `{ "base..head" }` |
+| `api.local_comment(opts, cb)` | creates a thread: `path`, `start_line`, `end_line` (or `line`), `body`, `author`; `cb(true, thread)` |
+| `api.threads(opts)` | reads them back, the same call the panel uses |
+| `api.reply({ thread_id, body }, cb)` | adds to a thread |
+| `api.resolve(thread_id, resolved, cb)` | resolves or unresolves one |
+| `api.edit_comment({ comment_id, body }, cb)` | replaces a body |
+| `api.delete_comment(comment_id, cb)` | removes a comment, and its thread when it was the last one |
+| `api.local_store()` | the JSON file's path, for reading or writing it directly |
+
+Ids are the `t<n>` and `c<n>` the store shows. `author` defaults to the repo's
+`git config user.name`, and falls back to `"agent"` when git has no name set —
+it is never a GitHub login, because there is no GitHub here.
 
 ## Picker Providers
 

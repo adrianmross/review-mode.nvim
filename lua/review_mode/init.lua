@@ -61,6 +61,10 @@ local function pr_url_async(callback)
     callback(url, not url and "merge request metadata is still loading" or nil)
     return
   end
+  if state.provider == "local" then
+    callback(nil, "a local review has no PR to open")
+    return
+  end
   local args = { "pr", "view" }
   local pr = active_pr_arg()
   if pr then
@@ -396,7 +400,7 @@ local function build_changed_maps_async(generation, callback)
   core.reset_changed_data()
   state.maps_loading = true
   system_async(
-    { "git", "diff", "--name-status", "--find-renames", "--no-ext-diff", "--no-color", core.base_ref() .. "...HEAD" },
+    { "git", "diff", "--name-status", "--find-renames", "--no-ext-diff", "--no-color", core.diff_range() },
     { cwd = state.root },
     function(output, err)
       if not core.is_current(generation) then
@@ -412,7 +416,7 @@ local function build_changed_maps_async(generation, callback)
 
       parse_changed_files(output)
       system_async(
-        { "git", "diff", "--numstat", "--find-renames", "--no-ext-diff", "--no-color", core.base_ref() .. "...HEAD" },
+        { "git", "diff", "--numstat", "--find-renames", "--no-ext-diff", "--no-color", core.diff_range() },
         { cwd = state.root },
         function(numstat)
           if not core.is_current(generation) then
@@ -539,7 +543,7 @@ local function load_hunks_for_paths(paths, on_done)
     "--diff-filter=ACMRT",
     "--no-ext-diff",
     "--no-color",
-    core.base_ref() .. "...HEAD",
+    core.diff_range(),
     "--",
   }
   if needs_rename_detection then
@@ -759,7 +763,7 @@ local function start_background_hunk_scan()
       "--diff-filter=ACMRT",
       "--no-ext-diff",
       "--no-color",
-      core.base_ref() .. "...HEAD",
+      core.diff_range(),
     }, { cwd = state.root }, function(patch)
       if not core.is_current(generation) then
         state.background_hunk_scan_loading = false
@@ -1213,6 +1217,8 @@ end
 --- opts (all optional; no opts keeps the env/`gh` discovery):
 ---   root, repo, pr, base, head  the session's context, instead of env/`gh`
 ---   workspace                   "tab" | "inplace", overriding mode.workspace
+---   provider                    "github" | "gitlab" | "local", instead of auto
+---   local_args                  `:ReviewModeLocal` arguments, for provider "local"
 function M.start(opts)
   opts = opts or {}
   local root, root_err = opts.root, nil
@@ -1223,6 +1229,20 @@ function M.start(opts)
     vim.notify("Review Mode: " .. tostring(root_err or "not in a git repo"), vim.log.levels.ERROR)
     return
   end
+
+  -- Local reviews ---------------------------------------------------------------
+  -- A local review has no forge to ask, so its refs and its comment store are
+  -- worked out here, up front, and the rest of start-up runs unchanged.
+  local provider = opts.provider or require("review_mode.providers").select(root)
+  if provider == "local" and not opts.local_store then
+    local resolved, resolve_err = require("review_mode.providers.local").resolve(opts.local_args or {}, root)
+    if not resolved then
+      vim.notify("Review Mode: " .. tostring(resolve_err), vim.log.levels.ERROR)
+      return
+    end
+    opts = vim.tbl_extend("force", resolved, { workspace = opts.workspace })
+  end
+  -- End local reviews -----------------------------------------------------------
 
   state.root = root
   state.active = true
@@ -1235,7 +1255,9 @@ function M.start(opts)
   state.base = opts.base or util.env_value("GH_REVIEW_BASE")
   state.head = opts.head or util.env_value("GH_REVIEW_HEAD")
   state.workspace = opts.workspace
-  state.provider = require("review_mode.providers").select(root)
+  state.head_ref = opts.head_ref
+  state.local_store = opts.local_store
+  state.provider = provider
   if state.provider == "gitlab" then
     require("review_mode.providers.gitlab").apply_env()
   end
@@ -1261,6 +1283,12 @@ function M.start(opts)
     load_review_async(generation, { open_initial = true })
   else
     vim.notify("Review Mode: loading PR metadata")
+  end
+
+  -- Local reviews: the refs are already resolved and there is nothing to ask.
+  if state.provider == "local" then
+    state.metadata_loaded = true
+    return
   end
 
   load_metadata_async(generation, function(result, err)
@@ -1438,6 +1466,8 @@ function M.stop()
   state.pr = nil
   state.base = nil
   state.head = nil
+  state.head_ref = nil
+  state.local_store = nil
   state.head_log_path = nil
   state.head_log_stamp = nil
   core.reset_review_data()
@@ -1751,6 +1781,9 @@ local function set_thread_resolved(resolved, thread_id, callback)
   if state.provider == "gitlab" then
     return require("review_mode.providers.gitlab").set_resolved(thread_id, resolved, callback)
   end
+  if state.provider == "local" then
+    return require("review_mode.providers.local").set_resolved(thread_id, resolved, callback)
+  end
 
   -- REST-loaded and cache-derived threads have a synthetic id; GitHub only
   -- resolves threads it issued an id for.
@@ -1864,6 +1897,12 @@ local function submit_review_comment(path, start_line, end_line, body, callback)
   if state.provider == "gitlab" then
     return require("review_mode.providers.gitlab").submit_comment(path, start_line, end_line, body, callback)
   end
+  if state.provider == "local" then
+    return require("review_mode.providers.local").add_comment(
+      { path = path, start_line = start_line, end_line = end_line, body = body },
+      callback
+    )
+  end
 
   if state.head then
     post_review_comment(path, start_line, end_line, body, state.head, callback)
@@ -1906,6 +1945,9 @@ end
 function M.submit_reply(opts, callback)
   if state.provider == "gitlab" then
     return require("review_mode.providers.gitlab").submit_reply(opts, callback)
+  end
+  if state.provider == "local" then
+    return require("review_mode.providers.local").submit_reply(opts, callback)
   end
   opts = opts or {}
   local body = util.trim(opts.body or "")
@@ -2033,7 +2075,7 @@ function M.copy_url()
 end
 
 function M.checks()
-  if state.provider == "gitlab" then
+  if state.provider == "gitlab" or state.provider == "local" then
     return require("review_mode.providers").unsupported("PR checks")
   end
   local args = { "gh", "pr", "checks" }
@@ -2056,7 +2098,7 @@ function M.checks()
 end
 
 function M.status()
-  if state.provider == "gitlab" then
+  if state.provider == "gitlab" or state.provider == "local" then
     return require("review_mode.providers").unsupported("PR status")
   end
   local args = { "pr", "view" }
@@ -2169,9 +2211,34 @@ function M.action_items()
         end)
       end,
     },
+    -- Local reviews
+    {
+      category = "Local",
+      label = "Review local changes",
+      run = function()
+        M.review_local({})
+      end,
+    },
+    {
+      category = "Local",
+      label = "Local comments buffer",
+      run = function()
+        require("review_mode.local_buffer").open()
+      end,
+    },
     { category = "PR", label = "Summary", run = M.summary },
   }
 end
+
+-- Local reviews -------------------------------------------------------------------
+
+--- Review two local refs, with no PR and no network. `args` is what
+--- :ReviewModeLocal was given: {}, { base }, { base, head } or { "base..head" }.
+function M.review_local(args)
+  return M.start({ provider = "local", local_args = args or {} })
+end
+
+-- End local reviews -----------------------------------------------------------------
 
 -- Checkout ----------------------------------------------------------------------
 
@@ -2228,6 +2295,12 @@ function M.setup(opts)
     vim.api.nvim_create_user_command("ReviewModeCopyUrl", M.copy_url, { desc = "Copy the current PR URL" })
     vim.api.nvim_create_user_command("ReviewModeChecks", M.checks, { desc = "Show current PR checks" })
     vim.api.nvim_create_user_command("ReviewModeStatus", M.status, { desc = "Show current PR status" })
+    vim.api.nvim_create_user_command("ReviewModeLocal", function(command)
+      M.review_local(command.fargs)
+    end, { nargs = "*", desc = "Review local refs: :ReviewModeLocal [<base>] [<head>]" })
+    vim.api.nvim_create_user_command("ReviewModeLocalComments", function()
+      require("review_mode.local_buffer").open()
+    end, { desc = "Open the local comments buffer" })
     vim.api.nvim_create_user_command("ReviewModeStop", M.stop, { desc = "Stop normal Review Mode" })
     vim.api.nvim_create_user_command("ReviewModeRefresh", M.refresh, { desc = "Refresh normal Review Mode" })
     vim.api.nvim_create_user_command("ReviewModeNextChange", M.next_change, { desc = "Alias for ReviewModeNextHunk" })

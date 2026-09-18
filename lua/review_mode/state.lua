@@ -12,7 +12,8 @@ local default_comment_sign_text = ""
 local defaults = {
   auto_open_first_change = true,
   follow_head = true,
-  -- "auto" | "github" | "gitlab"; auto reads the origin remote's host
+  -- "auto" | "github" | "gitlab" | "local"; auto reads the origin remote's
+  -- host, and falls back to "local" when there is no remote to read
   provider = "auto",
   -- self-hosted GitLab hosts that auto should treat as GitLab
   gitlab_hosts = {},
@@ -176,6 +177,13 @@ local state = {
   return_tab = nil,
   -- per-session override of config.mode.workspace ("tab" for checkout reviews)
   workspace = nil,
+  -- Local reviews ------------------------------------------------------------
+  -- the right-hand side of every review diff: nil for a PR (always HEAD), "" for
+  -- a local review of the working tree, or a ref to compare against instead
+  head_ref = nil,
+  -- <git-dir>/review-mode/<key>.json while a local review is active
+  local_store = nil,
+  -- End local reviews ---------------------------------------------------------
 }
 
 M.defaults = defaults
@@ -221,7 +229,12 @@ function M.normalize_config(opts)
   end
   config.picker = picker
 
-  if config.provider ~= "auto" and config.provider ~= "github" and config.provider ~= "gitlab" then
+  if
+    config.provider ~= "auto"
+    and config.provider ~= "github"
+    and config.provider ~= "gitlab"
+    and config.provider ~= "local"
+  then
     config.provider = defaults.provider
   end
   if type(config.gitlab_hosts) ~= "table" then
@@ -238,6 +251,27 @@ function M.base_ref()
   end
   return "origin/" .. base
 end
+
+-- Local reviews -----------------------------------------------------------------
+
+--- The range every review `git diff` runs over.
+---
+--- A PR review always compares its base against HEAD, and passing nothing new
+--- keeps exactly that. A local review may name its own head instead, and an
+--- empty head_ref means the working tree, so uncommitted edits are part of the
+--- review.
+function M.diff_range()
+  local head = state.head_ref
+  if head == nil then
+    return M.base_ref() .. "...HEAD"
+  end
+  if head == "" then
+    return M.base_ref()
+  end
+  return M.base_ref() .. ".." .. head
+end
+
+-- End local reviews ---------------------------------------------------------------
 
 function M.cache_key()
   if not state.repo or not state.pr then

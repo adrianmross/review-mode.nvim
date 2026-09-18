@@ -292,7 +292,7 @@ function M.file_diff(path, callback)
     "--find-renames",
     "--no-ext-diff",
     "--no-color",
-    M.base_ref() .. "...HEAD",
+    core.diff_range(),
     "--",
     path,
   }, { cwd = state.root, raw = true }, callback)
@@ -353,12 +353,18 @@ end
 --- Replace the body of your own comment. opts: comment_id, body.
 --- Emits "comment_edited" and reloads comments. callback(ok, err).
 function M.edit_comment(opts, callback)
+  if state.provider == "local" then
+    return require("review_mode.providers.local").edit_comment(opts, callback)
+  end
   return github.edit_comment(opts, callback)
 end
 
 --- Delete your own comment. Emits "comment_deleted" and reloads comments.
 --- callback(ok, err).
 function M.delete_comment(comment_id, callback)
+  if state.provider == "local" then
+    return require("review_mode.providers.local").delete_comment(comment_id, callback)
+  end
   return github.delete_comment(comment_id, callback)
 end
 
@@ -537,6 +543,63 @@ end
 function M.set_quickfix(opts)
   return require("review_mode.diagnostics").set_quickfix(opts)
 end
+
+-- Local reviews ---------------------------------------------------------------
+--
+-- A local review compares two refs in this checkout, with no PR and no network,
+-- and keeps its comments in a JSON file under the repo's git dir. Everything
+-- else on this page -- threads, replies, resolve, edit, delete, signs, the
+-- panel, diagnostics, quickfix -- works against it unchanged, which is what
+-- makes the whole loop reachable from a headless Neovim:
+--
+--   nvim --headless -c 'lua require("review_mode.api").review_local({ "main" })' \
+--        -c 'lua require("review_mode.api").local_comment({ path = "init.lua",
+--              line = 10, body = "why?", author = "agent" })' -c qa
+
+--- Start a local review. `args` is {}, { base }, { base, head } or
+--- { "base..head" }; base defaults to the merge base with the repo's default
+--- branch, and head defaults to the working tree.
+function M.review_local(args)
+  return plugin().review_local(args)
+end
+
+--- Create a local comment thread on disk. opts: path, start_line, end_line (or
+--- line), body, author (defaults to git user.name, else "agent").
+--- callback(true, thread) on success, callback(false, err) otherwise.
+---
+--- Only for local reviews; a PR comment goes through M.comment.
+function M.local_comment(opts, callback)
+  return require("review_mode.providers.local").add_comment(opts, callback)
+end
+
+--- The file a local review keeps its comments in, or nil when the session is
+--- not a local one. It is stable enough to read and write from outside Neovim.
+function M.local_store()
+  return state.local_store
+end
+
+--- Every path that carries comments in this session: the review's changed files
+--- first, in review order, then any other path a comment is anchored to.
+function M.comment_paths()
+  local seen, paths = {}, {}
+  for _, path in ipairs(state.file_order) do
+    if state.comments[path] and #state.comments[path] > 0 then
+      seen[path] = true
+      paths[#paths + 1] = path
+    end
+  end
+
+  local extra = {}
+  for path, list in pairs(state.comments) do
+    if not seen[path] and #list > 0 then
+      extra[#extra + 1] = path
+    end
+  end
+  table.sort(extra)
+  return vim.list_extend(paths, extra)
+end
+
+-- End local reviews -------------------------------------------------------------
 
 -- Escape hatches --------------------------------------------------------------
 
