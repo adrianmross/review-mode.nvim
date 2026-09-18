@@ -60,6 +60,12 @@ and the PR head SHA is re-fetched so new comments anchor to a commit GitHub
 knows. Viewed state and loaded comments are kept. Set follow_head = false to
 require |:ReviewModeRefresh| instead.
 
+On a branch with no PR, :ReviewMode reviews it locally instead (see
+|:ReviewModeLocal|) and says so; the statusline shows "local repo@ref". It falls
+back only when gh answers that there is no PR, never on an auth, network or
+rate-limit failure, and never for a PR named with GH_REVIEW_PR. Set
+no_pr = "error" to report the missing PR instead.
+
 With mode.workspace = "tab" the review keeps its own tabpage: entering focuses
 it, leaving returns to the previous tabpage, and the layout survives in
 between. Ending the session closes it. The default "inplace" leaves your
@@ -448,6 +454,7 @@ SETUP                                                        *review-mode-setup*
   require("review_mode").setup({
     auto_open_first_change = true,
     follow_head = true,
+    no_pr = "local",
     provider = "auto", -- "auto" | "github" | "gitlab"
     gitlab_hosts = {}, -- self-hosted GitLab hosts for provider = "auto"
     comments = {

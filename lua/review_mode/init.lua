@@ -1400,6 +1400,27 @@ function M.start(opts)
         return
       end
       state.active = false
+
+      -- No PR for this branch is an answer, not a failure, so review it
+      -- locally. Only that answer: anything else (auth, network, a named PR
+      -- that does not exist) still reports, since falling back then would
+      -- review a branch that has a PR without its comments.
+      local providers = require("review_mode.providers")
+      if
+        state.config.no_pr == "local"
+        and state.provider ~= "gitlab"
+        and not util.env_value("GH_REVIEW_PR")
+        and providers.is_no_pr(err)
+      then
+        local branch = util.system({ "git", "branch", "--show-current" }, { cwd = state.root }) or "this branch"
+        vim.notify(string.format('Review Mode: no PR for "%s", reviewing it locally', branch))
+        -- deferred: restarting from inside start's own callback re-enters it
+        vim.schedule(function()
+          M.review_local({})
+        end)
+        return
+      end
+
       vim.notify("Review Mode: " .. tostring(err or "could not load PR metadata"), vim.log.levels.ERROR)
       return
     end
@@ -1497,6 +1518,18 @@ function M.statusline()
     if state.viewed[path] then
       viewed = viewed + 1
     end
+  end
+
+  -- a local review's pr is a ref key, so "repo#feat-x" would read as a PR
+  if state.provider == "local" then
+    return string.format(
+      "%s local %s@%s %d/%d",
+      state.in_mode and "REVIEW" or "review",
+      state.repo or "?",
+      state.pr or "?",
+      viewed,
+      #state.file_order
+    )
   end
 
   return string.format(

@@ -46,7 +46,15 @@ set -euo pipefail
 case "$1 $2" in
   "pr view")
     args="$*"
-    if [[ "$args" == *"--json url"* && "$args" == *"-q .url"* ]]; then
+    # local-fallback fixture: the two ways `gh pr view` exits 1. Real gh writes
+    # both to stderr, and only the wording tells them apart.
+    if [[ "${REVIEW_MODE_FIXTURE:-}" == "no_pr" ]]; then
+      echo 'no pull requests found for branch "feature"' >&2
+      exit 1
+    elif [[ "${REVIEW_MODE_FIXTURE:-}" == "gh_auth_fail" ]]; then
+      echo 'HTTP 401: Bad credentials (https://api.github.com/graphql)' >&2
+      exit 1
+    elif [[ "$args" == *"--json url"* && "$args" == *"-q .url"* ]]; then
       printf 'https://github.com/owner/repo/pull/123\n'
     elif [[ "$args" == *"title,state,isDraft,mergeable,reviewDecision,headRefName,baseRefName,url"* ]]; then
       printf '{"title":"Improve review tools","state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","reviewDecision":"REVIEW_REQUIRED","headRefName":"feature","baseRefName":"main","url":"https://github.com/owner/repo/pull/123"}\n'
@@ -428,3 +436,13 @@ REVIEW_MODE_FIXTURE=suggestions \
 nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/suggestion_fixture.lua"
+
+# :ReviewMode on a branch with no PR reviews it locally; any other failure
+# still errors. No GH_REVIEW_* here: the fallback is about discovery.
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/fallback-cache" \
+XDG_STATE_HOME="$tmp/fallback-state" \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+nvim --headless -u NONE -i NONE \
+  -c "set noswapfile" \
+  -l "$repo_root/scripts/local_fallback_fixture.lua"
