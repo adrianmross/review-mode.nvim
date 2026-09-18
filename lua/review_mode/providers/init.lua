@@ -60,6 +60,16 @@ function M.select(root)
   return M.detect(url, state.config.gitlab_hosts)
 end
 
+--- True when a forge answered that the branch has no PR, as opposed to failing.
+---
+--- Both come back from `gh pr view` as exit 1, so the wording is the only
+--- signal. That is the point of matching it narrowly: a network error, an
+--- expired token or a rate limit must stay an error, because falling back on
+--- one would quietly review a branch that does have a PR, minus its comments.
+function M.is_no_pr(err)
+  return type(err) == "string" and err:find("no pull requests found", 1, true) ~= nil
+end
+
 function M.is_local()
   return state.provider == "local"
 end

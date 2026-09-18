@@ -12,6 +12,9 @@ local default_comment_sign_text = ""
 local defaults = {
   auto_open_first_change = true,
   follow_head = true,
+  -- What :ReviewMode does on a branch with no PR: "local" reviews it against
+  -- the default branch's merge base, "error" reports that there is no PR.
+  no_pr = "local",
   -- "auto" | "github" | "gitlab" | "local"; auto reads the origin remote's
   -- host, and falls back to "local" when there is no remote to read
   provider = "auto",
@@ -240,6 +243,10 @@ function M.normalize_config(opts)
   end
   panel.width = math.max(30, tonumber(panel.width) or defaults.panel.width)
   config.panel = panel
+
+  if config.no_pr ~= "local" and config.no_pr ~= "error" then
+    config.no_pr = defaults.no_pr
+  end
 
   if type(config.hooks) ~= "table" then
     config.hooks = {}

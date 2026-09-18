@@ -742,6 +742,24 @@ no `origin` remote picks it on its own. The PR-only actions (`:ReviewModeChecks`
 `:ReviewModeStatus`, `:ReviewModeBrowser`, `:ReviewModeCopyUrl`) say they are not
 supported in a local review rather than asking `gh` about your branch.
 
+### `:ReviewMode` on a branch with no PR
+
+`:ReviewMode` falls back to a local review when the branch has no PR yet — the
+point where you want to check your own work, or an agent's, before opening one.
+It says so (`no PR for "feat/x", reviewing it locally`), and the statusline reads
+`REVIEW local repo@ref` instead of `REVIEW repo#123`, so a local review is never
+mistaken for a PR review. Open the PR later and `:ReviewMode` picks it up; the
+local comments stay in `.git/`, keyed by branch.
+
+It falls back **only** when `gh` answers that there is no PR. Any other failure
+— an expired token, the network, a rate limit — is still reported as an error,
+because falling back then would review a branch that may well have a PR, without
+its comments, and look like it worked. A PR named with `GH_REVIEW_PR` is never a
+fallback candidate either. Set `no_pr = "error"` to be told instead.
+
+`gh` exits `1` for both "no PR" and a real failure, so this keys on its wording;
+the test suite pins that string so a `gh` change fails loudly.
+
 ### Comments on disk
 
 A local review has no forge to keep comments on, so it keeps them in a file:
@@ -846,6 +864,7 @@ Install snacks.nvim or Telescope for the preview and toggle keymaps.
 require("review_mode").setup({
   auto_open_first_change = true,
   follow_head = true,
+  no_pr = "local", -- "local" | "error": what :ReviewMode does with no PR
   provider = "auto", -- "auto" | "github" | "gitlab"
   gitlab_hosts = {}, -- self-hosted GitLab hosts for provider = "auto"
   comments = {
