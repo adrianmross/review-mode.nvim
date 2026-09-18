@@ -215,7 +215,7 @@ be edited before it goes out. Nothing is sent until you confirm:
 |---|---|
 | `<C-s>` or `:w` | post, after a confirmation prompt showing what will be sent |
 | `<C-r>` | quote the lines you have selected in the code window, with their path and line numbers |
-| `<C-g>` | seed a ```suggestion block from the lines the draft is aimed at |
+| `<C-g>` | edit the suggestion as code: the lines (or the draft's existing ```suggestion block) open in a buffer with the file's filetype; `:w` or `<C-s>` writes them back as the block, `q` cancels |
 | `<C-p>` | queue the comment in the pending review instead of posting it (new comments only) |
 | `q` | discard the draft (confirmed if it is not empty) |
 

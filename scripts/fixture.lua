@@ -454,10 +454,28 @@ wait_for(function()
 end, "reply command did not post a thread reply")
 vim.fn.confirm = original_confirm
 
--- :ReviewModeSuggest drafts a suggestion block from the lines as they are,
--- in the draft buffer rather than a one-line prompt
+-- :ReviewModeSuggest opens the lines as code, in a buffer with the file's
+-- filetype; writing it puts them in the draft as a suggestion block
+-- (headless -u NONE detects no filetype, so give the file one to carry over)
+vim.bo.filetype = "text"
+local source_ft = vim.bo.filetype
 vim.api.nvim_win_set_cursor(0, { 2, 0 })
 pr.suggest()
+local function code_win()
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(win)):find("review%-mode://suggestion%-code") then
+      return win, vim.api.nvim_win_get_buf(win)
+    end
+  end
+end
+local scratch_win, scratch_buf = code_win()
+assert(scratch_win, "suggest did not open the lines as code")
+assert(vim.bo[scratch_buf].filetype == source_ft, "the code buffer should take the file's filetype")
+assert(vim.api.nvim_buf_get_lines(scratch_buf, 0, -1, false)[1] == "two", "the code buffer should start from the line")
+vim.api.nvim_buf_set_lines(scratch_buf, 0, -1, false, { "two improved" })
+vim.api.nvim_set_current_win(scratch_win)
+vim.cmd.write()
+assert(code_win() == nil, "writing the code buffer should close it")
 local suggest_win
 for _, win in ipairs(vim.api.nvim_list_wins()) do
   if vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(win)):find("review%-mode://comment") then
@@ -467,7 +485,33 @@ end
 assert(suggest_win, "suggest did not open a draft")
 local suggest_buf = vim.api.nvim_win_get_buf(suggest_win)
 local suggest_lines = vim.api.nvim_buf_get_lines(suggest_buf, 0, -1, false)
-assert(has_line(suggest_lines, "```suggestion") and has_line(suggest_lines, "two"), "suggestion block was not drafted")
+assert(
+  has_line(suggest_lines, "```suggestion") and has_line(suggest_lines, "two improved"),
+  "the code was not written back"
+)
+-- C-g again edits that block rather than adding a second; q leaves it alone
+vim.api.nvim_set_current_win(suggest_win)
+pr.composer_suggest()
+scratch_win, scratch_buf = code_win()
+assert(vim.api.nvim_buf_get_lines(scratch_buf, 0, -1, false)[1] == "two improved", "C-g should reopen the block")
+vim.api.nvim_buf_set_lines(scratch_buf, 0, -1, false, { "two better" })
+vim.api.nvim_set_current_win(scratch_win)
+vim.cmd.write()
+suggest_lines = vim.api.nvim_buf_get_lines(suggest_buf, 0, -1, false)
+assert(has_line(suggest_lines, "two better") and not has_line(suggest_lines, "two improved"), "rewrite lost")
+vim.api.nvim_set_current_win(suggest_win)
+pr.composer_suggest()
+scratch_win, scratch_buf = code_win()
+vim.api.nvim_buf_set_lines(scratch_buf, 0, -1, false, { "discarded" })
+vim.api.nvim_set_current_win(scratch_win)
+vim.cmd("normal q")
+suggest_lines = vim.api.nvim_buf_get_lines(suggest_buf, 0, -1, false)
+assert(not has_line(suggest_lines, "discarded"), "q should leave the draft unchanged")
+local fences = 0
+for _, line in ipairs(suggest_lines) do
+  fences = fences + (line == "```suggestion" and 1 or 0)
+end
+assert(fences == 1, "the draft should hold one suggestion block, got " .. fences)
 vim.fn.confirm = function()
   return 1
 end
@@ -676,6 +720,8 @@ vim.api.nvim_win_set_cursor(0, { 2, 0 })
 pr.compose_comment()
 local draft_win = assert(win_by_filetype("markdown"), "compose_comment did not open a draft buffer")
 pr.composer_suggest()
+-- the lines open as code first; writing them seeds the block
+vim.cmd.write()
 assert(
   has_line(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(draft_win), 0, -1, false), "```suggestion"),
   "draft suggestion block missing"

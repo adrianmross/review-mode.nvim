@@ -309,22 +309,87 @@ function M.composer_reference()
   pcall(vim.api.nvim_win_set_cursor, ui.composer_win, { row + #lines, 0 })
 end
 
---- Seed a GitHub suggestion block from the lines the draft is aimed at.
+-- The ```suggestion block in a draft, as its fence rows (0-based), or nil.
+local function draft_suggestion_block(lines)
+  for open, line in ipairs(lines) do
+    if line:match("^```suggestion%s*$") then
+      for close = open + 1, #lines do
+        if lines[close]:match("^```%s*$") then
+          return open - 1, close - 1
+        end
+      end
+    end
+  end
+  return nil
+end
+
+--- Edit the suggestion as code, not as text in a markdown fence: its lines open
+--- in a buffer of their own with the file's filetype, and :w or <C-s> writes
+--- them back into the draft's ```suggestion block (adding one if there is
+--- none). q goes back to the draft without changing it.
 function M.composer_suggest()
   local source = ui.composer_source
   if not source or not vim.api.nvim_buf_is_valid(source.buf) or not composer_is_open() then
     return
   end
 
+  vim.cmd("stopinsert")
+  local draft_buf, draft_win = ui.composer_buf, ui.composer_win
+  local draft = vim.api.nvim_buf_get_lines(draft_buf, 0, -1, false)
+  local open_row, close_row = draft_suggestion_block(draft)
   local last = math.min(source.end_line or source.line, vim.api.nvim_buf_line_count(source.buf))
   local first = math.min(source.start_line or source.line, last)
-  local lines = { "```suggestion" }
-  vim.list_extend(lines, vim.api.nvim_buf_get_lines(source.buf, first - 1, last, false))
-  vim.list_extend(lines, { "```", "" })
+  local code = open_row and vim.list_slice(draft, open_row + 2, close_row)
+    or vim.api.nvim_buf_get_lines(source.buf, first - 1, last, false)
+  local insert_row = vim.api.nvim_win_get_cursor(draft_win)[1]
 
-  local row = vim.api.nvim_win_get_cursor(ui.composer_win)[1]
-  vim.api.nvim_buf_set_lines(ui.composer_buf, row, row, false, lines)
-  pcall(vim.api.nvim_win_set_cursor, ui.composer_win, { row + #lines, 0 })
+  vim.api.nvim_set_current_win(draft_win)
+  vim.cmd("aboveleft split")
+  local win = vim.api.nvim_get_current_win()
+  local bufnr = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_win_set_buf(win, bufnr)
+  vim.bo[bufnr].buftype = "acwrite"
+  vim.bo[bufnr].bufhidden = "wipe"
+  vim.api.nvim_buf_set_name(bufnr, "review-mode://suggestion-code")
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, code)
+  vim.bo[bufnr].filetype = vim.bo[source.buf].filetype
+  vim.bo[bufnr].modified = false
+  vim.wo[win].winbar =
+    string.format("Suggestion for %s:%d-%d  │  :w or C-s to the draft  q cancel", source.path, first, last)
+
+  local function back(write)
+    if write and vim.api.nvim_buf_is_valid(draft_buf) then
+      local block = { "```suggestion" }
+      vim.list_extend(block, vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
+      block[#block + 1] = "```"
+      local open, close = draft_suggestion_block(vim.api.nvim_buf_get_lines(draft_buf, 0, -1, false))
+      if open then
+        vim.api.nvim_buf_set_lines(draft_buf, open, close + 1, false, block)
+      else
+        block[#block + 1] = ""
+        vim.api.nvim_buf_set_lines(draft_buf, insert_row, insert_row, false, block)
+      end
+    end
+    pcall(vim.api.nvim_win_close, win, true)
+    if vim.api.nvim_win_is_valid(draft_win) then
+      vim.api.nvim_set_current_win(draft_win)
+    end
+  end
+
+  vim.api.nvim_create_autocmd("BufWriteCmd", {
+    buffer = bufnr,
+    callback = function()
+      vim.bo[bufnr].modified = false
+      back(true)
+    end,
+  })
+  vim.keymap.set({ "n", "i" }, "<C-s>", function()
+    vim.cmd("stopinsert")
+    back(true)
+  end, { buffer = bufnr, nowait = true, silent = true })
+  vim.keymap.set("n", "q", function()
+    back(false)
+  end, { buffer = bufnr, nowait = true, silent = true })
 end
 
 function M.composer_submit()
