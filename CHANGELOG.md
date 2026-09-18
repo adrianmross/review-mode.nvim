@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.2](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.1...v0.13.2) (2026-09-18)
+
+
+### Features
+
+* **diff:** make condensed and full file fold states in both layouts ([#86](https://github.com/adrianmross/review-mode.nvim/issues/86)) ([afa4f30](https://github.com/adrianmross/review-mode.nvim/commit/afa4f30cf7ed29dbb9c1f35ef1ec632105c5c983))
+
 ## [0.13.1](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.0...v0.13.1) (2026-09-18)
 
 
