@@ -647,6 +647,17 @@ GH_REVIEW_HEAD=abc123 \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 run_fixture optimistic_comments_fixture
 
+# Drafts, failed posts and on-disk stores never lose what the user typed.
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/never-lose-cache" \
+XDG_STATE_HOME="$tmp/never-lose-state" \
+GH_REVIEW_REPO=owner/repo \
+GH_REVIEW_PR=123 \
+GH_REVIEW_BASE=main \
+GH_REVIEW_HEAD=abc123 \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+run_fixture never_lose_work_fixture
+
 # Hide whitespace: its own repo with a reindent-only file.
 PATH="$tmp/bin:$PATH" \
 XDG_CACHE_HOME="$tmp/whitespace-cache" \

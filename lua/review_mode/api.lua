@@ -592,6 +592,11 @@ function M.add_pending(opts)
   return review.add(opts)
 end
 
+--- False where add_pending would refuse: GitLab, a local review, no session.
+function M.can_add_pending()
+  return review.can_queue()
+end
+
 function M.remove_pending(id)
   return review.remove(id)
 end
@@ -775,7 +780,9 @@ end
 
 --- Undo a trial, restoring the exact lines it replaced even when the file has
 --- been edited around it since. id is an id from M.suggestion_trials, or nil
---- for the trial under the cursor. Emits "suggestion_reverted".
+--- for the trial under the cursor. When the trial's own lines were edited, it
+--- confirms first (vim.fn.confirm), and keeping them returns nil and why.
+--- Emits "suggestion_reverted".
 function M.revert_suggestion(id)
   return suggestions().revert(id)
 end

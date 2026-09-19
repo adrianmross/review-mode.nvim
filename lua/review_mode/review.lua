@@ -56,9 +56,15 @@ local function save(drafts)
   return true
 end
 
+--- False where a draft could not be queued (GitLab, a local review), so a UI
+--- need not offer it only to refuse.
+function M.can_queue()
+  return state.provider ~= "gitlab" and state.provider ~= "local" and store_path() ~= nil
+end
+
 --- Queue a comment for the next review. Returns the draft, or nil and an error.
 function M.add(opts)
-  if state.provider == "gitlab" then
+  if state.provider == "gitlab" or state.provider == "local" then
     return nil, require("review_mode.providers").unsupported("Pending review comments")
   end
   opts = opts or {}

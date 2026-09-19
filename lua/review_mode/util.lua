@@ -184,6 +184,9 @@ function M.split_blob_lines(content)
   return lines
 end
 
+-- files that exist but could not be decoded or set aside: never written over
+local unreadable = {}
+
 function M.read_json_file(path)
   local fd = vim.uv.fs_open(path, "r", 420)
   if not fd then
@@ -200,18 +203,50 @@ function M.read_json_file(path)
 
   local ok, decoded = pcall(vim.json.decode, content)
   if not ok or type(decoded) ~= "table" then
+    -- A store that cannot be read must not pass for an empty one: the next
+    -- write would erase it. Set it aside, once, and say where; if even that
+    -- fails, refuse to write over it.
+    local aside = string.format("%s.corrupt-%d", path, os.time())
+    if vim.uv.fs_rename(path, aside) then
+      vim.notify("Review Mode: could not read " .. path .. "; kept it as " .. aside, vim.log.levels.WARN)
+    else
+      unreadable[path] = true
+      vim.notify("Review Mode: could not read " .. path .. "; leaving it alone", vim.log.levels.ERROR)
+    end
     return nil
   end
 
   return decoded
 end
 
-function M.write_json_file(path, value)
-  local dir = vim.fs.dirname(path)
-  if dir then
-    vim.fn.mkdir(dir, "p")
+--- Write lines to path atomically: a crash mid-write leaves the old file whole.
+function M.write_file(path, lines)
+  if unreadable[path] then
+    error("not overwriting " .. path .. ": it could not be read")
   end
-  vim.fn.writefile({ vim.json.encode(value) }, path)
+  vim.fn.mkdir(vim.fs.dirname(path), "p")
+  local tmp = path .. ".tmp" .. vim.uv.os_getpid()
+  vim.fn.writefile(lines, tmp)
+  local ok, err = vim.uv.fs_rename(tmp, path)
+  if not ok then
+    vim.uv.fs_unlink(tmp)
+    error(err)
+  end
+end
+
+function M.write_json_file(path, value)
+  M.write_file(path, { vim.json.encode(value) })
+end
+
+--- Text the user typed that could not be sent or saved goes to the unnamed
+--- register, and the notice says so: nothing typed is ever just dropped.
+function M.keep_text(text)
+  -- already there (an optimistic post kept it first): say it once, not twice
+  if not text or vim.trim(text) == "" or vim.fn.getreg('"') == text then
+    return
+  end
+  vim.fn.setreg('"', text)
+  vim.notify('Review Mode: your text is in the " register (p to put it back)', vim.log.levels.WARN)
 end
 
 function M.buf_relpath(bufnr)

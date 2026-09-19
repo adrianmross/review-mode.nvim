@@ -114,6 +114,26 @@ local _, tree_count = listed:gsub("pr%-123", "")
 assert(tree_count == 1, "second checkout created another worktree")
 assert(#vim.api.nvim_list_tabpages() == 2, "restarting a checkout review leaked a tabpage")
 
+-- 2b. a clean tree with a commit of its own (a trial suggestion committed on
+-- its detached HEAD) is dirty too: moving HEAD or removing the tree would
+-- orphan that commit
+git({ "commit", "-q", "--allow-empty", "-m", "my trial commit" }, tree)
+local my_commit = git({ "rev-parse", "HEAD" }, tree)
+notifications = {}
+local committed = review("123")
+assert(committed.dirty, "a tree with a local commit was not reported dirty")
+assert(git({ "rev-parse", "HEAD" }, tree) == my_commit, "a tree with a local commit was moved to the PR head")
+assert(notified("my trial commit", vim.log.levels.WARN), "reusing a tree with a local commit did not say why")
+pr.stop()
+vim.fn.confirm = function()
+  error("CheckoutClean asked to remove a tree holding a local commit")
+end
+notifications = {}
+pr.checkout_clean("123")
+assert(vim.uv.fs_stat(tree), "CheckoutClean removed a tree holding a local commit")
+assert(notified("my trial commit", vim.log.levels.WARN), "CheckoutClean did not say which commit it kept")
+git({ "checkout", "-q", "--detach", feature_sha }, tree)
+
 -- 3. a dirty tree is neither updated nor removed
 vim.fn.writefile({ "my local edit" }, vim.fs.joinpath(tree, "file.txt"))
 git({ "update-ref", "refs/pull/123/head", "main" })

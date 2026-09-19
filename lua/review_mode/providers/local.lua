@@ -5,10 +5,10 @@
 -- that writes the same normalized shape review_mode.comments defines, so signs,
 -- the panel, diagnostics, quickfix and review_mode.api work unchanged.
 --
--- The store lives under `git rev-parse --git-dir`, which is `.git` in a normal
--- checkout and `.git/worktrees/<name>` in a linked worktree -- so every worktree
--- gets its own comments for free, and git never tracks any of it. The filename
--- is the branch (or the named head), so switching branches switches comments.
+-- The store lives under `git rev-parse --git-common-dir` (the main `.git`, for
+-- a linked worktree too), so removing a worktree never takes its comments with
+-- it, and git never tracks any of it. The filename is the branch the head
+-- resolves to (percent-encoded), so switching branches switches comments.
 local M = {}
 
 local core = require("review_mode.state")
@@ -19,8 +19,16 @@ local state = core.state
 
 local store_version = 1
 
--- the same sanitizing the comment cache uses for its keys
-local function sanitize(key)
+-- Percent-encoding, so no two keys share a file (feat/x is feat%2Fx, feat_x
+-- stays feat_x).
+local function encode_key(key)
+  return (tostring(key):gsub("[^%w_.-]", function(char)
+    return string.format("%%%02X", char:byte())
+  end))
+end
+
+-- What stores were named before: every odd character became "_".
+local function legacy_key(key)
   return (tostring(key):gsub("[^%w_.-]", "_"))
 end
 
@@ -48,18 +56,52 @@ function M.default_branch(root)
   return "HEAD"
 end
 
---- Where a local review keeps its comments: <git-dir>/review-mode/<key>.json.
-function M.store_for(root, key)
-  local git_dir = git({ "rev-parse", "--git-dir" }, root)
-  if not git_dir then
+local function git_path(root, flag)
+  local dir = git({ "rev-parse", flag }, root)
+  if not dir then
     return nil
   end
   -- git answers a relative ".git" in a plain checkout and an absolute path in a
   -- linked worktree, so only join when it is relative
-  if not git_dir:match("^[/\\]") and not git_dir:match("^%a:[/\\]") then
-    git_dir = vim.fs.joinpath(root, git_dir)
+  if not dir:match("^[/\\]") and not dir:match("^%a:[/\\]") then
+    dir = vim.fs.joinpath(root, dir)
   end
-  return vim.fs.joinpath(vim.fs.normalize(git_dir), "review-mode", sanitize(key) .. ".json")
+  return vim.fs.normalize(dir)
+end
+
+--- Where a local review keeps its comments:
+--- <git-common-dir>/review-mode/<percent-encoded key>.json.
+function M.store_for(root, key)
+  local dir = git_path(root, "--git-common-dir")
+  return dir and vim.fs.joinpath(dir, "review-mode", encode_key(key) .. ".json")
+end
+
+-- Older releases kept the store under --git-dir (deleted with a linked worktree)
+-- with "_" for every odd character. Copy it over once, so nothing is lost.
+local function migrate(root, old_key, store)
+  local dir = git_path(root, "--git-dir")
+  local old = dir and vim.fs.joinpath(dir, "review-mode", legacy_key(old_key) .. ".json")
+  if not old or old == store or vim.uv.fs_stat(store) or not vim.uv.fs_stat(old) then
+    return
+  end
+  vim.fn.mkdir(vim.fs.dirname(store), "p")
+  if vim.uv.fs_copyfile(old, store) then
+    vim.notify("Review Mode: local comments moved to " .. store)
+  end
+end
+
+-- The branch a head names (HEAD included), else a ref's own name, else the
+-- detached commit: never "HEAD", which every branch would share.
+local function store_key(head_rev, root)
+  local full = git({ "rev-parse", "--symbolic-full-name", head_rev }, root)
+  local branch = full and full:match("^refs/heads/(.+)$")
+  if branch then
+    return branch
+  end
+  if full and full ~= "" and full ~= "HEAD" then
+    return (full:gsub("^refs/", ""))
+  end
+  return "detached-" .. tostring(git({ "rev-parse", "--short", head_rev }, root) or "unknown")
 end
 
 --- Turn `:ReviewModeLocal [<base>] [<head>]` into opts for review_mode.start.
@@ -84,18 +126,20 @@ function M.resolve(args, root)
     return nil, string.format("could not resolve %s in this repo", base_arg)
   end
 
-  local key = head_arg
-  if not key then
-    key = git({ "rev-parse", "--abbrev-ref", "HEAD" }, root)
-    if not key or key == "HEAD" then
-      key = "detached-" .. tostring(git({ "rev-parse", "--short", "HEAD" }, root) or "unknown")
-    end
-  end
-
+  local key = store_key(head_rev, root)
   local store = M.store_for(root, key)
   if not store then
     return nil, "not in a git repo"
   end
+  -- what the store was keyed by before: the head as typed, else the branch
+  local old_key = head_arg
+  if not old_key then
+    old_key = git({ "rev-parse", "--abbrev-ref", "HEAD" }, root)
+    if not old_key or old_key == "HEAD" then
+      old_key = "detached-" .. tostring(git({ "rev-parse", "--short", "HEAD" }, root) or "unknown")
+    end
+  end
+  migrate(root, old_key, store)
 
   return {
     provider = "local",
@@ -160,8 +204,10 @@ local function write_doc(doc)
   if not path then
     return false, "no local review store: start a local review first"
   end
-  vim.fn.mkdir(vim.fs.dirname(path), "p")
-  vim.fn.writefile(vim.split(encode(doc, ""), "\n", { plain = true }), path)
+  local ok, err = pcall(util.write_file, path, vim.split(encode(doc, ""), "\n", { plain = true }))
+  if not ok then
+    return false, tostring(err)
+  end
   return true
 end
 

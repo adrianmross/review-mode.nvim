@@ -72,17 +72,52 @@ local review_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
 assert(has_line(review_lines, "file.txt:2  Needs a test"), "review buffer does not list the line draft")
 assert(has_line(review_lines, "file.txt:4-5  Rename these"), "review buffer does not list the range draft")
 local extra = assert(api.add_pending({ path = "nested/other.txt", line = 2, body = "drop me" }))
-review_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-for row, line in ipairs(review_lines) do
-  if line:find("drop me", 1, true) then
-    vim.api.nvim_win_set_cursor(0, { row, 0 })
+local function cursor_on(needle)
+  for row, line in ipairs(vim.api.nvim_buf_get_lines(0, 0, -1, false)) do
+    if line:find(needle, 1, true) then
+      vim.api.nvim_win_set_cursor(0, { row, 0 })
+      return row
+    end
   end
+  error("no line with " .. needle)
+end
+-- a line typed above the list shifts every draft down; dd still means the one
+-- under the cursor, not the one that used to be on that line number
+vim.api.nvim_buf_set_lines(0, 1, 1, false, { "a note of mine" })
+cursor_on("drop me")
+local drop_prompts = {}
+vim.fn.confirm = function(prompt)
+  drop_prompts[#drop_prompts + 1] = prompt
+  return 2
+end
+vim.cmd("normal dd")
+assert(#drop_prompts == 1 and drop_prompts[1]:find("drop me", 1, true), "dd did not ask before dropping the draft")
+assert(#api.pending() == 3, "declining the dd confirmation still dropped a draft")
+vim.fn.confirm = function(prompt)
+  drop_prompts[#drop_prompts + 1] = prompt
+  return 1
 end
 vim.cmd("normal dd")
 assert(#api.pending() == 2, "dd did not drop the draft under the cursor")
 for _, draft in ipairs(api.pending()) do
   assert(draft.id ~= extra.id, "dd dropped the wrong draft")
 end
+
+-- deleting the marker line must not cost the typed review body: the next
+-- redraw puts the marker back instead of rewriting the buffer
+local marker_row = cursor_on("Review body")
+vim.api.nvim_buf_set_lines(0, marker_row, -1, false, { "My review body", "its second line" })
+vim.cmd("normal dd")
+assert(not has_line(vim.api.nvim_buf_get_lines(0, 0, -1, false), "Review body"), "the marker line was not deleted")
+assert(review_buffer.body() == "My review body\nits second line", "body lost once the marker line was deleted")
+local redraw = assert(api.add_pending({ path = "file.txt", line = 3, body = "redraw me" }))
+review_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+assert(has_line(review_lines, "My review body"), "a redraw without the marker wiped the review body")
+assert(has_line(review_lines, "Review body"), "the redraw did not put the marker back")
+assert(review_buffer.body() == "My review body\nits second line", "body wrong after the marker came back")
+api.remove_pending(redraw.id)
+marker_row = cursor_on("Review body")
+vim.api.nvim_buf_set_lines(0, marker_row, -1, false, { "" })
 
 -- REQUEST_CHANGES needs a body, and that is caught before anything is sent
 local rejected

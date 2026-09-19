@@ -195,6 +195,8 @@ unsupported(api.delete_comment, first_comment.id)
 unsupported(api.submit_review, { event = "COMMENT", body = "looks good" })
 unsupported(require("review_mode.checkout").prepare, { pr = "7" })
 
+-- so the composer does not offer queueing on GitLab at all
+assert(not api.can_add_pending(), "GitLab claims it can queue pending comments")
 local draft, draft_err = api.add_pending({ path = "file.txt", line = 2, body = "later" })
 assert(not draft, "pending comment was queued on GitLab")
 assert(

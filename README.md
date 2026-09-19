@@ -246,18 +246,24 @@ be edited before it goes out. Nothing is sent until you confirm:
 | `<C-s>` or `:w` | post, after a confirmation prompt showing what will be sent |
 | `<C-r>` | quote the lines you have selected in the code window, with their path and line numbers |
 | `<C-g>` | edit the suggestion as code: the lines (or the draft's existing ```suggestion block) open in a buffer with the file's filetype; `:w` or `<C-s>` writes them back as the block, `q` cancels |
-| `<C-p>` | queue the comment in the pending review instead of posting it (new comments only) |
+| `<C-p>` | queue the comment in the pending review instead of posting it (new comments only; not offered on GitLab or in a local review) |
 | `q` | discard the draft (confirmed if it is not empty) |
+
+A draft is never thrown away unasked. Opening another draft, or closing the
+panel, over one that is not empty asks `Discard this draft?` first, and keeping
+it keeps the draft (and the panel) open. Where there is nobody to ask — the
+session stopping, the panel window closing, `:q!` on the draft — its text goes
+to the unnamed register and a notice says so.
 
 `<C-r>` is what lets a reply point at lines other than the one the thread is
 anchored to: select the lines in the code window, come back to the draft, and
 press it.
 
 A posted comment or reply shows in the panel and as a sign right away, marked
-`sending…`, and becomes the real comment when GitHub answers. If the post fails
-it disappears again and its text is left in the unnamed register, so `p` puts
-it back into a new draft (GitHub only; GitLab and local reviews show the comment
-once it is saved).
+`sending…`, and becomes the real comment when GitHub answers (GitLab and local
+reviews show it once it is saved). If a post, reply, edit or queue from the
+draft fails, on any provider, its text is left in the unnamed register, so `p`
+puts it back into a new draft.
 
 `e`, `dd`, `:ReviewModeEditComment` and `:ReviewModeDeleteComment` only act on
 comments you wrote. GitHub says who that is only through the GraphQL query, so
@@ -296,9 +302,13 @@ review body below the marker line, and submits the lot in one GitHub review:
 | key | action |
 |---|---|
 | `<CR>` | jump to the draft's line |
-| `dd` | drop the draft under the cursor |
+| `dd` | drop the draft under the cursor, after a confirmation (elsewhere, an ordinary `dd`) |
 | `<C-s>` / `<C-a>` / `<C-x>` | submit as comment / approve / request changes |
 | `q` | close the buffer |
+
+Lines you add above the list do not confuse `dd`: it drops the draft actually
+under the cursor. Deleting the marker line does not cost you the review body —
+the next redraw puts the marker back above it.
 
 Each submit is confirmed first, showing the event and how many comments go with
 it. `:ReviewModeSubmit [comment|approve|request_changes]` does the same without
@@ -600,7 +610,9 @@ did not check out should not be a lesser review.
 Review worktrees are never removed for you. `:ReviewModeCheckoutClean [pr]`
 removes the clean ones after a confirmation and refuses the dirty ones, listing
 what is uncommitted in each; the worktree the current session is using is
-refused too. A tree that has uncommitted changes is also never updated: a
+refused too. A tree holding commits that are on no branch, tag or remote and
+not in the PR (a trial suggestion committed there, say) counts as dirty: moving
+or removing it would orphan them. A dirty tree is also never updated: a
 second `:ReviewModeCheckout` on it reuses it as it stands and warns instead of
 moving it to the new PR head. `checkout = { cleanup = "manual" }` is the only
 cleanup mode.
@@ -733,7 +745,7 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeLocalComments` opens the local comments buffer
 - `:ReviewModeSuggestionPreview [inline|split]` toggles a preview of the suggestion on the current line, in the code or side by side
 - `:ReviewModeSuggestionAcceptAll` applies every suggestion in the current file as trials, after a confirmation
-- `:ReviewModeSuggestionRevert [id]` reverts a trial suggestion: the one under the cursor, or one from `:ReviewModeSuggestionList`
+- `:ReviewModeSuggestionRevert [id]` reverts a trial suggestion: the one under the cursor, or one from `:ReviewModeSuggestionList` (asks first when you have typed inside it)
 - `:ReviewModeSuggestionList` lists the trial suggestions that are applied but not saved
 - `:ReviewModeSuggestionCommit` commits the trial suggestions, and only them, crediting each suggester with a `Co-authored-by:` trailer, after a confirmation that can also resolve their threads
 
@@ -1013,14 +1025,19 @@ the test suite pins that string so a `gh` change fails loudly.
 A local review has no forge to keep comments on, so it keeps them in a file:
 
 ```text
-<git-dir>/review-mode/<branch-or-head>.json
+<git-common-dir>/review-mode/<branch>.json
 ```
 
-`<git-dir>` is what `git rev-parse --git-dir` answers: `.git` in a normal
-checkout, and `.git/worktrees/<name>` in a linked worktree. That is deliberate —
-it is the per-worktree git dir, not the shared `--git-common-dir` — so parallel
-worktrees of the same repo never see each other's review comments, and the
-filename keys them by branch on top of that. Nothing is ever tracked by git.
+`<git-common-dir>` is what `git rev-parse --git-common-dir` answers: the main
+`.git`, for a linked worktree too, so `git worktree remove` (or `wt remove`)
+never deletes a worktree's review comments. The filename is the branch the head
+resolves to — `HEAD` included, so `:ReviewModeLocal main HEAD` keys by your
+branch rather than one "HEAD" file every branch shares; another ref by its own
+name, a detached commit as `detached-<sha>` — percent-encoded, so `feat/x` and
+`feat_x` never share a file. Older releases kept the file under `--git-dir`
+with `_` for `/`; it is copied to the new place the first time the review
+starts. Nothing is ever tracked by git. A file that no longer parses is set
+aside as `<file>.corrupt-<time>` (and you are told) rather than written over.
 
 The file is indented, with a stable key order, because it is meant to be read:
 
