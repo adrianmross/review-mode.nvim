@@ -33,27 +33,10 @@ function M.viewed_state_entry()
   end
 
   local store = M.load_viewed_store()
-  store[key] = store[key] or { viewed = {}, order = {}, sync_queue = {} }
+  store[key] = store[key] or { viewed = {}, sync_queue = {} }
   store[key].viewed = store[key].viewed or {}
-  store[key].order = store[key].order or {}
   store[key].sync_queue = store[key].sync_queue or {}
   return store[key]
-end
-
-function M.add_viewed_order(path)
-  if vim.tbl_contains(state.viewed_order, path) then
-    return
-  end
-  state.viewed_order[#state.viewed_order + 1] = path
-end
-
-function M.remove_viewed_order(path)
-  for index, item in ipairs(state.viewed_order) do
-    if item == path then
-      table.remove(state.viewed_order, index)
-      return
-    end
-  end
 end
 
 function M.persist_viewed_state()
@@ -67,7 +50,8 @@ function M.persist_viewed_state()
   end
 
   entry.viewed = state.viewed
-  entry.order = state.viewed_order
+  -- older releases kept a viewed order here that nothing read; drop it
+  entry.order = nil
   entry.sync_queue = state.viewed_sync_queue
   entry.hunks = state.hunk_viewed
   -- One file holds every PR, and another Neovim may have written its own PRs
@@ -87,7 +71,6 @@ end
 
 function M.load_viewed_state()
   state.viewed = {}
-  state.viewed_order = {}
   state.hunk_viewed = {}
 
   if not state.config.viewed.enabled then
@@ -101,7 +84,6 @@ function M.load_viewed_state()
 
   state.hunk_viewed = vim.deepcopy(entry.hunks or {})
   state.viewed = vim.deepcopy(entry.viewed or {})
-  state.viewed_order = vim.deepcopy(entry.order or {})
   state.viewed_sync_queue = vim.deepcopy(entry.sync_queue or {})
 end
 
@@ -114,12 +96,10 @@ function M.set_viewed_path(path, viewed)
 
   if viewed then
     state.viewed[path] = true
-    M.add_viewed_order(path)
     return true
   end
 
   state.viewed[path] = nil
-  M.remove_viewed_order(path)
   return false
 end
 
@@ -261,16 +241,6 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
   end)
 end
 
-function M.refresh_viewed_order()
-  local ordered = {}
-  for _, path in ipairs(state.file_order) do
-    if state.viewed[path] then
-      ordered[#ordered + 1] = path
-    end
-  end
-  state.viewed_order = ordered
-end
-
 function M.apply_queued_viewed_changes()
   for path, viewed in pairs(state.viewed_sync_queue or {}) do
     M.set_viewed_path(path, viewed == true)
@@ -316,7 +286,6 @@ function M.sync_viewed_from_github_async(generation, force, merge_local)
     end
     state.viewed = viewed
     M.apply_queued_viewed_changes()
-    M.refresh_viewed_order()
     M.persist_viewed_state()
     hooks.emit("viewed_changed", { path = nil, source = "github" })
     vim.schedule(function()

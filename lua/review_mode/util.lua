@@ -353,8 +353,4 @@ function M.visual_range(command)
   return start_line, end_line
 end
 
-function M.selected_text(start_line, end_line)
-  return table.concat(vim.api.nvim_buf_get_lines(0, start_line - 1, end_line, false), "\n")
-end
-
 return M

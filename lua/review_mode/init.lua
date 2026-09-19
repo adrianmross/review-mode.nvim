@@ -42,11 +42,8 @@ local gh_json_async = util.gh_json_async
 local ensure_active = util.ensure_active
 local current_relpath = util.current_relpath
 local buf_relpath = util.buf_relpath
-local defaults = core.defaults
 
 local ns = vim.api.nvim_create_namespace("review_mode_normal")
-local picker_ns = vim.api.nvim_create_namespace("review_mode_picker")
-local panel_ns = vim.api.nvim_create_namespace("review_mode_panel")
 
 local setup_done = false
 
@@ -1016,7 +1013,6 @@ function head_watch.reload()
       return
     end
 
-    viewed_state.refresh_viewed_order()
     annotate_open_buffers()
     refresh_tree()
     prefetch_current_buffer()
@@ -2128,7 +2124,6 @@ function M.clear_viewed()
   end
   state.hunk_viewed = {}
   state.viewed = {}
-  state.viewed_order = {}
   state.viewed_sync_queue = unmark
   viewed_state.persist_viewed_state()
   schedule_comments_ui_refresh()
@@ -2168,7 +2163,6 @@ function M.toggle_viewed_feature()
     end
   else
     state.viewed = {}
-    state.viewed_order = {}
   end
 
   schedule_comments_ui_refresh()
@@ -2802,11 +2796,6 @@ function M.suggest_edits(opts)
   )
 end
 
--- The panel and its draft buffer own a lot of small helpers, and this file is
--- already near Lua's 200-locals-per-chunk limit. Scoping them to a block keeps
--- them out of the file-level slot budget; the M.* entry points below are still
--- module functions.
-
 function M.open_browser()
   pr_url_async(function(url, err)
     if not url then
@@ -3101,9 +3090,7 @@ function M.review_pr(opts, callback)
       return
     end
 
-    if state.active then
-      M.stop()
-    end
+    -- start ends a running session itself, the way :ReviewModeStop does
     M.start({
       root = result.path,
       repo = result.repo,

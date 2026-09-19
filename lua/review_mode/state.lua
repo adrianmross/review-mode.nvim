@@ -226,7 +226,6 @@ local state = {
   comment_threads = {},
   comments_loading = false,
   viewed = {},
-  viewed_order = {},
   -- per path, the hunk keys marked viewed
   hunk_viewed = {},
   viewed_sync_queue = {},
@@ -513,7 +512,6 @@ function M.reset_review_data()
   state.comment_threads = {}
   state.comments_loading = false
   state.viewed = {}
-  state.viewed_order = {}
   state.hunk_viewed = {}
   state.viewed_sync_queue = {}
   state.viewed_loading = false
