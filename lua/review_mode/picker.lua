@@ -505,14 +505,14 @@ local function run_action_item(item)
   end
 end
 
-local function open_native_actions_picker(items)
+local function open_native_actions_picker(items, title)
   vim.ui.select(items, {
-    prompt = "Review Mode action",
+    prompt = title or "Review Mode action",
     format_item = action_item_label,
   }, run_action_item)
 end
 
-local function open_snacks_actions_picker(items)
+local function open_snacks_actions_picker(items, title)
   local picker = get_snacks_picker()
   if not picker then
     return false
@@ -520,7 +520,7 @@ local function open_snacks_actions_picker(items)
 
   picker.pick({
     source = "review_mode_actions",
-    title = "Review Mode actions",
+    title = title or "Review Mode actions",
     items = vim.tbl_map(function(item)
       return {
         text = action_item_label(item),
@@ -541,7 +541,7 @@ local function open_snacks_actions_picker(items)
   return true
 end
 
-local function open_telescope_actions_picker(items)
+local function open_telescope_actions_picker(items, title)
   local ok_pickers, pickers = pcall(require, "telescope.pickers")
   local ok_finders, finders = pcall(require, "telescope.finders")
   local ok_conf, conf = pcall(require, "telescope.config")
@@ -553,7 +553,7 @@ local function open_telescope_actions_picker(items)
 
   pickers
     .new({}, {
-      prompt_title = "Review Mode actions",
+      prompt_title = title or "Review Mode actions",
       finder = finders.new_table({
         results = items,
         entry_maker = function(item)
@@ -578,20 +578,22 @@ local function open_telescope_actions_picker(items)
   return true
 end
 
---- Open the action picker over a caller-supplied item list.
-function M.actions(items)
+--- Open the action picker over a caller-supplied item list, titled `title`.
+--- Without one, snacks and Telescope title it "Review Mode actions" and the
+--- native vim.ui.select prompt reads "Review Mode action".
+function M.actions(items, title)
   items = items or {}
   for _, provider in ipairs(picker_provider_order()) do
     if provider == "native" then
-      open_native_actions_picker(items)
+      open_native_actions_picker(items, title)
       return
     end
 
     local ok, opened = pcall(function()
       if provider == "snacks" then
-        return open_snacks_actions_picker(items)
+        return open_snacks_actions_picker(items, title)
       elseif provider == "telescope" then
-        return open_telescope_actions_picker(items)
+        return open_telescope_actions_picker(items, title)
       end
       return false
     end)

@@ -472,6 +472,16 @@ review layout survives in between — so you can flip between "my work" and "the
 review" without either disturbing the other. Ending the session closes the tab.
 The default, `"inplace"`, never touches your windows.
 
+### Review inbox
+
+`:ReviewModeInbox` lists the open PRs in this repo that are waiting on your
+review, with no review running: size (`+adds −dels`), CI state (`✓` passed,
+`✗` failed, `…` running), how long since the last update, and a `[draft]`
+marker. Choose one and it opens as below, in its own worktree. `:ReviewModeInbox
+mine` lists the PRs you opened instead, and `:ReviewModeInbox all` every open
+PR. It is one `gh pr list` call, CI state included; the repo is `GH_REVIEW_REPO`
+or the running review's, else whatever `gh` sees from the cwd.
+
 ### Review a PR without checking it out
 
 `:ReviewModeCheckout 123` (or a PR URL, or `api.review_pr`) reviews a PR
@@ -609,6 +619,7 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeSubmit [comment|approve|request_changes]` submits the pending review, confirmed first
 - `:ReviewModeSummary` shows file, comment, thread, and viewed-sync counts.
 - `:ReviewModeCheckout <number|url>` reviews a PR in its own worktree without checking it out
+- `:ReviewModeInbox [requested|mine|all]` picks an open PR waiting on your review (or yours, or any) and reviews it without checking it out
 - `:ReviewModeCheckoutClean [pr]` removes clean review worktrees, after a confirmation.
 - `:ReviewModeQuickfix [unresolved|all]` fills the quickfix list with review threads and opens it
 - `:ReviewModeDiagnosticsToggle` toggles review threads as diagnostics

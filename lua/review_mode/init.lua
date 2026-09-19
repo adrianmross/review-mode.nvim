@@ -2803,6 +2803,13 @@ function M.action_items()
     },
     {
       category = "PR",
+      label = "Review inbox (PRs waiting on you)",
+      run = function()
+        M.inbox()
+      end,
+    },
+    {
+      category = "PR",
       label = "Remove clean review worktrees",
       run = function()
         M.checkout_clean(nil)
@@ -2888,6 +2895,12 @@ function M.review_pr(opts, callback)
 end
 
 M.checkout_clean = checkout.clean
+
+--- Pick an open PR waiting on your review and review it without checking it
+--- out. scope: "requested" (default), "mine" or "all".
+function M.inbox(scope)
+  return require("review_mode.inbox").open(scope)
+end
 
 function M.config()
   return state.config
@@ -3089,6 +3102,15 @@ function M.setup(opts)
     vim.api.nvim_create_user_command("ReviewModeCheckoutClean", function(command)
       M.checkout_clean(command.args ~= "" and command.args or nil)
     end, { nargs = "?", desc = "Remove clean review worktrees" })
+    vim.api.nvim_create_user_command("ReviewModeInbox", function(command)
+      M.inbox(command.args)
+    end, {
+      nargs = "?",
+      complete = function()
+        return { "requested", "mine", "all" }
+      end,
+      desc = "Pick a PR waiting on your review",
+    })
     -- Diagnostics and quickfix
     vim.api.nvim_create_user_command("ReviewModeQuickfix", function(command)
       require("review_mode.diagnostics").set_quickfix({ filter = command.args ~= "" and command.args or nil })
