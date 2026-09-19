@@ -613,6 +613,8 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeQuickfix [unresolved|all]` fills the quickfix list with review threads and opens it
 - `:ReviewModeDiagnosticsToggle` toggles review threads as diagnostics
 - `:ReviewModeCIToggle` toggles CI check-run annotations as diagnostics
+
+- `:ReviewModeBlastRadius[!]` lists, in the quickfix list, callers of the current file's changed functions that the PR did not touch (`!` counts body-only changes too)
 - `:ReviewModeLocal [<base>] [<head>]` reviews two local refs, with no PR and no network
 - `:ReviewModeLocalComments` opens the local comments buffer
 - `:ReviewModeSuggestionPreview [inline|split]` toggles a preview of the suggestion on the current line, in the code or side by side
@@ -745,6 +747,23 @@ single call. They are not refetched when HEAD moves mid-review; refresh for
 that. `:ReviewModeCIToggle` (or "Toggle CI diagnostics" in the actions
 picker) turns them off and on; `ci = { diagnostics = false }` stops the fetch
 altogether. Local and GitLab reviews skip it.
+
+## Blast Radius
+
+A review in a real checkout has something the browser does not: your language
+server. `:ReviewModeBlastRadius` uses it to answer the question line-by-line
+review misses — "this PR changes `parse()`; were all its callers updated?"
+
+It finds the function definitions in the current file whose signature (first
+line through the end of the parameter list) the PR changes, using treesitter's
+function-like nodes, so any language with a parser works. It asks every attached
+LSP client for their references, drops the ones on lines the PR itself added or
+rewrote, and puts the rest in the quickfix list as
+`parse → caller not changed in this PR`. `:ReviewModeBlastRadius!` also includes
+functions the PR changes only in their body. It is also in the actions picker.
+
+It runs only when asked, and never starts a language server: with no client
+attached to the buffer it says so. Each request gives up after 5 seconds.
 
 ## gh-dash / Worktree Handoff
 
