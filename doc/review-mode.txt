@@ -530,6 +530,13 @@ COMMANDS                                                  *review-mode-commands*
         List the trial suggestions that are applied but not saved, with the
         file and line each one now sits on.
 
+                                                        *:ReviewModeSuggestionCommit*
+:ReviewModeSuggestionCommit
+        Commit every live trial suggestion, and nothing else, crediting each
+        suggester with a Co-authored-by trailer. One confirmation lists the
+        trials and the message and can also resolve their threads. Local
+        only; nothing is pushed. See |review-mode-suggestions|.
+
 ==============================================================================
 KEYMAPS                                                    *review-mode-keymaps*
 
@@ -917,6 +924,28 @@ Accept all: the panel's `A` key and |:ReviewModeSuggestionAcceptAll| apply every
 suggestion in the file after a confirmation. Bottom-up, because a suggestion can
 replace one line with three, and applying the top one first would move every
 line number below it.
+
+Commit with credit: |:ReviewModeSuggestionCommit| (or "Commit trial
+suggestions, crediting reviewers" in the actions picker) makes one local commit
+of every live trial, as GitHub's "Commit suggestion" would: titled "Apply
+suggestions from code review" (singular for one), with one trailer per distinct
+suggester:
+>
+    Co-authored-by: Name <id+login@users.noreply.github.com>
+<
+The name is the user's display name, else the login. A comment cached before
+the author's id was fetched falls back to <login@users.noreply.github.com>.
+Your own suggestions get no trailer, and neither do local or GitLab reviews,
+whose authors have no GitHub address. The confirmation lists each trial and the
+message, and its second choice also resolves the suggestion threads. Nothing
+is pushed.
+
+The commit holds the trial lines and nothing else: they are written into
+HEAD's version of the file, which goes into the index directly, so your own
+edits in the same files, saved or not, stay out of it and stay unstaged. The
+buffers are then written and the trials forgotten. It refuses rather than
+guess when anything is staged (a commit takes the whole index), when you typed
+inside a trial, or when your edits reach into the lines a trial replaced.
 
 Trials are buffer state, not review state, and the plugin does not track git:
 
