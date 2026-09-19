@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.13.7](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.6...v0.13.7) (2026-09-19)
+
+
+### Features
+
+* **author:** resolve threads a commit fixed, walk unresolved, re-request review ([#110](https://github.com/adrianmross/review-mode.nvim/issues/110)) ([968f0d4](https://github.com/adrianmross/review-mode.nvim/commit/968f0d4c34e8e1d16794a75a551d9ffa61ddcb1c))
+* **review:** list what an approval has not covered yet ([#106](https://github.com/adrianmross/review-mode.nvim/issues/106)) ([ef8fc61](https://github.com/adrianmross/review-mode.nvim/commit/ef8fc610ef60ef307fcd6f35247b733f7e4bcb8e))
+* **review:** walk a PR in a reading order, definitions before uses ([#109](https://github.com/adrianmross/review-mode.nvim/issues/109)) ([183bfa9](https://github.com/adrianmross/review-mode.nvim/commit/183bfa98ac39602194bf02388a3c7dd040e18eed))
+* **suggestions:** commit trial suggestions, crediting the suggesters ([#108](https://github.com/adrianmross/review-mode.nvim/issues/108)) ([8d6607a](https://github.com/adrianmross/review-mode.nvim/commit/8d6607aef6d33834b4d114d0daa0a27c35245ede))
+* **suggestions:** turn your edits across the whole PR into suggestions ([#107](https://github.com/adrianmross/review-mode.nvim/issues/107)) ([ec7e857](https://github.com/adrianmross/review-mode.nvim/commit/ec7e8575aa93c44ebd101f4282f07167ca3d34f8))
+
 ## [0.13.6](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.5...v0.13.6) (2026-09-19)
 
 
