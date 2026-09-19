@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.13.5](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.4...v0.13.5) (2026-09-19)
+
+
+### Features
+
+* **ci:** show CI check-run annotations as diagnostics ([#99](https://github.com/adrianmross/review-mode.nvim/issues/99)) ([141e869](https://github.com/adrianmross/review-mode.nvim/commit/141e869164e4b27c4ddc7e5be3b22a5efeb6d06d))
+* **diff:** hide whitespace-only changes ([#95](https://github.com/adrianmross/review-mode.nvim/issues/95)) ([f453248](https://github.com/adrianmross/review-mode.nvim/commit/f453248f55c4e1b9985671741a0430aaa8790457))
+* **diff:** mark moved code and let ]c skip hunks that only move it ([#96](https://github.com/adrianmross/review-mode.nvim/issues/96)) ([cbb70ea](https://github.com/adrianmross/review-mode.nvim/commit/cbb70ea638ac01b49ba0b41c1cd3ec35c9878414))
+* **inbox:** pick a PR waiting on your review and review it ([#93](https://github.com/adrianmross/review-mode.nvim/issues/93)) ([5c1f88b](https://github.com/adrianmross/review-mode.nvim/commit/5c1f88be893db6f62194d02813ef75c24d2a4079))
+* **review:** list callers of changed functions the PR did not touch ([#97](https://github.com/adrianmross/review-mode.nvim/issues/97)) ([c36edf7](https://github.com/adrianmross/review-mode.nvim/commit/c36edf7688dce86799fcd3e98a699a32fbf49ca3))
+* **viewed:** mark individual hunks viewed ([#98](https://github.com/adrianmross/review-mode.nvim/issues/98)) ([dbfc08b](https://github.com/adrianmross/review-mode.nvim/commit/dbfc08b9b8ff00e9d5b8dfc82e322a5b6c39df06))
+
+
+### Performance Improvements
+
+* **comments:** show comments and replies while they post ([#100](https://github.com/adrianmross/review-mode.nvim/issues/100)) ([29604ad](https://github.com/adrianmross/review-mode.nvim/commit/29604ad7d84adc5fc061cc43d621468a9a82dc8f))
+* **startup:** draw cached comment signs before gh names the PR ([#94](https://github.com/adrianmross/review-mode.nvim/issues/94)) ([4b2f973](https://github.com/adrianmross/review-mode.nvim/commit/4b2f973fbd2615f1edbae594876a1737387d2da6))
+
 ## [0.13.4](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.3...v0.13.4) (2026-09-18)
 
 
