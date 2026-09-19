@@ -405,9 +405,14 @@ api.accept_suggestion(entry)   --> the trial { id, buf, path, thread_id, line, a
 api.accept_all_suggestions("src/a.ts")   --> how many were applied, and the first error
 api.revert_suggestion(trial_id)          -- or nil for the trial under the cursor
 api.suggestion_trials()                  --> the trials applied but not saved
-api.suggestion_commit_plan()     --> { trials, message }, or nil and why nothing can be committed
+api.suggestion_commit_plan()     --> a plan, or nil and why nothing can be committed
 api.commit_suggestions(plan)     --> { sha, unwritten }: commits only the trial lines, locally
 ```
+
+A commit plan is opaque: pass it back to `api.commit_suggestions` unchanged.
+Its stable fields are `trials` (`{ id, path, line, thread_id, suggester }`,
+`suggester` being `{ login, id, name, is_viewer }`) and `message`, for showing
+in a confirmation; anything else in it is internal and may change.
 
 Writes take a `callback(ok, err)`. `api.reply` needs the id of the comment it
 answers: pass `comment_id` directly, or a `thread_id` and it is looked up —
