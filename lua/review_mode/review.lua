@@ -210,8 +210,8 @@ local function overlaps(first, last, other_first, other_last)
 end
 
 -- A comment of yours covering any line of first..last: a posted one GitHub says
--- you wrote, or a pending draft.
-local function commented_on(path, first, last)
+-- you wrote, or one of `drafts` (passed in so the file is read once per check).
+local function commented_on(path, first, last, drafts)
   for _, comment in ipairs(state.comments[path] or {}) do
     local line = tonumber(comment.line)
     if comment.viewer_did_author == true and line then
@@ -220,7 +220,7 @@ local function commented_on(path, first, last)
       end
     end
   end
-  for _, draft in ipairs(M.list()) do
+  for _, draft in ipairs(drafts) do
     if draft.path == path and overlaps(draft.start_line, draft.end_line, first, last) then
       return true
     end
@@ -243,7 +243,8 @@ end
 --- annotations on a changed line with no comment of yours over it, and is 0
 --- until CI annotations have loaded.
 function M.readiness()
-  local out = { unviewed_files = 0, unviewed_hunks = 0, ci_failures = 0, unresolved_threads = 0, pending = #M.list() }
+  local drafts = M.list()
+  local out = { unviewed_files = 0, unviewed_hunks = 0, ci_failures = 0, unresolved_threads = 0, pending = #drafts }
   for _, path in ipairs(state.file_order) do
     if state.config.viewed.enabled and not state.viewed[path] then
       out.unviewed_files = out.unviewed_files + 1
@@ -255,7 +256,7 @@ function M.readiness()
       if
         annotation.severity == vim.diagnostic.severity.ERROR
         and on_changed_line(path, first, last)
-        and not commented_on(path, first, last)
+        and not commented_on(path, first, last, drafts)
       then
         out.ci_failures = out.ci_failures + 1
       end
