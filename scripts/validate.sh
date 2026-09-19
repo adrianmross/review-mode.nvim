@@ -123,7 +123,7 @@ case "$1 $2" in
   "api repos/owner/repo/pulls/123/comments?per_page=100"|"api repos/owner/repo/pulls/123/comments?per_page=100&page=1")
     printf '%s\n' '[{"id":1,"path":"file.txt","line":2,"body":"Needs review","user":{"login":"reviewer"},"created_at":"2024-01-02T03:04:05Z","html_url":"https://github.com/owner/repo/pull/123#discussion_r1","author_association":"OWNER","reactions":{"+1":2,"laugh":0,"hooray":1,"heart":0,"rocket":0,"eyes":0,"total_count":3}},{"id":2,"path":"file.txt","line":4,"body":"Check final line","user":{"login":"reviewer"},"created_at":"2024-01-02T03:04:05Z","author_association":"NONE","reactions":{"+1":0,"total_count":0}}]'
     ;;
-  "api repos/owner/repo/pulls/123/comments/1/replies"|"api repos/owner/repo/pulls/123/comments/2/replies"|"api repos/owner/repo/pulls/123/comments/3/replies")
+  "api repos/owner/repo/pulls/123/comments/1/replies"|"api repos/owner/repo/pulls/123/comments/2/replies"|"api repos/owner/repo/pulls/123/comments/3/replies"|"api repos/owner/repo/pulls/123/comments/41/replies")
     args="$*"
     if [[ "$args" == *"--method POST"* ]]; then
       # author fixture: which thread got a "Fixed in" reply, and what it said
@@ -186,6 +186,14 @@ case "$1 $2" in
       printf '{"data":{"resolveReviewThread":{"thread":{"id":"thread_1","isResolved":true}}}}\n'
     elif [[ "$args" == *"unresolveReviewThread"* ]]; then
       printf '{"data":{"unresolveReviewThread":{"thread":{"id":"thread_1","isResolved":false}}}}\n'
+    # comment anchoring fixture: the fixture writes the thread payload (and the
+    # second page of a long thread's comments) as JSON files of its own
+    elif [[ -n "${REVIEW_MODE_THREADS_FILE:-}" && "$args" == *"reviewThreads"* ]]; then
+      printf 'graphql reviewThreads\n' >> "${REVIEW_MODE_GH_LOG:-/dev/null}"
+      cat "$REVIEW_MODE_THREADS_FILE"
+    elif [[ -n "${REVIEW_MODE_THREADS_FILE:-}" && "$args" == *"PullRequestReviewThread"* ]]; then
+      printf 'graphql thread page %s\n' "$args" >> "${REVIEW_MODE_GH_LOG:-/dev/null}"
+      cat "$REVIEW_MODE_THREADS_FILE.page"
     elif [[ "$args" == *"reviewThreads"* && "${REVIEW_MODE_FIXTURE:-}" == "reactions" ]]; then
       printf '%s\n' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"id":"thread_1","path":"file.txt","line":2,"originalLine":2,"startLine":null,"diffSide":"RIGHT","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_1","databaseId":1,"path":"file.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r1","state":"SUBMITTED","authorAssociation":"OWNER","viewerDidAuthor":false,"body":"Needs review","author":{"login":"reviewer"},"reactionGroups":[{"content":"THUMBS_UP","viewerHasReacted":true,"reactors":{"totalCount":2}},{"content":"HOORAY","viewerHasReacted":false,"reactors":{"totalCount":1}}]},{"id":"comment_5","databaseId":5,"path":"file.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-03T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r5","state":"SUBMITTED","authorAssociation":"MEMBER","viewerDidAuthor":true,"body":"Done","author":{"login":"maintainer"},"reactionGroups":[]}]}}]}}}}}'
     elif [[ "$args" == *"reviewThreads"* && "${REVIEW_MODE_FIXTURE:-}" == "edit_delete" ]]; then
@@ -518,6 +526,21 @@ XDG_STATE_HOME="$tmp/gitlab-state" \
 GLAB_LOG="$tmp/glab.log" \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 run_fixture gitlab_fixture
+
+# Where threads anchor, and what line actions find on them: replies, reloads,
+# out-of-range, outdated and base-side threads, suggestion fences, counts.
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/anchoring-cache" \
+XDG_STATE_HOME="$tmp/anchoring-state" \
+GH_REVIEW_REPO=owner/repo \
+GH_REVIEW_PR=123 \
+GH_REVIEW_BASE=main \
+GH_REVIEW_HEAD=abc123 \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+REVIEW_MODE_THREADS_FILE="$tmp/anchoring-threads.json" \
+REVIEW_MODE_GH_LOG="$tmp/anchoring-gh.log" \
+REVIEW_MODE_AUTHOR_LOG="$tmp/anchoring-gh.log" \
+run_fixture comment_anchoring_fixture
 
 # Local reviews: two refs, no PR, no network, comments on disk. Deliberately no
 # gh mock on PATH for this run -- the fixture asserts nothing shells out to gh.

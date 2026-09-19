@@ -87,7 +87,8 @@ require("nvim-tree").setup({
 Unviewed changed files and closed parent folders are marked with `☐ N`, where
 `N` is the number of unviewed changed files under that node. Viewed files and
 closed folders are marked with `✓`; files and closed folders with unresolved
-comments are also marked with ` N` (a Nerd Font comment glyph). An open
+threads are also marked with ` N` (a Nerd Font comment glyph), `N` counting
+threads, not the comments in them. An open
 folder hides these folder markers because its children show the same state
 inline. A folder switches to viewed after every changed file under it is
 viewed.
@@ -207,7 +208,9 @@ session = {
 
 `:ReviewModePanel` (or `<leader>rt` during a review) opens a vertical split beside the file.
 It follows the cursor: threads anchored to the current line, or every thread in
-the file when the cursor is not on one. Each thread shows who wrote it, their
+the file when the cursor is not on one (resolved ones too, when every thread in
+the file is resolved). A comment on a deleted line is listed as `path:N (base)`:
+its line numbers the file before the PR, so it gets no sign in the buffer. Each thread shows who wrote it, their
 association with the repo, how long ago, the reply chain, emoji reactions, and
 its resolved/outdated state. Fenced code inside a comment is drawn as code
 rather than as more prose, and a `suggestion` block is drawn as the diff it
@@ -375,6 +378,7 @@ api.file_diff(path, function(diff, err) ... end)  -- the diff for one file, neve
 
 -- threads
 api.threads({ path = "src/a.ts", line = 42, include_resolved = false })
+api.threads_at("src/a.ts", 42)  -- what line actions mean: the unresolved threads, else the resolved ones
 api.comment({ path = ..., start_line = ..., end_line = ..., body = ... }, cb)
 api.reply({ thread_id = ..., body = ... }, cb)          -- or comment_id = ... to skip the lookup
 api.resolve(thread_id, true, cb)
@@ -392,6 +396,7 @@ api.goto_next("comment") / api.goto_prev("hunk")
 local lines, marks = api.render_threads(threads, { width = 60 })
 api.apply_render(bufnr, namespace, lines, marks)
 api.suggestion(comment)   --> the ```suggestion block as lines, or nil
+api.suggestion_block(lines)   --> 0-based rows of a draft's suggestion fences, or nil
 
 -- pending review
 api.pending()                       --> { { id, path, start_line, end_line, side, body, created_at }, ... }
@@ -444,9 +449,11 @@ A thread looks like:
 
 ```lua
 {
-  id = "PRRT_...",            -- GitHub thread id, or "comment:N" from the REST fallback
+  id = "PRRT_...",            -- GitHub thread id, or "rest:N" from the REST fallback
   path = "src/a.ts",
-  line = 42, start_line = 40,
+  line = 42, start_line = 40,  -- an outdated thread's original lines stand in here
+  original_line = 42, original_start_line = 40,  -- in the commit it was written on
+  side = "RIGHT",             -- "LEFT": a deleted line, numbered in the base file
   is_resolved = false, is_outdated = false,
   comments = {
     { id = 1, author = "reviewer", association = "OWNER", created_at = "...",
@@ -712,14 +719,14 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModePanel` toggles the thread panel beside the current file
 - `:ReviewModeCompose` drafts a PR comment for the current line or visual range
 - `:ReviewModeApplySuggestion` applies the suggestion on the current line to the buffer
-- `:ReviewModeReply` replies to the latest comment on the current line
+- `:ReviewModeReply` replies to the thread on the current line (a resolved one too, when it is the only one there)
 - `:ReviewModeResolveThread` resolves the PR review thread on the current line
 - `:ReviewModeUnresolveThread` unresolves the PR review thread on the current line
 - `:ReviewModeReact [THUMBS_UP]` toggles a reaction on the latest comment on the current line, asking which one when no argument is given
 - `:ReviewModeEditComment` edits your most recent comment on the current line in a draft buffer
 - `:ReviewModeDeleteComment` deletes your most recent comment on the current line, after a confirmation
 - `:ReviewModeComment` creates a PR comment on the current line or visual range
-- `:ReviewModeSuggest` suggests your edit on the current line, or drafts a suggestion over the line or visual range starting from the lines as they are
+- `:ReviewModeSuggest` suggests your edit on the current line, or drafts a suggestion over the line or visual range starting from the lines as they are; always in the panel's draft buffer, even with `comments.compose = "prompt"`
 - `:ReviewModeSuggestEdits` queues every edit in the current file as a pending suggestion, and undoes the edits; `:ReviewModeSuggestEdits!` does every PR file you edited
 - `:ReviewModeViewedToggle` toggles viewed state for the current PR file
 - `:ReviewModeHunkViewedToggle` toggles viewed state for the hunk under the cursor
@@ -816,9 +823,16 @@ Reverting does not lean on `u`. The applied range is tracked with an extmark, so
 it restores exactly the lines the suggestion replaced, wherever they have moved
 to since, and edits you have made elsewhere in the file are left alone.
 
+A suggestion is only previewed or applied where it still means what the reviewer
+meant. An outdated thread's lines number the commit it was written on, a thread
+on a deleted line (the base side of the diff) numbers the old file, and a range
+past the end of the buffer is not the one the reviewer saw: all three are
+refused with a message saying which, rather than written over whatever code sits
+at that line now.
+
 **Take them all.** `A` in the panel, or `:ReviewModeSuggestionAcceptAll`, applies
-every suggestion in the current file after a confirmation saying how many and in
-which file. They go in bottom-up, because a suggestion can replace one line with
+every suggestion on an unresolved, current thread in the file after a
+confirmation saying how many and in which file. They go in bottom-up, because a suggestion can replace one line with
 three: applying the top one first would move every line number below it and land
 the next suggestion on the wrong lines.
 

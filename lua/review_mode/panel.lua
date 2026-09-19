@@ -58,7 +58,7 @@ function M.show_thread()
 
   local bufnr = vim.api.nvim_get_current_buf()
   local line = vim.api.nvim_win_get_cursor(0)[1]
-  local threads = api.threads({ path = path, line = line })
+  local threads = api.threads_at(path, line)
   local width = math.floor(vim.o.columns * 0.6)
 
   for _, thread in ipairs(threads) do
@@ -159,7 +159,7 @@ local function render_panel()
 
   if target then
     empty = string.format("No PR comments in %s", target.path)
-    local on_line = api.threads({ path = target.path, line = target.line })
+    local on_line = api.threads_at(target.path, target.line)
     if #on_line > 0 then
       threads = on_line
       for _, thread in ipairs(threads) do
@@ -169,6 +169,11 @@ local function render_panel()
       end
     else
       threads = api.threads({ path = target.path, include_resolved = api.config().comments.show_resolved })
+      -- an all-resolved file still has something to say; its threads beat an
+      -- empty panel beside lines that visibly carry signs
+      if #threads == 0 then
+        threads = api.threads({ path = target.path, include_resolved = true })
+      end
     end
   end
 
@@ -230,12 +235,17 @@ local function panel_thread_at_cursor()
 end
 
 -- The comment whose header is at or above the cursor, within the thread under
--- it. Outside the panel there is no cursor to go by, so take the latest.
+-- it. Outside the panel there is no cursor to go by, so take the latest. With
+-- no rows (cleared by a delete until the reload redraws) there is no telling
+-- which comment the cursor is on, so there is none.
 local function panel_comment_at_cursor()
   local thread = panel_thread_at_cursor()
   local comments = thread and thread.comments or {}
   if #comments == 0 or vim.api.nvim_get_current_win() ~= ui.panel_win then
     return thread, comments[#comments]
+  end
+  if not ui.panel_comment_rows then
+    return thread, nil
   end
 
   local row = vim.api.nvim_win_get_cursor(ui.panel_win)[1] - 1
@@ -327,18 +337,20 @@ function M.composer_reference()
   pcall(vim.api.nvim_win_set_cursor, ui.composer_win, { row + #lines, 0 })
 end
 
--- The ```suggestion block in a draft, as its fence rows (0-based), or nil.
+-- The ```suggestion block in a draft, as its fence rows (0-based), or nil:
+-- the same fence rules the renderer draws it with.
 local function draft_suggestion_block(lines)
-  for open, line in ipairs(lines) do
-    if line:match("^```suggestion%s*$") then
-      for close = open + 1, #lines do
-        if lines[close]:match("^```%s*$") then
-          return open - 1, close - 1
-        end
-      end
-    end
+  return api.suggestion_block(lines)
+end
+
+-- A fence longer than any backtick run the code starts a line with, so code
+-- holding ``` does not close the block early.
+local function suggestion_fence(code)
+  local longest = 2
+  for _, line in ipairs(code) do
+    longest = math.max(longest, #(line:match("^%s*(`*)") or ""))
   end
-  return nil
+  return string.rep("`", longest + 1)
 end
 
 --- Edit the suggestion as code, not as text in a markdown fence: its lines open
@@ -377,9 +389,11 @@ function M.composer_suggest()
 
   local function back(write)
     if write and vim.api.nvim_buf_is_valid(draft_buf) then
-      local block = { "```suggestion" }
-      vim.list_extend(block, vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
-      block[#block + 1] = "```"
+      local code = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+      local fence = suggestion_fence(code)
+      local block = { fence .. "suggestion" }
+      vim.list_extend(block, code)
+      block[#block + 1] = fence
       local open, close = draft_suggestion_block(vim.api.nvim_buf_get_lines(draft_buf, 0, -1, false))
       if open then
         vim.api.nvim_buf_set_lines(draft_buf, open, close + 1, false, block)
@@ -546,8 +560,10 @@ end
 
 local function reply_to_thread(thread, target)
   local comments = thread and thread.comments or {}
-  local last_comment = comments[#comments]
-  if not last_comment or not last_comment.id then
+  -- GitHub's replies endpoint takes the thread's first comment: it does not
+  -- accept replies to replies
+  local first_comment = comments[1]
+  if not first_comment or not first_comment.id then
     vim.notify("Review Mode reply: no comment to reply to", vim.log.levels.WARN)
     return
   end
@@ -558,7 +574,7 @@ local function reply_to_thread(thread, target)
     prompt = string.format("Post this reply to %s?", thread.path or "the thread"),
     source = panel_source(thread, target),
     submit = function(body)
-      api.reply({ thread_id = thread.id, comment_id = last_comment.id, body = body }, function(ok, err)
+      api.reply({ thread_id = thread.id, comment_id = first_comment.id, body = body }, function(ok, err)
         if not ok then
           vim.notify("Review Mode reply failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
           util.keep_text(body)
@@ -922,7 +938,7 @@ local function focused_thread()
   api.ensure_comments()
 
   local line = vim.api.nvim_win_get_cursor(0)[1]
-  local threads = api.threads({ path = path, line = line })
+  local threads = api.threads_at(path, line)
   return threads[#threads],
     {
       win = vim.api.nvim_get_current_win(),
@@ -1250,7 +1266,7 @@ local function focused_own_comment()
   end
 
   local own_thread, own
-  for _, candidate in ipairs(api.threads({ path = target.path, line = target.line })) do
+  for _, candidate in ipairs(api.threads_at(target.path, target.line)) do
     for _, comment in ipairs(candidate.comments) do
       if comment.viewer_did_author and (not own or (comment.created_at or "") >= (own.created_at or "")) then
         own_thread, own = candidate, comment

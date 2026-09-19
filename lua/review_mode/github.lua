@@ -98,6 +98,8 @@ function M.normalize_thread_comment(thread, comment)
     line = comment.line or thread.line,
     original_line = comment.originalLine or thread.originalLine,
     start_line = comment.startLine or thread.startLine,
+    original_start_line = comment.originalStartLine or thread.originalStartLine,
+    side = thread.diffSide,
     body = comment.body,
     -- id and name are for crediting a suggestion's author in a commit
     user = comment.author and {
@@ -281,33 +283,9 @@ end
 
 -- End conditional REST comment fetch -------------------------------------------
 
-function M.review_threads_async(generation, after, threads, callback)
-  local owner, name = core.repo_parts()
-  if not owner or not name or not state.pr then
-    callback(nil, "could not determine GitHub repository or PR")
-    return
-  end
-
-  local query = [[
-query($owner: String!, $name: String!, $number: Int!, $after: String) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
-      reviewThreads(first: 50, after: $after) {
-        pageInfo {
-          hasNextPage
-          endCursor
-        }
-        nodes {
-          id
-          path
-          line
-          originalLine
-          startLine
-          diffSide
-          isResolved
-          isOutdated
-          comments(first: 100) {
-            nodes {
+-- The fields of one review comment, shared by the thread query and the query
+-- that pages a long thread's comments.
+local comment_fields = [[
               id
               databaseId
               body
@@ -315,6 +293,7 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
               line
               originalLine
               startLine
+              originalStartLine
               createdAt
               url
               state
@@ -337,6 +316,96 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
                   totalCount
                 }
               }
+]]
+
+-- The thread query takes each thread's first 100 comments. Fetch the rest of
+-- any thread that has more, one page at a time, then hand the list on.
+function M.thread_comment_pages_async(generation, threads, index, callback)
+  local thread = threads[index]
+  if not thread then
+    callback(threads, nil)
+    return
+  end
+  local page = thread.comments and thread.comments.pageInfo or {}
+  if not page.hasNextPage or not page.endCursor then
+    M.thread_comment_pages_async(generation, threads, index + 1, callback)
+    return
+  end
+
+  local query = [[
+query($id: ID!, $after: String) {
+  node(id: $id) {
+    ... on PullRequestReviewThread {
+      comments(first: 100, after: $after) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        nodes {
+]] .. comment_fields .. [[
+        }
+      }
+    }
+  }
+}
+]]
+  gh_json_async({
+    "api",
+    "graphql",
+    "-f",
+    "query=" .. query,
+    "-F",
+    "id=" .. thread.id,
+    "-F",
+    "after=" .. page.endCursor,
+  }, function(result, err)
+    if not core.is_current(generation) then
+      return
+    end
+    local comments = result and result.data and result.data.node and result.data.node.comments
+    if not comments then
+      callback(nil, err or "GitHub returned no comments for a review thread page")
+      return
+    end
+    vim.list_extend(thread.comments.nodes, comments.nodes or {})
+    thread.comments.pageInfo = comments.pageInfo
+    M.thread_comment_pages_async(generation, threads, index, callback)
+  end)
+end
+
+function M.review_threads_async(generation, after, threads, callback)
+  local owner, name = core.repo_parts()
+  if not owner or not name or not state.pr then
+    callback(nil, "could not determine GitHub repository or PR")
+    return
+  end
+
+  local query = [[
+query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 50, after: $after) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        nodes {
+          id
+          path
+          line
+          originalLine
+          startLine
+          originalStartLine
+          diffSide
+          isResolved
+          isOutdated
+          comments(first: 100) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            nodes {
+]] .. comment_fields .. [[
             }
           }
         }
@@ -387,8 +456,22 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
       return
     end
 
-    callback(threads, nil)
+    M.thread_comment_pages_async(generation, threads, 1, callback)
   end)
+end
+
+-- A forced load that arrived while another was running asked for data newer
+-- than that run can hold (a comment just posted, a thread just resolved): drop
+-- the run's result instead of showing or caching it, and fetch again. Returns
+-- true when it did.
+local function superseded()
+  state.comments_loading = false
+  if not state.comments_reload_queued then
+    return false
+  end
+  state.comments_reload_queued = false
+  M.load_comments_async({ force = true })
+  return true
 end
 
 function M.load_comments_from_rest_async(generation)
@@ -397,7 +480,9 @@ function M.load_comments_from_rest_async(generation)
       return
     end
 
-    state.comments_loading = false
+    if superseded() then
+      return
+    end
     if not comments then
       vim.notify("Failed to load PR comments: " .. tostring(err or "unknown error"), vim.log.levels.WARN)
       return
@@ -417,7 +502,12 @@ end
 
 function M.load_comments_async(opts)
   opts = opts or {}
-  if not state.config.comments.enabled or not state.active or state.comments_loading then
+  if not state.config.comments.enabled or not state.active then
+    return
+  end
+  if state.comments_loading then
+    -- the running load may predate the write that forced this one
+    state.comments_reload_queued = state.comments_reload_queued or opts.force == true
     return
   end
 
@@ -443,6 +533,7 @@ function M.load_comments_async(opts)
   end
 
   state.comments_loading = true
+  state.comments_reload_queued = false
   M.review_threads_async(generation, nil, {}, function(threads, err)
     if not core.is_current(generation) then
       return
@@ -453,12 +544,14 @@ function M.load_comments_async(opts)
       return
     end
 
+    if superseded() then
+      return
+    end
     state.comments, state.comment_threads = M.group_review_threads(threads)
     local key = core.cache_key()
     if key then
       M.write_comment_cache_entry(key, state.comments, state.comment_threads)
     end
-    state.comments_loading = false
     hooks.emit("comments_loaded", { repo = state.repo, pr = state.pr })
   end)
 end

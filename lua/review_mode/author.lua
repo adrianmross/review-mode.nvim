@@ -92,7 +92,11 @@ function M.touched_threads(ranges)
   local touched = {}
   for _, thread in ipairs(api.threads({ include_resolved = true })) do
     local last = thread.line
-    local resolvable = not thread.is_resolved and not thread.is_outdated and not thread.id:find(":", 1, true)
+    -- a base-side (LEFT) thread's line numbers the PR's base, not `from`
+    local resolvable = not thread.is_resolved
+      and not thread.is_outdated
+      and thread.side ~= "LEFT"
+      and not thread.id:find(":", 1, true)
     for _, range in ipairs(resolvable and last and ranges[thread.path] or {}) do
       if range[1] <= last and range[2] >= (thread.start_line or last) then
         touched[#touched + 1] = thread
