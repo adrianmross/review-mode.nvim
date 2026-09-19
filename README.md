@@ -1022,6 +1022,14 @@ with immediate focused-file prefetch, opportunistic `gitsigns.nvim` hunk-cache
 reuse, and an optional delayed background scan for PRs under
 `performance.background_hunk_scan.max_files`.
 
+On a warm cache the comment signs are drawn from `stdpath("cache")` before any
+`gh` call returns: each branch remembers the PR it last resolved to, so even a
+plain `:ReviewMode` shows that PR's cached comments at once and reconciles when
+`gh pr view` answers. `scripts/validate.sh` holds this to a budget: with every
+`gh` call slowed by 3s, the first comment sign of a warm start must appear
+within `REVIEW_MODE_STARTUP_BUDGET_MS` (default 500 ms; ~20 ms measured). The
+measured time is printed on every run.
+
 External launchers can provide `GH_REVIEW_REPO`, `GH_REVIEW_PR`,
 `GH_REVIEW_BASE`, and `GH_REVIEW_HEAD` to avoid startup discovery calls, or
 `GL_REVIEW_MR`, `GL_REVIEW_REPO`, `GL_REVIEW_BASE` and `GL_REVIEW_HEAD` for

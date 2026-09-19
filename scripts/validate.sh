@@ -43,6 +43,12 @@ cat > "$tmp/bin/gh" <<'GH'
 #!/usr/bin/env bash
 set -euo pipefail
 
+# startup budget fixture: a slow network, so cache-first rendering can be told
+# apart from waiting on gh
+if [[ -n "${REVIEW_MODE_GH_DELAY:-}" ]]; then
+  sleep "$REVIEW_MODE_GH_DELAY"
+fi
+
 case "$1 $2" in
   "pr view")
     args="$*"
@@ -473,3 +479,31 @@ REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/edit_suggestion_fixture.lua"
+
+# Time to first comment sign on a warm cache, with every gh call slowed by the
+# delay: the sign must come from the comment cache, not wait on the network. The
+# budget sits far above the measured ~20 ms and far below the delay, so CI noise
+# cannot flip it but waiting on gh always does. Override with
+# REVIEW_MODE_STARTUP_BUDGET_MS. Run twice: plain discovery (gh names the PR)
+# and GH_REVIEW_* (the PR is known up front).
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/startup-cache" \
+XDG_STATE_HOME="$tmp/startup-state" \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+REVIEW_MODE_STARTUP_GH_DELAY=3 \
+nvim --headless -u NONE -i NONE \
+  -c "set noswapfile" \
+  -l "$repo_root/scripts/startup_budget_fixture.lua"
+
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/startup-env-cache" \
+XDG_STATE_HOME="$tmp/startup-env-state" \
+GH_REVIEW_REPO=owner/repo \
+GH_REVIEW_PR=123 \
+GH_REVIEW_BASE=main \
+GH_REVIEW_HEAD=abc123 \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+REVIEW_MODE_STARTUP_GH_DELAY=3 \
+nvim --headless -u NONE -i NONE \
+  -c "set noswapfile" \
+  -l "$repo_root/scripts/startup_budget_fixture.lua"

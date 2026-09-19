@@ -1430,6 +1430,7 @@ function M.start(opts)
   announce("start")
 
   local review_loading_started = false
+  local seeded_key = nil
   if state.base then
     review_loading_started = true
     set_gitsigns_base()
@@ -1437,6 +1438,9 @@ function M.start(opts)
     load_review_async(generation, { open_initial = true })
   else
     vim.notify("Review Mode: loading PR metadata")
+    if state.provider ~= "local" then
+      seeded_key = github.hydrate_for_branch(root)
+    end
   end
 
   -- Local reviews: the refs are already resolved and there is nothing to ask.
@@ -1460,6 +1464,11 @@ function M.start(opts)
         return
       end
       state.active = false
+      if seeded_key then
+        -- the cached comments drawn ahead of gh belong to no session now
+        core.reset_review_data()
+        annotate_open_buffers()
+      end
       -- start installed both layers before it knew it would fail; a session
       -- that never started must not leave its keys behind
       clear_mode_keys()
@@ -1496,6 +1505,13 @@ function M.start(opts)
     state.base = state.base or meta.baseRefName or "main"
     state.head = state.head or meta.headRefOid
     state.metadata_loaded = true
+    if state.provider == "github" then
+      github.remember_branch(root)
+    end
+    if seeded_key and seeded_key ~= core.cache_key() then
+      -- the branch moved to another PR: drop what was drawn from the old one
+      state.comments, state.comment_threads = {}, {}
+    end
 
     viewed_state.load_viewed_state()
     schedule_comments_ui_refresh()
