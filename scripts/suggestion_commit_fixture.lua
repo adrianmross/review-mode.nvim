@@ -192,6 +192,113 @@ assert(
   "each suggestion thread should be resolved once: " .. table.concat(resolved, " ")
 )
 
+-- Edits at the edges of a trial ---------------------------------------------------
+
+-- A trial over HEAD lines 6-8 (same1, same2, same3), with the user's edit right
+-- at one of its edges. Edits beside the replaced lines are the user's own and
+-- stay out of the commit; edits into them cannot be told apart from the trial.
+local head_lines = vim.split(git({ "show", "HEAD:file.txt" }), "\n", { plain = true })
+assert(head_lines[6] == "same1" and head_lines[8] == "same3", "unexpected HEAD for the edge cases")
+local expected = vim.list_slice(head_lines, 1, 5)
+vim.list_extend(expected, { "same mid" })
+vim.list_extend(expected, vim.list_slice(head_lines, 9, #head_lines))
+expected = table.concat(expected, "\n") .. "\n"
+
+local case_id = 0
+local function edge(name, before, after, start_line, end_line)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, head_lines)
+  if before then
+    before()
+  end
+  case_id = case_id + 1
+  local trial = assert(api.accept_suggestion({
+    id = "edge_" .. case_id,
+    path = "file.txt",
+    start_line = start_line or 6,
+    end_line = end_line or 8,
+    lines = { "same mid" },
+  }, { buf = buf }))
+  if after then
+    after()
+  end
+  local plan, err = api.suggestion_commit_plan()
+  api.revert_suggestion(trial.id)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, head_lines)
+  return plan, err, name
+end
+
+local function safe(plan, err, name)
+  assert(plan, name .. " should be committable: " .. tostring(err))
+  assert(plan.files[1].content == expected, name .. " leaked into the commit:\n" .. plan.files[1].content)
+end
+local function refused(needle, plan, err, name)
+  assert(
+    not plan and tostring(err):find(needle, 1, true),
+    name .. " should be refused with '" .. needle .. "': " .. tostring(err)
+  )
+end
+
+-- the trial sits on row 5 (0-based) once applied
+safe(edge("deleting the line right above", nil, function()
+  vim.api.nvim_buf_set_lines(buf, 4, 5, false, {})
+end))
+safe(edge("deleting the line right below", nil, function()
+  vim.api.nvim_buf_set_lines(buf, 6, 7, false, {})
+end))
+safe(edge("inserting right below", nil, function()
+  vim.api.nvim_buf_set_lines(buf, 6, 6, false, { "mine below" })
+end))
+safe(edge("inserting at the end of the line above", nil, function()
+  vim.api.nvim_buf_set_text(buf, 4, #head_lines[5], 4, #head_lines[5], { "", "mine above" })
+end))
+-- a line opened at the trial's first row joins the trial: the mark's gravity
+-- takes it in, so it reads as the user's typing inside the trial
+refused(
+  "the trial suggestion was edited",
+  edge("inserting at the trial's first row", nil, function()
+    vim.api.nvim_buf_set_lines(buf, 5, 5, false, { "mine above" })
+  end)
+)
+-- edits made to the lines before the trial replaced them
+refused(
+  "was edited around the trial suggestion",
+  edge("editing inside the replaced lines", function()
+    vim.api.nvim_buf_set_lines(buf, 6, 7, false, { "same2 mine" })
+  end)
+)
+refused(
+  "was edited around the trial suggestion",
+  edge("deleting inside the replaced lines", function()
+    vim.api.nvim_buf_set_lines(buf, 6, 7, false, {})
+  end, nil, 6, 7)
+)
+refused(
+  "was edited around the trial suggestion",
+  edge("inserting inside the replaced lines", function()
+    vim.api.nvim_buf_set_lines(buf, 6, 6, false, { "mine inside" })
+  end, nil, 6, 9)
+)
+
+-- A display name is user-controlled: it must not add a trailer of its own.
+vim.api.nvim_buf_set_lines(buf, 0, -1, false, head_lines)
+local hostile = assert(api.accept_suggestion({
+  id = "hostile",
+  path = "file.txt",
+  start_line = 6,
+  end_line = 8,
+  lines = { "same mid" },
+  suggester = { login = "eve\n", id = 7, name = "Eve\nCo-authored-by: Mallory <m@x>" },
+}, { buf = buf }))
+local hostile_plan = assert(api.suggestion_commit_plan())
+assert(
+  hostile_plan.message
+    == "Apply suggestion from code review\n\nCo-authored-by: Eve Co-authored-by: Mallory m@x <7+eve@users.noreply.github.com>\n",
+  "a hostile name should stay on one trailer line:\n" .. hostile_plan.message
+)
+api.revert_suggestion(hostile.id)
+vim.api.nvim_buf_set_lines(buf, 0, -1, false, head_lines)
+vim.bo[buf].modified = false
+
 pr.stop()
 
 -- Local reviews: committed, but nobody to credit -------------------------------------

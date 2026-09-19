@@ -601,7 +601,10 @@ end
 
 -- The overlap test for a hunk from vim.diff against lines first..last of its
 -- new side: -1 before them, 1 after, 0 when it touches them. A hunk adding no
--- lines (count 0) sits between its start line and the next.
+-- lines (count 0) is a gap, and its start is the new-side line *before* the gap
+-- (0 at the top): "1 2 3 4" -> "1 3 4" is { 2, 1, 1, 0 }. So a deletion right
+-- above the lines has start first - 1, right below has start last, and only a
+-- start in first..last-1 falls between two of them.
 local function hunk_side(hunk, first, last)
   local start, count = hunk[3], hunk[4]
   if count == 0 then
@@ -658,11 +661,8 @@ local function committed_content(path, file_trials)
         shift = shift + hunk[2] - hunk[4]
       end
     end
+    -- no hunk touches the replaced lines, so HEAD has them, unchanged, here
     place.head_first = place.first + shift
-    local at_head = vim.list_slice(head, place.head_first, place.head_first + #place.trial.original - 1)
-    if not vim.deep_equal(at_head, place.trial.original) then
-      return nil, string.format("%s:%d no longer matches HEAD under the trial suggestion", path, place.first)
-    end
   end
 
   -- bottom-up, so each replacement leaves the rows above it where they were
@@ -687,10 +687,18 @@ end
 -- GitHub credits a user as <id>+<login>@users.noreply.github.com. Without the
 -- id (the comment cache predates it, or a bot), <login>@... still links on
 -- most accounts, though not ones that keep their email private.
+--
+-- A display name is whatever the user typed. A newline in it would start a
+-- trailer of its own, and < or > would end the address early, so the name is
+-- flattened to one line without them; a login is kept to GitHub's alphabet.
 local function trailer(suggester)
-  local name = type(suggester.name) == "string" and suggester.name ~= "" and suggester.name or suggester.login
+  local login = suggester.login:gsub("[^%w%-%[%]]", "")
+  local name = type(suggester.name) == "string" and vim.trim((suggester.name:gsub("[%c<>]+", " "):gsub("%s+", " ")))
+  if not name or name == "" then
+    name = login
+  end
   local id = type(suggester.id) == "number" and (string.format("%d+", suggester.id)) or ""
-  return string.format("Co-authored-by: %s <%s%s@users.noreply.github.com>", name, id, suggester.login)
+  return string.format("Co-authored-by: %s <%s%s@users.noreply.github.com>", name, id, login)
 end
 
 local function commit_message(committed)
