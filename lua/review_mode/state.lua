@@ -69,6 +69,11 @@ local defaults = {
     unified_context = 3,
     use_fast_diffopt = true,
   },
+  -- CI check-run annotations on the PR head as vim.diagnostic entries, in a
+  -- namespace of their own (GitHub only)
+  ci = {
+    diagnostics = true,
+  },
   gitsigns = {
     enabled = true,
   },

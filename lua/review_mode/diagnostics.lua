@@ -153,12 +153,69 @@ function M.set_quickfix(opts)
   end
 end
 
+-- CI annotations --------------------------------------------------------------
+-- Their own namespace and source, so they toggle apart from the threads. Nothing
+-- else draws CI failures, so this namespace keeps vim.diagnostic's display.
+
+M.ci_namespace = vim.api.nvim_create_namespace("review_mode_ci")
+
+local function ci_enabled()
+  local ci = api.config().ci
+  return api.is_active() and type(ci) == "table" and ci.diagnostics == true
+end
+
+function M.refresh_ci_buffer(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  local path = util.buf_relpath(bufnr)
+  if not ci_enabled() or not path then
+    vim.diagnostic.reset(M.ci_namespace, bufnr)
+    return
+  end
+
+  local items = {}
+  for _, annotation in ipairs(api.ci_annotations(path)) do
+    items[#items + 1] = {
+      lnum = annotation.start_line - 1,
+      end_lnum = annotation.end_line - 1,
+      col = 0,
+      severity = annotation.severity,
+      message = annotation.message,
+      source = "review-mode CI",
+      user_data = { check = annotation.check },
+    }
+  end
+  vim.diagnostic.set(M.ci_namespace, bufnr, items)
+end
+
+function M.refresh_ci()
+  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_loaded(bufnr) then
+      M.refresh_ci_buffer(bufnr)
+    end
+  end
+end
+
+function M.toggle_ci()
+  local cfg = api.config()
+  cfg.ci = type(cfg.ci) == "table" and cfg.ci or {}
+  cfg.ci.diagnostics = not cfg.ci.diagnostics
+  if cfg.ci.diagnostics and api.is_active() then
+    api.reload_ci()
+  else
+    M.refresh_ci()
+  end
+  vim.notify("Review Mode CI diagnostics " .. (cfg.ci.diagnostics and "enabled" or "disabled"))
+end
+
 function M.setup()
   vim.api.nvim_create_autocmd({ "BufReadPost", "BufEnter" }, {
     group = vim.api.nvim_create_augroup("review_mode_diagnostics", { clear = true }),
     callback = function(args)
       if api.is_active() then
         M.refresh_buffer(args.buf)
+        M.refresh_ci_buffer(args.buf)
       end
     end,
   })
@@ -168,5 +225,9 @@ end
 hooks.on("comments_loaded", M.refresh)
 hooks.on("viewed_changed", M.refresh)
 hooks.on("stop", M.clear)
+hooks.on("ci_loaded", M.refresh_ci)
+hooks.on("stop", function()
+  vim.diagnostic.reset(M.ci_namespace)
+end)
 
 return M
