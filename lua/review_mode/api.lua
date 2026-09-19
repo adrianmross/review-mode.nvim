@@ -56,6 +56,8 @@ M.events = {
   "suggestion_reverted",
   -- CI annotations
   "ci_loaded",
+  -- follow HEAD: { from = <old sha>, to = <new sha> }
+  "head_moved",
 }
 
 -- Session ---------------------------------------------------------------------
@@ -478,10 +480,11 @@ end
 local jumps = {
   hunk = { "next_hunk", "prev_hunk" },
   comment = { "next_comment", "prev_comment" },
+  unresolved = { "next_unresolved", "prev_unresolved" },
   file = { "next_file", "prev_file" },
 }
 
---- kind is "hunk", "comment" or "file".
+--- kind is "hunk", "comment", "unresolved" or "file".
 function M.goto_next(kind)
   local names = jumps[kind] or jumps.hunk
   return plugin()[names[1]]()

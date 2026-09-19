@@ -365,7 +365,7 @@ api.edit_comment({ comment_id = ..., body = ... }, cb)  -- your own comments onl
 api.delete_comment(comment_id, cb)
 api.can_modify_comment(comment_id)   --> true, or false and why not
 
--- navigation ("hunk" | "comment" | "file")
+-- navigation ("hunk" | "comment" | "unresolved" | "file")
 api.goto_next("comment") / api.goto_prev("hunk")
 
 -- rendering, so a custom UI reuses the thread renderer instead of reimplementing it
@@ -465,6 +465,7 @@ prefer.
 | `on_suggestion_accepted` | `ReviewModeSuggestionAccepted` | a suggestion is applied as a trial (`{ id, path, line, thread_id, added, removed }`) |
 | `on_suggestion_reverted` | `ReviewModeSuggestionReverted` | a trial suggestion is reverted |
 | `on_ci_loaded` | `ReviewModeCiLoaded` | CI annotations for the PR head are fetched (or cleared) |
+| `on_head_moved` | `ReviewModeHeadMoved` | follow-HEAD notices HEAD moved mid-review (`{ from, to }` SHAs) |
 
 **Overrides** are asked *how* something should be done, and what they return
 replaces the built-in behavior. Return `nil` to fall back to the default, so an
@@ -534,6 +535,24 @@ and no process per file — it adds ~15 ms to a 100-file PR. Within a tier and
 wherever nothing links two files, git's order stands; a cycle is broken at its
 earliest file in git's order. `files.order = "diff"` keeps git's order
 throughout.
+
+### When the PR is yours
+
+Review mode works for the author too, for the round after the feedback lands:
+
+- **Resolve on commit.** When a commit you make mid-review changes a line an
+  unresolved thread is anchored to, you are offered — once, listing the
+  threads — to reply "Fixed in `<sha>`" to each and resolve it. Nothing is
+  posted unless you confirm. It only asks when GitHub says you wrote the PR,
+  and only when the move added commits on top: a checkout, reset or rebase is
+  not a fix. The SHA links once you push. Set `author.offer_resolve = false`
+  to turn it off.
+- **Work through what is left.** `:ReviewModeNextUnresolved` /
+  `:ReviewModePrevUnresolved` step through the unresolved threads across the
+  whole PR, where `]r` / `[r` also stop at resolved ones.
+- **Ask for another look.** `:ReviewModeRerequest` re-requests review from
+  everyone who has reviewed the PR (not you, not bots), after a confirmation
+  naming them.
 
 ### Its own workspace (opt-in)
 
@@ -659,6 +678,8 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModePrevHunk` jumps to the previous PR hunk
 - `:ReviewModeNextComment` jumps to the next PR comment
 - `:ReviewModePrevComment` jumps to the previous PR comment
+- `:ReviewModeNextUnresolved` / `:ReviewModePrevUnresolved` jump to the next / previous unresolved thread, across files
+- `:ReviewModeRerequest` re-requests review from everyone who has reviewed the PR, after a confirmation naming them
 - `:ReviewModeNextFile` jumps to the next changed file
 - `:ReviewModePrevFile` jumps to the previous changed file
 - `:ReviewModeOldToggle` toggles the base version or unified diff for the current file
@@ -1081,6 +1102,9 @@ Install snacks.nvim or Telescope for the preview and toggle keymaps.
 require("review_mode").setup({
   auto_open_first_change = true,
   follow_head = true,
+  -- when the PR is yours: after a commit mid-review, offer to reply "Fixed in
+  -- <sha>" to the unresolved threads it changed and resolve them (confirmed)
+  author = { offer_resolve = true },
   no_pr = "local", -- "local" | "error": what :ReviewMode does with no PR
   provider = "auto", -- "auto" | "github" | "gitlab"
   gitlab_hosts = {}, -- self-hosted GitLab hosts for provider = "auto"

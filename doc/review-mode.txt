@@ -95,6 +95,17 @@ as a whole word; init, index, mod, main and names under three letters do not
 count. Where nothing links two files git's order stands, and a cycle is broken
 at its earliest file in git's order. "diff" keeps git's order throughout.
 
+                                                          *review-mode-author*
+When the PR is yours, a commit made mid-review that changes a line an
+unresolved thread is anchored to brings one confirmation listing those
+threads; accepting replies "Fixed in `<sha>`" to each and resolves it. Nothing
+is posted without it. It asks only when GitHub says you wrote the PR, and only
+when HEAD moved forward: a checkout, reset or rebase is not a fix. The SHA
+links once you push. author.offer_resolve = false turns it off. The
+head_moved event ({ from, to }) fires whenever follow-HEAD sees HEAD move.
+|:ReviewModeNextUnresolved| walks the threads still open, and
+|:ReviewModeRerequest| asks the reviewers to look again.
+
 On a branch with no PR, :ReviewMode reviews it locally instead (see
 |:ReviewModeLocal|) and says so; the statusline shows "local repo@ref". It falls
 back only when gh answers that there is no PR, never on an auth, network or
@@ -307,6 +318,22 @@ COMMANDS                                                  *review-mode-commands*
                                                         *:ReviewModePrevComment*
 :ReviewModePrevComment
         Jump to the previous PR comment.
+
+                                                     *:ReviewModeNextUnresolved*
+:ReviewModeNextUnresolved
+        Jump to the next unresolved review thread, crossing files and
+        wrapping. Unlike |:ReviewModeNextComment| (]r), resolved threads are
+        passed over.
+
+                                                     *:ReviewModePrevUnresolved*
+:ReviewModePrevUnresolved
+        Jump to the previous unresolved review thread.
+
+                                                          *:ReviewModeRerequest*
+:ReviewModeRerequest
+        Re-request review from everyone who has reviewed the PR, after a
+        confirmation naming them. The PR's author and bots are left out.
+        GitHub only.
 
                                                         *:ReviewModeNextFile*
 :ReviewModeNextFile
@@ -571,6 +598,8 @@ SETUP                                                        *review-mode-setup*
   require("review_mode").setup({
     auto_open_first_change = true,
     follow_head = true,
+    -- see |review-mode-author|
+    author = { offer_resolve = true },
     no_pr = "local",
     provider = "auto", -- "auto" | "github" | "gitlab"
     gitlab_hosts = {}, -- self-hosted GitLab hosts for provider = "auto"

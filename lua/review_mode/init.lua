@@ -169,12 +169,12 @@ local function comment_line(comment)
   return tonumber(comment.line) or tonumber(comment.original_line) or tonumber(comment.start_line)
 end
 
-local function comment_positions()
+local function comment_positions(unresolved_only)
   local positions = {}
   for _, path in ipairs(state.file_order) do
     for _, comment in ipairs(state.comments[path] or {}) do
       local line = comment_line(comment)
-      if line then
+      if line and not (unresolved_only and comment.is_resolved) then
         positions[#positions + 1] = {
           path = path,
           line = line,
@@ -1028,6 +1028,24 @@ function head_watch.reload()
   end)
 end
 
+-- where HEAD was and is, from the reflog lines appended since the `previous`
+-- stamp: the first one's old sha and the last one's new sha
+function head_watch.moved(previous)
+  local size = tonumber(tostring(previous):match("^(%d+):"))
+  local file = size and io.open(state.head_log_path, "r")
+  if not file then
+    return nil
+  end
+  file:seek("set", size)
+  local from, to
+  for line in file:lines() do
+    local old, new = line:match("^(%x+) (%x+) ")
+    from, to = from or old, new or to
+  end
+  file:close()
+  return from, to
+end
+
 function head_watch.check()
   if not state.config.follow_head or not state.active or not state.head_log_path or state.maps_loading then
     return
@@ -1038,8 +1056,12 @@ function head_watch.check()
     return
   end
 
+  local from, to = head_watch.moved(state.head_log_stamp)
   state.head_log_stamp = stamp
   head_watch.reload()
+  if from and to and from ~= to then
+    hooks.emit("head_moved", { from = from, to = to })
+  end
 end
 
 local function open_initial_change()
@@ -1293,7 +1315,7 @@ local function jump_hunk(delta)
   jump_changed_file(delta)
 end
 
-local function jump_comment(delta)
+local function jump_comment(delta, unresolved_only)
   if not ensure_active() then
     return
   end
@@ -1308,10 +1330,11 @@ local function jump_comment(delta)
     github.load_comments_async()
   end
 
-  local positions = comment_positions()
+  local positions = comment_positions(unresolved_only)
   if #positions == 0 then
     vim.notify(
-      state.comments_loading and "Review Mode comments are still loading" or "No PR comments loaded",
+      state.comments_loading and "Review Mode comments are still loading"
+        or (unresolved_only and "No unresolved threads" or "No PR comments loaded"),
       vim.log.levels.INFO
     )
     return
@@ -1842,6 +1865,19 @@ end
 
 function M.prev_comment()
   jump_comment(-1)
+end
+
+-- the author's worklist: ]r stops at resolved threads too
+function M.next_unresolved()
+  jump_comment(1, true)
+end
+
+function M.prev_unresolved()
+  jump_comment(-1, true)
+end
+
+function M.rerequest_review()
+  require("review_mode.author").rerequest()
 end
 
 function M.next_file()
@@ -2789,6 +2825,8 @@ function M.action_items()
     { category = "Thread", label = "Resolve / unresolve thread", run = M.toggle_resolve },
     { category = "Thread", label = "Next thread", run = M.next_comment },
     { category = "Thread", label = "Previous thread", run = M.prev_comment },
+    { category = "Thread", label = "Next unresolved thread", run = M.next_unresolved },
+    { category = "Thread", label = "Previous unresolved thread", run = M.prev_unresolved },
     {
       category = "Thread",
       label = "Threads to quickfix",
@@ -2874,6 +2912,7 @@ function M.action_items()
     { category = "PR", label = "Copy PR URL", run = M.copy_url },
     { category = "PR", label = "Show PR status", run = M.status },
     { category = "PR", label = "Show PR checks", run = M.checks },
+    { category = "PR", label = "Re-request review from past reviewers", run = M.rerequest_review },
     {
       category = "PR",
       label = "Toggle CI diagnostics",
@@ -3044,6 +3083,21 @@ function M.setup(opts)
       "ReviewModePrevComment",
       M.prev_comment,
       { desc = "Jump to previous PR comment in normal review mode" }
+    )
+    vim.api.nvim_create_user_command(
+      "ReviewModeNextUnresolved",
+      M.next_unresolved,
+      { desc = "Jump to the next unresolved PR thread, across files" }
+    )
+    vim.api.nvim_create_user_command(
+      "ReviewModePrevUnresolved",
+      M.prev_unresolved,
+      { desc = "Jump to the previous unresolved PR thread, across files" }
+    )
+    vim.api.nvim_create_user_command(
+      "ReviewModeRerequest",
+      M.rerequest_review,
+      { desc = "Re-request review from everyone who has reviewed the PR" }
     )
     vim.api.nvim_create_user_command(
       "ReviewModeNextFile",
@@ -3308,6 +3362,8 @@ function M.setup(opts)
 
   -- Diagnostics and quickfix: requiring it wires its event subscriptions.
   require("review_mode.diagnostics").setup()
+  -- Author mode: requiring it subscribes to head_moved.
+  require("review_mode.author")
 
   vim.api.nvim_create_autocmd({ "BufReadPost", "BufEnter" }, {
     group = vim.api.nvim_create_augroup("normal_review_mode", { clear = true }),
