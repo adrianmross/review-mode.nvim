@@ -86,9 +86,13 @@ case "$1 $2" in
   "api repos/owner/repo/pulls/123/comments?per_page=100"|"api repos/owner/repo/pulls/123/comments?per_page=100&page=1")
     printf '%s\n' '[{"id":1,"path":"file.txt","line":2,"body":"Needs review","user":{"login":"reviewer"},"created_at":"2024-01-02T03:04:05Z","html_url":"https://github.com/owner/repo/pull/123#discussion_r1","author_association":"OWNER","reactions":{"+1":2,"laugh":0,"hooray":1,"heart":0,"rocket":0,"eyes":0,"total_count":3}},{"id":2,"path":"file.txt","line":4,"body":"Check final line","user":{"login":"reviewer"},"created_at":"2024-01-02T03:04:05Z","author_association":"NONE","reactions":{"+1":0,"total_count":0}}]'
     ;;
-  "api repos/owner/repo/pulls/123/comments/1/replies"|"api repos/owner/repo/pulls/123/comments/2/replies")
+  "api repos/owner/repo/pulls/123/comments/1/replies"|"api repos/owner/repo/pulls/123/comments/2/replies"|"api repos/owner/repo/pulls/123/comments/3/replies")
     args="$*"
     if [[ "$args" == *"--method POST"* ]]; then
+      # author fixture: which thread got a "Fixed in" reply, and what it said
+      if [[ -n "${REVIEW_MODE_AUTHOR_LOG:-}" ]]; then
+        printf 'reply %s\n' "$args" >> "$REVIEW_MODE_AUTHOR_LOG"
+      fi
       # optimistic posting: slow the answer down, or fail it
       if [[ -n "${REVIEW_MODE_POST_DELAY:-}" ]]; then
         sleep "$REVIEW_MODE_POST_DELAY"
@@ -109,7 +113,10 @@ case "$1 $2" in
     if [[ -n "${REVIEW_MODE_GH_LOG:-}" ]]; then
       printf '%s\n' "$*" >> "$REVIEW_MODE_GH_LOG"
     fi
-    if [[ "$3 $4" == "PATCH repos/owner/repo/pulls/comments/11" ]]; then
+    if [[ "$3 $4" == "POST repos/owner/repo/pulls/123/requested_reviewers" ]]; then
+      printf 'rerequest %s\n' "$*" >> "${REVIEW_MODE_AUTHOR_LOG:-/dev/null}"
+      printf '{"number":123}\n'
+    elif [[ "$3 $4" == "PATCH repos/owner/repo/pulls/comments/11" ]]; then
       printf '{"id":11,"path":"file.txt","line":2,"body":"edited"}\n'
     elif [[ "$3 $4" != "DELETE repos/owner/repo/pulls/comments/11" ]]; then
       echo "unexpected gh --method args: $*" >&2
@@ -138,6 +145,7 @@ case "$1 $2" in
     if [[ "$args" == *"viewerViewedState"* ]]; then
       printf '{"data":{"repository":{"pullRequest":{"id":"PR_node","files":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"path":"file.txt","viewerViewedState":"VIEWED"}]}}}}}\n'
     elif [[ "$args" == *"resolveReviewThread"* ]]; then
+      printf 'resolve %s\n' "$args" >> "${REVIEW_MODE_AUTHOR_LOG:-/dev/null}"
       printf '{"data":{"resolveReviewThread":{"thread":{"id":"thread_1","isResolved":true}}}}\n'
     elif [[ "$args" == *"unresolveReviewThread"* ]]; then
       printf '{"data":{"unresolveReviewThread":{"thread":{"id":"thread_1","isResolved":false}}}}\n'
@@ -161,6 +169,16 @@ case "$1 $2" in
       # printf '%s\n' so the escaped newlines inside comment bodies survive as
       # JSON escapes instead of being expanded into real newlines.
       printf '%s\n' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"id":"thread_1","path":"file.txt","line":2,"originalLine":2,"startLine":null,"diffSide":"RIGHT","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_1","databaseId":1,"path":"file.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r1","state":"SUBMITTED","authorAssociation":"OWNER","viewerDidAuthor":false,"body":"Needs review\n\n```suggestion\ntwo improved\n```","author":{"login":"reviewer"},"reactionGroups":[{"content":"THUMBS_UP","reactors":{"totalCount":2}},{"content":"HOORAY","reactors":{"totalCount":1}},{"content":"EYES","reactors":{"totalCount":0}}]}]}},{"id":"thread_2","path":"file.txt","line":4,"originalLine":4,"startLine":null,"diffSide":"RIGHT","isResolved":true,"isOutdated":false,"comments":{"nodes":[{"id":"comment_2","databaseId":2,"path":"file.txt","line":4,"originalLine":4,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r2","authorAssociation":"CONTRIBUTOR","body":"Check final line","author":{"login":"reviewer"},"reactionGroups":[]},{"id":"comment_4","databaseId":4,"path":"file.txt","line":4,"originalLine":4,"startLine":null,"createdAt":"2024-01-03T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r4","authorAssociation":"MEMBER","body":"Fixed in the follow-up commit.","author":{"login":"maintainer"},"reactionGroups":[{"content":"HEART","reactors":{"totalCount":1}}]}]}},{"id":"thread_3","path":"nested/other.txt","line":2,"originalLine":2,"startLine":null,"diffSide":"RIGHT","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_3","databaseId":3,"path":"nested/other.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r3","authorAssociation":"NONE","body":"Review nested change","author":{"login":"reviewer"},"reactionGroups":[]}]}}]}}}}}'
+    elif [[ "$args" == *"reviews(last"* ]]; then
+      # author mode: whether the viewer wrote the PR, and who has reviewed it.
+      # Not the author unless a fixture says so, since any fixture that commits
+      # mid-review asks.
+      printf 'people\n' >> "${REVIEW_MODE_AUTHOR_LOG:-/dev/null}"
+      author="false"
+      if [[ "${REVIEW_MODE_AUTHOR:-}" == "1" ]]; then
+        author="true"
+      fi
+      printf '%s\n' '{"data":{"repository":{"pullRequest":{"viewerDidAuthor":'"$author"',"author":{"login":"adrian"},"reviews":{"nodes":[{"author":{"__typename":"User","login":"alice"}},{"author":{"__typename":"User","login":"adrian"}},{"author":{"__typename":"Bot","login":"ci-bot"}},{"author":{"__typename":"User","login":"bob"}},{"author":{"__typename":"User","login":"alice"}}]}}}}}'
     elif [[ "$args" == *"pullRequest(number"* ]]; then
       printf '{"data":{"repository":{"pullRequest":{"id":"PR_node"}}}}\n'
     elif [[ "$args" == *"markFileAsViewed"* ]]; then
@@ -667,6 +685,25 @@ cp -R "$tmp/repo" "$tmp/hunk-repo"
   nvim --headless -u NONE -i NONE \
     -c "set noswapfile" \
     -l "$repo_root/scripts/hunk_viewed_fixture.lua"
+)
+
+# Author mode: the unresolved worklist, resolve-on-commit and re-request review.
+# In a copy of the repo, since the fixture commits during the review.
+cp -R "$tmp/repo" "$tmp/author-repo"
+(
+  cd "$tmp/author-repo"
+  PATH="$tmp/bin:$PATH" \
+  XDG_CACHE_HOME="$tmp/author-cache" \
+  XDG_STATE_HOME="$tmp/author-state" \
+  GH_REVIEW_REPO=owner/repo \
+  GH_REVIEW_PR=123 \
+  GH_REVIEW_BASE=main \
+  GH_REVIEW_HEAD=abc123 \
+  REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+  REVIEW_MODE_AUTHOR_LOG="$tmp/author-gh.log" \
+  nvim --headless -u NONE -i NONE \
+    -c "set noswapfile" \
+    -l "$repo_root/scripts/author_fixture.lua"
 )
 
 # Moved code: marked as moved, and passed over by ]c / [c. Builds its own repo.

@@ -12,6 +12,10 @@ local default_comment_sign_text = ""
 local defaults = {
   auto_open_first_change = true,
   follow_head = true,
+  -- when the PR is yours and a commit lands mid-review, offer (always with a
+  -- confirmation) to reply "Fixed in <sha>" to the unresolved threads it
+  -- changed, and resolve them
+  author = { offer_resolve = true },
   -- What :ReviewMode does on a branch with no PR: "local" reviews it against
   -- the default branch's merge base, "error" reports that there is no PR.
   no_pr = "local",
