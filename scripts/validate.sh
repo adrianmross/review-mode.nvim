@@ -25,8 +25,10 @@ mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
 # :helptags only reports a duplicate tag (E154); inside try, cquit makes it fail.
 mkdir -p "$tmp/help"
 cp doc/review-mode.txt "$tmp/help/review-mode.txt"
-nvim --headless -u NONE -i NONE \
-  -c "try | helptags $tmp/help | catch | call writefile([v:exception], '/dev/stderr') | cquit 1 | endtry" \
+# the directory goes through an env var and fnameescape, so a temp path with
+# spaces still reaches :helptags whole
+REVIEW_MODE_HELP_DIR="$tmp/help" nvim --headless -u NONE -i NONE \
+  -c "try | execute 'helptags' fnameescape(\$REVIEW_MODE_HELP_DIR) | catch | call writefile([v:exception], '/dev/stderr') | cquit 1 | endtry" \
   -c qa
 
 # Runs one fixture headless; callers set its env as a prefix. A fixture fails on

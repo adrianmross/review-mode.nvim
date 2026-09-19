@@ -2,7 +2,7 @@
 --
 --   local harness = dofile(os.getenv("REVIEW_MODE_PLUGIN_ROOT") .. "/scripts/lib/prelude.lua")
 --   ...
---   harness.done() -- the last statement
+--   harness.done() -- after the last assertion (a trailing `qa!` may follow)
 --
 -- Puts the plugin on the path, and makes the ways a headless fixture can pass
 -- without running its assertions fail instead:
