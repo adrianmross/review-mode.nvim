@@ -22,6 +22,11 @@ The goal is to keep review inside normal files instead of a dedicated diff UI:
 - can expose threads as `vim.diagnostic` entries and a quickfix list, so `]d`, `vim.diagnostic.open_float`, Trouble and `:cnext` work on review comments
 - can use snacks.nvim or Telescope for action and viewed-file pickers, with `vim.ui.select` as fallback
 
+**Contents:** [Requirements](#requirements) · [Install](#install) · [nvim-tree Integration](#nvim-tree-integration) · [The Mode](#the-mode) · [The Thread Panel](#the-thread-panel) · [Pending Reviews](#pending-reviews) · [API](#api) · [Hooks](#hooks) · [Commands](#commands) · [Suggestions](#suggestions) · [Diagnostics and Quickfix](#diagnostics-and-quickfix) · [Blast Radius](#blast-radius) · [gh-dash / Worktree Handoff](#gh-dash--worktree-handoff) · [GitLab](#gitlab) · [Local Reviews](#local-reviews) · [Picker Providers](#picker-providers) · [Options](#options) · [Notes](#notes) · [Release Workflow](#release-workflow)
+
+Full reference inside Neovim: `:help review-mode.nvim` (API: `:help review-mode-api`,
+events: `:help review-mode-events`, options: `:help review-mode-options`).
+
 ## Requirements
 
 - Neovim 0.11+
@@ -34,6 +39,8 @@ The goal is to keep review inside normal files instead of a dedicated diff UI:
 - optional: `lewis6991/gitsigns.nvim`
 - optional: `nvim-tree/nvim-tree.lua`
 - optional: `folke/snacks.nvim` or `nvim-telescope/telescope.nvim` for picker UI
+
+Run `:checkhealth review_mode` to check these.
 
 The plugin assumes the current checkout is a PR branch and compares
 `origin/<base>...HEAD`, where `<base>` comes from `gh pr view`.
@@ -148,7 +155,7 @@ Keys come in two layers, split by whether they shadow something:
 
 | layer | live | keys |
 |---|---|---|
-| **mode** | while you are in the mode | `]c` `]r` `]f` — these shadow real keys, so they go when you step out (`<leader>rm` steps in and out) |
+| **mode** | while you are in the mode | `]c` `]r` `]f` — these shadow real keys, so they go when you step out (`:ReviewMode`, or the `<leader>rm` you bind in [Install](#install), steps in and out) |
 | **session** | from `:ReviewMode` to `:ReviewModeStop`, in or out of the mode | `<leader>r…` — these shadow nothing in stock Vim, so they stay while you step out |
 
 Either way, any mapping of yours a layer shadows is saved and put back when the
@@ -438,6 +445,9 @@ api.suggestion_commit_plan()     --> a plan, or nil and why nothing can be commi
 api.commit_suggestions(plan)     --> { sha, unwritten }: commits only the trial lines, locally
 ```
 
+That is the common surface; `:help review-mode-api` lists every function with a
+one-line description, and `lua/review_mode/api.lua` documents each signature.
+
 A commit plan is opaque: pass it back to `api.commit_suggestions` unchanged.
 Its stable fields are `trials` (`{ id, path, line, thread_id, suggester }`,
 `suggester` being `{ login, id, name, is_viewer }`) and `message`, for showing
@@ -482,6 +492,7 @@ prefer.
 | `on_leave` | `ReviewModeLeave` | you step out, session intact |
 | `on_stop` | `ReviewModeStop` | the session ends: stopped, restarted, or a start that failed |
 | `on_comments_loaded` | `ReviewModeCommentsLoaded` | review comments finish loading |
+| `on_highlights_changed` | `ReviewModeHighlightsChanged` | the colorscheme changed and the thread highlight groups were redefined |
 | `on_viewed_changed` | `ReviewModeViewedChanged` | viewed state changes |
 | `on_panel_open` / `on_panel_close` | `ReviewModePanelOpen` / `Close` | the thread panel opens or closes |
 | `on_comment_posted` | `ReviewModeCommentPosted` | you post a comment or reply |
@@ -723,6 +734,7 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeRefresh` reloads changed files and comments
 - `:ReviewModeNextHunk` jumps to the next PR hunk
 - `:ReviewModePrevHunk` jumps to the previous PR hunk
+- `:ReviewModeNextChange` / `:ReviewModePrevChange` are aliases for `:ReviewModeNextHunk` / `:ReviewModePrevHunk`
 - `:ReviewModeNextComment` jumps to the next PR comment
 - `:ReviewModePrevComment` jumps to the previous PR comment
 - `:ReviewModeNextUnresolved` / `:ReviewModePrevUnresolved` jump to the next / previous unresolved thread, across files
@@ -752,6 +764,7 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeViewedFeatureToggle` toggles viewed-state tracking on or off
 - `:ReviewModeCommentsToggle` toggles PR comments on or off
 - `:ReviewModeViewedList [all|viewed|unviewed]` opens a PR file list with diff stats; snacks.nvim and Telescope add a diff preview and toggle viewed state with `<Tab>`/`<C-t>`
+- `:PrViewedToggle` / `:PrViewedList` are aliases for `:ReviewModeViewedToggle` / `:ReviewModeViewedList`
 - `:ReviewModeViewedClear` clears viewed state for the current PR, on GitHub too when viewed sync is on
 - `:ReviewModeViewedSync` pulls viewed state from GitHub
 - `:ReviewModeViewedSyncToggle` toggles GitHub viewed-state sync; turning it on pushes marks made while it was off
@@ -764,7 +777,6 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeQuickfix [unresolved|all]` fills the quickfix list with review threads and opens it
 - `:ReviewModeDiagnosticsToggle` toggles review threads as diagnostics
 - `:ReviewModeCIToggle` toggles CI check-run annotations as diagnostics
-
 - `:ReviewModeBlastRadius[!]` lists, in the quickfix list, callers of the current file's changed functions that the PR did not touch (`!` counts body-only changes too)
 - `:ReviewModeLocal [<base>] [<head>]` reviews two local refs, with no PR and no network
 - `:ReviewModeLocalComments` opens the local comments buffer
@@ -1169,6 +1181,8 @@ Install snacks.nvim or Telescope for the preview and toggle keymaps.
 
 ## Options
 
+Every default, as `lua/review_mode/state.lua` sets it (also `:help review-mode-options`):
+
 ```lua
 require("review_mode").setup({
   auto_open_first_change = true,
@@ -1177,7 +1191,7 @@ require("review_mode").setup({
   -- <sha>" to the unresolved threads it changed and resolve them (confirmed)
   author = { offer_resolve = true },
   no_pr = "local", -- "local" | "error": what :ReviewMode does with no PR
-  provider = "auto", -- "auto" | "github" | "gitlab"
+  provider = "auto", -- "auto" | "github" | "gitlab" | "local"
   gitlab_hosts = {}, -- self-hosted GitLab hosts for provider = "auto"
   comments = {
     enabled = true,
@@ -1231,7 +1245,30 @@ require("review_mode").setup({
     workspace = "inplace",
     signs_when_out = true,
     gitsigns_follows = true,
-    keys = { ... },
+    keys = {
+      ["]c"] = "next_hunk",
+      ["[c"] = "prev_hunk",
+      ["]r"] = "next_comment",
+      ["[r"] = "prev_comment",
+      ["]f"] = "next_file",
+      ["[f"] = "prev_file",
+    },
+  },
+  session = { -- <leader> keys, live from :ReviewMode to :ReviewModeStop
+    keys = {
+      ["<leader>rt"] = "toggle_panel",
+      ["<leader>rr"] = { "comment_or_reply", mode = { "n", "v" } },
+      ["<leader>rR"] = { "comment", mode = { "n", "v" } },
+      ["<leader>rx"] = "toggle_resolve",
+      ["<leader>rf"] = "list_viewed",
+      ["<leader>rv"] = "toggle_viewed",
+      ["<leader>rh"] = "toggle_hunk_viewed",
+      ["<leader>rd"] = "old_toggle",
+      ["<leader>rD"] = "toggle_diff_layout",
+      ["<leader>ra"] = "actions",
+      ["<leader>rs"] = "open_pending",
+      ["<leader>rq"] = "stop",
+    },
   },
   picker = {
     provider = "auto", -- "auto" | "native" | "snacks" | "telescope"

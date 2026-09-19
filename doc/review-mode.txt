@@ -1,27 +1,42 @@
 *review-mode.nvim* Fast GitHub pull request review mode for normal buffers
 
 ==============================================================================
-CONTENTS                                                  *review-mode-contents*
+CONTENTS                                                *review-mode-contents*
 
-1. Overview                                      |review-mode-overview|
-2. The Mode                                      |review-mode-mode|
-3. Thread Panel                                  |review-mode-panel|
-   Pending Review                                |review-mode-pending|
-4. Commands                                      |review-mode-commands|
-5. Keymaps                                       |review-mode-keymaps|
-6. Picker Providers                              |review-mode-pickers|
-7. Setup                                         |review-mode-setup|
-8. GitLab                                        |review-mode-gitlab|
-9. Local Reviews                                 |review-mode-local|
-10. Suggestions                                  |review-mode-suggestions|
+1. Overview                                   |review-mode-overview|
+2. The Mode                                   |review-mode-mode|
+   Reading order                              |review-mode-order|
+   When the PR is yours                       |review-mode-author|
+   Statusline                                 |review-mode-statusline|
+3. Thread Panel                               |review-mode-panel|
+   Reactions                                  |review-mode-reactions|
+   Drafts                                     |review-mode-draft|
+4. Pending Review                             |review-mode-pending|
+   Submit check                               |review-mode-submit-check|
+5. Commands                                   |review-mode-commands|
+6. Keymaps                                    |review-mode-keymaps|
+7. Picker Providers                           |review-mode-pickers|
+8. Setup and Options                          |review-mode-options|
+   Fewer GitHub API calls                     |review-mode-api-calls|
+   Hunk viewed state                          |review-mode-hunk-viewed|
+   Moved code                                 |review-mode-moved|
+   Diagnostics and quickfix                   |review-mode-diagnostics|
+   CI annotations                             |review-mode-ci|
+   Blast radius                               |review-mode-blast-radius|
+9. GitLab                                     |review-mode-gitlab|
+10. Local Reviews                             |review-mode-local|
+11. Suggestions                               |review-mode-suggestions|
+   From an edit                               |review-mode-edit-suggestions|
+12. API                                       |review-mode-api|
+13. Events                                    |review-mode-events|
 
 ==============================================================================
-OVERVIEW                                                  *review-mode-overview*
+OVERVIEW                                                *review-mode-overview*
 
-review-mode.nvim keeps GitHub pull request review in ordinary file buffers. It compares the
-current branch to the PR base, sets Gitsigns to that base when available, loads
-review comments asynchronously, and provides commands for jumping through PR
-hunks, PR comments, and changed files.
+review-mode.nvim keeps GitHub pull request review in ordinary file buffers. It
+compares the current branch to the PR base, sets Gitsigns to that base when
+available, loads review comments asynchronously, and provides commands for
+jumping through PR hunks, PR comments, and changed files.
 
 The plugin uses `gh` for PR metadata, comments, replies, thread state, checks,
 and browser handoff metadata. The default comment sign is a Nerd Font glyph;
@@ -29,8 +44,11 @@ set `comments.sign_text` to a plain character if your font does not have it.
 Picker integrations for snacks.nvim and Telescope are optional and fall back
 to vim.ui.select.
 
+Run `:checkhealth review_mode` to check Neovim, git, gh / glab and the
+optional integrations.
+
 ==============================================================================
-THE MODE                                                      *review-mode-mode*
+THE MODE                                                    *review-mode-mode*
 
 The mode and the review session are separate. The session holds the PR context
 (base ref, changed files, comments, viewed state); the mode is the key layer
@@ -49,15 +67,18 @@ Keys installed while in the mode (see mode.keys to change them):
         ]r / [r         next / previous PR comment thread
         ]f / [f         next / previous changed file
 
-<leader>rm (or |:ReviewModeEnter| / |:ReviewModeLeave|) steps in and out.
+|:ReviewMode| (or |:ReviewModeEnter| / |:ReviewModeLeave|) steps in and out.
+The plugin maps no key for it: bind one yourself, for example >
+  vim.keymap.set("n", "<leader>rm", "<cmd>ReviewMode<cr>")
+<
 
 A mapping shadowed by the layer is saved on entry and restored on exit.
 
 Session keys are installed by :ReviewMode and removed by :ReviewModeStop. They
-stay while you step out of the mode, since <leader> keys shadow nothing in stock
-Vim (see session.keys to change them):
+stay while you step out of the mode, since <leader> keys shadow nothing in
+stock Vim (see session.keys to change them):
 
-        <leader>rt      toggle the thread panel |review-mode-panel|
+        <leader>rt      toggle the thread panel|review-mode-panel|
         <leader>rr      comment: on a line you edited, suggest the edit;
                         else reply to the thread on this line, or start
                         one where there is none; a visual range always
@@ -69,7 +90,8 @@ Vim (see session.keys to change them):
                         reviewed and files left
         <leader>rv      toggle this file viewed
         <leader>rh      toggle the hunk under the cursor viewed
-        <leader>rd      base diff (rD layout; zR / zM show / fold unchanged lines)
+        <leader>rd      base diff (rD layout; zR / zM show / fold
+                        unchanged lines)
         <leader>ra      actions picker (every action, with its key)
         <leader>rs      pending review and submit
         <leader>rq      end the review
@@ -78,12 +100,12 @@ mode.keys and session.keys merge over the defaults; false removes one key and
 {} installs none.
 
 A commit made during the review joins it: the reflog is watched, and on the
-next FocusGained, BufEnter or TermLeave the changed files and hunks are rebuilt
-and the PR head SHA is re-fetched so new comments anchor to a commit GitHub
-knows. Viewed state and loaded comments are kept. Set follow_head = false to
-require |:ReviewModeRefresh| instead.
+next FocusGained, BufEnter or TermLeave the changed files and hunks are
+rebuilt and the PR head SHA is re-fetched so new comments anchor to a commit
+GitHub knows. Viewed state and loaded comments are kept. Set follow_head =
+false to require |:ReviewModeRefresh| instead.
 
-                                                        *review-mode-order*
+                                                           *review-mode-order*
 ]f / [f, the jump to the next unviewed file, the changed-files picker, ]r / [r
 across files and api.files() walk the PR in one order, set by files.order.
 "smart" (the default) reads code first, with a file that another changed file
@@ -108,19 +130,19 @@ head_moved event ({ from, to }) fires whenever follow-HEAD sees HEAD move.
 |:ReviewModeRerequest| asks the reviewers to look again.
 
 On a branch with no PR, :ReviewMode reviews it locally instead (see
-|:ReviewModeLocal|) and says so; the statusline shows "local repo@ref". It falls
-back only when gh (or glab) answers that there is no PR, or gh finds no GitHub
-host among the remotes (Codeberg, Gitea: no forge to ask), never on an auth,
-network or rate-limit failure, and never for a PR named with GH_REVIEW_PR or
-an MR named with GL_REVIEW_MR. Set
-no_pr = "error" to report the missing PR instead.
+|:ReviewModeLocal|) and says so; the statusline shows "local repo@ref". It
+falls back only when gh (or glab) answers that there is no PR, or gh finds no
+GitHub host among the remotes (Codeberg, Gitea: no forge to ask), never on an
+auth, network or rate-limit failure, and never for a PR named with
+GH_REVIEW_PR or an MR named with GL_REVIEW_MR. Set no_pr = "error" to report
+the missing PR instead.
 
 With mode.workspace = "tab" the review keeps its own tabpage: entering focuses
 it, leaving returns to the previous tabpage, and the layout survives in
 between. Ending the session closes it. The default "inplace" leaves your
 windows alone.
 
-                                                        *review-mode-statusline*
+                                                      *review-mode-statusline*
 vim.g.review_mode is "mode", "session", or nil.
 require("review_mode").statusline() returns a short summary such as
 "REVIEW owner/repo#123 62% 3/12": the share of changed lines reviewed, then
@@ -135,30 +157,33 @@ api.review_progress() returns the full totals.
 
 Review is a key layer over normal mode, not a real Vim mode, so mode() never
 returns it and a statusline's stock mode component cannot show it.
-require("review_mode").mode_text() stands in for that component: "REVIEW" while
-the layer is live and you are in normal mode, "REVIEW INSERT" once you step
-into another mode, and the plain mode name with no review, so normal/insert
-context stays visible. It takes { label = "PR", separator = "." }.
+require("review_mode").mode_text() stands in for that component: "REVIEW"
+while the layer is live and you are in normal mode, "REVIEW INSERT" once you
+step into another mode, and the plain mode name with no review, so
+normal/insert context stays visible. It takes
+{ label = "PR", separator = "." }. With lualine: >
+  sections = { lualine_a = { { require("review_mode").mode_text } } }
+<
 
-With lualine: sections = { lualine_a = { { require("review_mode").mode_text } } }
-
-The plugin fires these |User| autocommands: ReviewModeStart, ReviewModeEnter,
-ReviewModeLeave, ReviewModeStop. Every ReviewModeStart is matched by a
-ReviewModeStop: a start that fails, and a restart while a session is running,
-end the session the way |:ReviewModeStop| does.
+The plugin fires |User| autocommands such as ReviewModeStart, ReviewModeEnter,
+ReviewModeLeave and ReviewModeStop; |review-mode-events| lists them all. Every
+ReviewModeStart is matched by a ReviewModeStop: a start that fails, and a
+restart while a session is running, end the session the way |:ReviewModeStop|
+does.
 
 ==============================================================================
-THREAD PANEL                                                 *review-mode-panel*
+THREAD PANEL                                               *review-mode-panel*
 
 |:ReviewModePanel| opens a vertical split beside the file. It follows the
 cursor: threads anchored to the current line, or every thread in the file when
 the cursor is not on one (resolved ones too, when every thread in the file is
 resolved). A comment on a deleted line is listed as "path:N (base)": its line
-numbers the file before the PR, so it gets no sign in the buffer. A thread shows its author, their association with the
-repository, how long ago it was written, the reply chain, emoji reactions, and
-whether it is open, resolved, or outdated. Fenced code inside a comment is
-drawn as code instead of as more prose, and a `suggestion` block is drawn as
-the diff it would apply: the lines it replaces above the lines it proposes.
+numbers the file before the PR, so it gets no sign in the buffer. A thread
+shows its author, their association with the repository, how long ago it was
+written, the reply chain, emoji reactions, and whether it is open, resolved,
+or outdated. Fenced code inside a comment is drawn as code instead of as more
+prose, and a `suggestion` block is drawn as the diff it would apply: the lines
+it replaces above the lines it proposes.
 
 Keys inside the panel:
 
@@ -174,9 +199,9 @@ Keys inside the panel:
         +       react to the comment under the cursor
         e       edit your comment under the cursor in a draft buffer
         dd      delete your comment under the cursor, after a confirmation
-        s       open the pending review buffer |review-mode-pending|
+        s       open the pending review buffer|review-mode-pending|
         q       close the panel
-        p       preview the suggestion in the code |review-mode-suggestions|
+        p       preview the suggestion in the code|review-mode-suggestions|
         A       apply every suggestion in the file, after a confirmation
 
 Resolved threads are hidden in the panel and in |:ReviewModeThread| unless a
@@ -200,10 +225,10 @@ Comments loaded through the REST fallback can only gain a reaction; removing
 one needs a GraphQL id they do not carry, so removal is refused.
 
                                                            *review-mode-draft*
-|:ReviewModeReply|, |:ReviewModeCompose| and the panel's `r` and `R` keys open a
-markdown draft buffer rather than a vim.ui.input prompt, so a reply can be more
-than one line and can be edited before it goes out. Nothing reaches GitHub
-until the draft is confirmed.
+|:ReviewModeReply|, |:ReviewModeCompose| and the panel's `r` and `R` keys open
+a markdown draft buffer rather than a vim.ui.input prompt, so a reply can be
+more than one line and can be edited before it goes out. Nothing reaches
+GitHub until the draft is confirmed.
 
         <C-s>   post, after a prompt showing what will be sent
         :w      same as <C-s>
@@ -214,7 +239,7 @@ until the draft is confirmed.
                 filetype; :w or <C-s> writes them back, q cancels
         <C-p>   queue the comment in the pending review instead of posting it
                 (new comments only; not offered on GitLab or in a local
-                review) |review-mode-pending|
+                review)                       |review-mode-pending|
         q       discard the draft (confirmed if it is not empty)
 
 A draft is never thrown away unasked. Opening another draft, or closing the
@@ -233,12 +258,12 @@ draft fails, on any provider, its text is left in the unnamed register, so `p`
 puts it back into a new draft.
 
 ==============================================================================
-PENDING REVIEW                                             *review-mode-pending*
+PENDING REVIEW                                           *review-mode-pending*
 
-Comments can be batched into one review instead of posting one at a time. <C-p>
-in the draft buffer queues the comment; |:ReviewModePending| opens the review
-buffer with every queued comment, and the review body is whatever is typed
-below the marker line.
+Comments can be batched into one review instead of posting one at a time.
+<C-p> in the draft buffer queues the comment; |:ReviewModePending| opens the
+review buffer with every queued comment, and the review body is whatever is
+typed below the marker line.
 
         <CR>    jump to the draft's line
         dd      drop the draft under the cursor, after a confirmation
@@ -248,9 +273,9 @@ below the marker line.
         <C-x>   submit as a REQUEST_CHANGES review
         q       close the buffer
 
-dd drops the draft actually under the cursor, even after lines were added above
-the list. Deleting the marker line does not cost the review body: the next
-redraw puts the marker back above it.
+dd drops the draft actually under the cursor, even after lines were added
+above the list. Deleting the marker line does not cost the review body: the
+next redraw puts the marker back above it.
 
 Every submission is confirmed first, showing the event and the number of
 comments. |:ReviewModeSubmit| does the same without the buffer.
@@ -261,108 +286,113 @@ restarts, and are cleared only once GitHub accepts the review; a failed
 submission keeps them. GitHub requires a review body for REQUEST_CHANGES, and
 for a COMMENT review carrying no comments.
 
-                                                *review-mode-submit-check*
+                                                    *review-mode-submit-check*
 An APPROVE confirmation also lists what the review has not covered yet, one
 line per non-zero count: files not viewed (with their unviewed hunks), CI
 failures on changed lines that no comment of yours, posted or pending, covers,
 and unresolved threads. With nothing to report the prompt is unchanged. The
 counts come from what is already loaded and never wait on the network: hunks
-not yet loaded count nothing, and CI counts nothing until its annotations load.
-COMMENT and REQUEST_CHANGES skip the list, since they are routinely sent
+not yet loaded count nothing, and CI counts nothing until its annotations
+load. COMMENT and REQUEST_CHANGES skip the list, since they are routinely sent
 mid-review. Turn it off with review = { submit_check = false }.
-review_mode.api.review_readiness() returns the counts:
-{ unviewed_files, unviewed_hunks, ci_failures, unresolved_threads, pending }.
-A local review has no GitHub review to submit to, so submitting is refused
-there without a prompt.
+review_mode.api.review_readiness() returns the counts: { unviewed_files,
+unviewed_hunks, ci_failures, unresolved_threads, pending }. A local review has
+no GitHub review to submit to, so submitting is refused there without a
+prompt.
 
 Replies are never batched: the reviews endpoint only accepts new comments, so
 |:ReviewModeReply| still posts immediately. A pending review started in the
 GitHub web UI is not merged with these drafts.
 
 ==============================================================================
-COMMANDS                                                  *review-mode-commands*
+COMMANDS                                                *review-mode-commands*
 
-                                                        *:ReviewMode*
+                                                                 *:ReviewMode*
 :ReviewMode
         Toggle Review Mode. Starts the review session if there is none,
         otherwise steps into or out of the mode. See |review-mode-mode|.
 
-                                                        *:ReviewModeEnter*
+                                                            *:ReviewModeEnter*
 :ReviewModeEnter
         Step into Review Mode without reloading the session.
 
-                                                        *:ReviewModeLeave*
+                                                            *:ReviewModeLeave*
 :ReviewModeLeave
         Step out of Review Mode, keeping the session loaded.
 
-                                                        *:ReviewModeActions*
+                                                          *:ReviewModeActions*
 :ReviewModeActions
         Open a picker of every action, grouped by what it acts on, with the
         key bound to each shown beside it, using the configured picker
         provider.
 
-                                                        *:ReviewModeBrowser*
+                                                          *:ReviewModeBrowser*
 :ReviewModeBrowser
         Open the current PR in your browser.
 
-                                                        *:ReviewModeCopyUrl*
+                                                          *:ReviewModeCopyUrl*
 :ReviewModeCopyUrl
         Copy the current PR URL to registers.
 
-                                                        *:ReviewModeChecks*
+                                                           *:ReviewModeChecks*
 :ReviewModeChecks
         Show `gh pr checks` output in a floating preview.
 
-                                                        *:ReviewModeStatus*
+                                                           *:ReviewModeStatus*
 :ReviewModeStatus
         Show current PR status in a floating preview.
 
-                                                        *:ReviewModeStop*
+                                                             *:ReviewModeStop*
 :ReviewModeStop
         Stop Review Mode and clear plugin state. With no session running it
         does nothing.
 
-                                                        *:ReviewModeRefresh*
+                                                          *:ReviewModeRefresh*
 :ReviewModeRefresh
         Reload changed files and review comments.
 
-                                                        *:ReviewModeNextHunk*
+                                                         *:ReviewModeNextHunk*
 :ReviewModeNextHunk
         Jump to the next PR hunk, wrapping across files.
 
-                                                        *:ReviewModePrevHunk*
+                                                         *:ReviewModePrevHunk*
 :ReviewModePrevHunk
         Jump to the previous PR hunk, wrapping across files.
 
-                                                        *:ReviewModeNextComment*
+                               *:ReviewModeNextChange* *:ReviewModePrevChange*
+:ReviewModeNextChange
+:ReviewModePrevChange
+        Aliases for |:ReviewModeNextHunk| and |:ReviewModePrevHunk|.
+
+                                                      *:ReviewModeNextComment*
 :ReviewModeNextComment
         Jump to the next PR comment.
 
-                                                        *:ReviewModePrevComment*
+                                                      *:ReviewModePrevComment*
 :ReviewModePrevComment
         Jump to the previous PR comment.
 
-                                                     *:ReviewModeNextUnresolved*
+                                                   *:ReviewModeNextUnresolved*
 :ReviewModeNextUnresolved
         Jump to the next unresolved review thread, crossing files and
         wrapping. Unlike |:ReviewModeNextComment| (]r), resolved threads are
         passed over.
 
-                                                     *:ReviewModePrevUnresolved*
+                                                   *:ReviewModePrevUnresolved*
 :ReviewModePrevUnresolved
         Jump to the previous unresolved review thread.
 
-                                                          *:ReviewModeRerequest*
+                                                        *:ReviewModeRerequest*
 :ReviewModeRerequest
         Re-request review from everyone who has reviewed the PR, after a
         confirmation naming them. The PR's author and bots are left out.
         GitHub only.
 
-                                                        *:ReviewModeNextFile*
+                                                         *:ReviewModeNextFile*
 :ReviewModeNextFile
         Jump to the next changed file.
 
-                                                        *:ReviewModePrevFile*
+                                                         *:ReviewModePrevFile*
 :ReviewModePrevFile
         Jump to the previous changed file.
 
@@ -370,78 +400,78 @@ COMMANDS                                                  *review-mode-commands*
 :ReviewModeOldToggle
         Toggle the base version or unified diff for the current file.
 
-                                                *:ReviewModeDiffLayoutToggle*
+                                                 *:ReviewModeDiffLayoutToggle*
 :ReviewModeDiffLayoutToggle
         Toggle the open diff between side-by-side and unified layout.
 
-                                                  *:ReviewModeDiffFullToggle*
+                                                   *:ReviewModeDiffFullToggle*
 :ReviewModeDiffFullToggle
         Open or close every unchanged fold in the diff, as zR / zM do, and set
         how the next diff opens.
 
-                                            *:ReviewModeDiffWhitespaceToggle*
+                                             *:ReviewModeDiffWhitespaceToggle*
 :ReviewModeDiffWhitespaceToggle
         Hide or show whitespace-only changes (diff.ignore_whitespace) in the
         diff and in hunk navigation, re-rendering the open diff.
 
-                                                        *:ReviewModeThread*
+                                                           *:ReviewModeThread*
 :ReviewModeThread
         Show PR comments on the current line.
 
-                                                        *:ReviewModeReply*
+                                                            *:ReviewModeReply*
 :ReviewModeReply
         Reply to the latest PR comment on the current line.
 
-                                                        *:ReviewModeResolveThread*
+                                                    *:ReviewModeResolveThread*
 :ReviewModeResolveThread
         Resolve the PR review thread on the current line.
 
-                                                        *:ReviewModeUnresolveThread*
+                                                  *:ReviewModeUnresolveThread*
 :ReviewModeUnresolveThread
         Unresolve the PR review thread on the current line.
 
-                                                        *:ReviewModeReact*
+                                                            *:ReviewModeReact*
 :ReviewModeReact [content]
         Toggle a reaction on the latest PR comment on the current line, or on
         the comment under the panel cursor. Without an argument, pick one of
         THUMBS_UP, THUMBS_DOWN, LAUGH, HOORAY, CONFUSED, HEART, ROCKET, EYES.
-                                                        *:ReviewModeEditComment*
+                                                      *:ReviewModeEditComment*
 :ReviewModeEditComment
         Edit your most recent PR comment on the current line in a draft
         buffer, confirmed before it is sent. Only comments you wrote can be
         edited; comments loaded through the REST fallback are refused.
 
-                                                        *:ReviewModeDeleteComment*
+                                                    *:ReviewModeDeleteComment*
 :ReviewModeDeleteComment
         Delete your most recent PR comment on the current line, after a
         confirmation showing its first line.
 
-                                                        *:ReviewModePanel*
+                                                            *:ReviewModePanel*
 :ReviewModePanel
         Toggle the thread panel beside the current file.
 
-                                                        *:ReviewModeCompose*
+                                                          *:ReviewModeCompose*
 :ReviewModeCompose
         Draft a PR comment for the current line or visual range in a buffer,
         confirmed before it is sent.
 
-                                                        *:ReviewModeApplySuggestion*
+                                                  *:ReviewModeApplySuggestion*
 :ReviewModeApplySuggestion
         Apply the suggestion on the current line to the buffer, leaving it
         unsaved.
 
-                                                        *:ReviewModeComment*
+                                                          *:ReviewModeComment*
 :ReviewModeComment
         Create a PR comment on the current line or visual range.
 
-                                                        *:ReviewModeSuggest*
+                                                          *:ReviewModeSuggest*
 :ReviewModeSuggest
-        On a line you edited, draft a suggestion from your edit. Otherwise draft
-        one over the current line or visual range, starting from the lines as
-        they are. Always in the panel's draft buffer, even with
+        On a line you edited, draft a suggestion from your edit. Otherwise
+        draft one over the current line or visual range, starting from the
+        lines as they are. Always in the panel's draft buffer, even with
         comments.compose = "prompt". See |review-mode-edit-suggestions|.
 
-                                                    *:ReviewModeSuggestEdits*
+                                                     *:ReviewModeSuggestEdits*
 :ReviewModeSuggestEdits[!]
         Queue every edit in the current file as a pending suggestion, and undo
         the edits. Edits outside the PR diff are left alone. With [!], every
@@ -451,64 +481,69 @@ COMMANDS                                                  *review-mode-commands*
         are undone, unless its buffer held other unsaved changes. Edits
         outside the PR diff stay, so the file need not match HEAD.
 
-                                                        *:ReviewModeViewedToggle*
+                                                     *:ReviewModeViewedToggle*
 :ReviewModeViewedToggle
         Toggle viewed state for the current PR file.
 
-                                                        *:ReviewModeHunkViewedToggle*
+                                                 *:ReviewModeHunkViewedToggle*
 :ReviewModeHunkViewedToggle
         Toggle viewed state for the hunk under the cursor (the last hunk that
         starts at or above it). See |review-mode-hunk-viewed|.
 
-                                                        *:ReviewModeViewedNext*
+                                                       *:ReviewModeViewedNext*
 :ReviewModeViewedNext
         Mark the current PR file viewed and jump to the next unviewed file.
 
-                                                        *:ReviewModeViewedFeatureToggle*
+                                              *:ReviewModeViewedFeatureToggle*
 :ReviewModeViewedFeatureToggle
         Toggle viewed-state tracking on or off.
 
-                                                        *:ReviewModeCommentsToggle*
+                                                   *:ReviewModeCommentsToggle*
 :ReviewModeCommentsToggle
         Toggle PR comments on or off.
 
-                                                        *:ReviewModeViewedList*
-:ReviewModeViewedList [all|viewed|unviewed]
+                                                       *:ReviewModeViewedList*
+:ReviewModeViewedList [all | viewed | unviewed]
         Open a PR file list by viewed state, with additions/deletions. The
         snacks.nvim and Telescope providers add a diff preview and toggle
         viewed state for the selected file with <Tab> or <C-t>.
 
-                                                        *:ReviewModeViewedClear*
+                                             *:PrViewedToggle* *:PrViewedList*
+:PrViewedToggle
+:PrViewedList [all | viewed | unviewed]
+        Aliases for |:ReviewModeViewedToggle| and |:ReviewModeViewedList|.
+
+                                                      *:ReviewModeViewedClear*
 :ReviewModeViewedClear
         Clear viewed state for the current PR. With GitHub viewed sync on, the
         files are unmarked on GitHub too.
 
-                                                        *:ReviewModeViewedSync*
+                                                       *:ReviewModeViewedSync*
 :ReviewModeViewedSync
         Pull viewed state from GitHub for the current PR.
 
-                                                        *:ReviewModeViewedSyncToggle*
+                                                 *:ReviewModeViewedSyncToggle*
 :ReviewModeViewedSyncToggle
         Toggle GitHub viewed-state sync. Turning it on pushes the marks made
         while it was off instead of replacing them with GitHub's.
 
-                                                        *:ReviewModePending*
+                                                          *:ReviewModePending*
 :ReviewModePending
         Open the pending review buffer. See |review-mode-pending|.
 
-                                                        *:ReviewModeSubmit*
-:ReviewModeSubmit [comment|approve|request_changes]
+                                                           *:ReviewModeSubmit*
+:ReviewModeSubmit [comment | approve | request_changes]
         Submit the pending review with that event, after a confirmation
         showing the event and the comment count. With no argument it opens the
         review buffer instead.
 
-                                                        *:ReviewModeSummary*
+                                                          *:ReviewModeSummary*
 :ReviewModeSummary
         Show how much of the review is done (by changed lines), files left,
         total +/-, comments, threads with how many are resolved, and
         viewed-sync counts.
 
-                                                        *:ReviewModeCheckout*
+                                                         *:ReviewModeCheckout*
 :ReviewModeCheckout {number|url}
         Review a PR without checking it out. Fetches the PR head into
         refs/review-mode/pr/{number} (pull/{number}/head, so fork PRs work)
@@ -524,8 +559,8 @@ COMMANDS                                                  *review-mode-commands*
         hooks.prepare_checkout override to create the worktree with your own
         tool and return its path instead.
 
-                                                        *:ReviewModeInbox*
-:ReviewModeInbox [requested|mine|all]
+                                                            *:ReviewModeInbox*
+:ReviewModeInbox [requested | mine | all]
         Pick an open PR in this repo and review it with |:ReviewModeCheckout|.
         No review needs to be running. "requested" (the default) lists PRs
         waiting on your review, "mine" the PRs you opened, "all" every open
@@ -536,38 +571,38 @@ COMMANDS                                                  *review-mode-commands*
         cwd. GitHub only: in a repo whose origin is GitLab it says so instead
         of calling gh.
 
-                                                        *:ReviewModeCheckoutClean*
+                                                    *:ReviewModeCheckoutClean*
 :ReviewModeCheckoutClean [pr]
         Remove review worktrees created by |:ReviewModeCheckout|, after a
         confirmation. [pr] is a number, #number or PR URL. A worktree whose
-        directory was deleted by hand is reported as prunable. Worktrees with uncommitted changes or with commits on
-        no branch, tag or remote and not in the PR (a committed trial
-        suggestion, say), and the one the current session is using, are
-        refused and listed. A dirty worktree is
+        directory was deleted by hand is reported as prunable. Worktrees with
+        uncommitted changes or with commits on no branch, tag or remote and
+        not in the PR (a committed trial suggestion, say), and the one the
+        current session is using, are refused and listed. A dirty worktree is
         also never updated: reviewing its PR again reuses it as it stands and
         warns.
 
-                                                        *:ReviewModeQuickfix*
+                                                         *:ReviewModeQuickfix*
 :ReviewModeQuickfix [unresolved|all]
         Fill the quickfix list with the PR review threads and open it. The
         default follows comments.show_resolved; "all" also lists resolved
         threads, marked [resolved].
 
-                                                        *:ReviewModeDiagnosticsToggle*
+                                                *:ReviewModeDiagnosticsToggle*
 :ReviewModeDiagnosticsToggle
         Toggle review threads as vim.diagnostic entries.
 
-                                                        *:ReviewModeCIToggle*
+                                                         *:ReviewModeCIToggle*
 :ReviewModeCIToggle
         Toggle CI check-run annotations as vim.diagnostic entries. Turning
         them on refetches them.
 
-                                                        *:ReviewModeBlastRadius*
+                                                      *:ReviewModeBlastRadius*
 :ReviewModeBlastRadius[!]
         Fill the quickfix list with callers of the current file's changed
         functions that the PR did not touch. See |review-mode-blast-radius|.
 
-                                                        *:ReviewModeSuggestionPreview*
+                                                *:ReviewModeSuggestionPreview*
 :ReviewModeSuggestionPreview [inline|split]
         Toggle a preview of the suggestion on the current line without
         applying it. "inline" (the default) draws the suggested lines as
@@ -575,34 +610,43 @@ COMMANDS                                                  *review-mode-commands*
         with the suggestion applied side by side against the file as it
         stands. See |review-mode-suggestions|.
 
-                                                        *:ReviewModeSuggestionAcceptAll*
+                                              *:ReviewModeSuggestionAcceptAll*
 :ReviewModeSuggestionAcceptAll
         Apply every suggestion in the current file as a trial, after a
         confirmation saying how many and in which file. Applied bottom-up, so
         an earlier application cannot move the lines a later one is anchored
         to.
 
-                                                        *:ReviewModeSuggestionRevert*
+                                                 *:ReviewModeSuggestionRevert*
 :ReviewModeSuggestionRevert [id]
         Put back the lines a trial suggestion replaced: the trial under the
         cursor, or the one with this id from |:ReviewModeSuggestionList|.
         When you have typed inside the trial since, it asks first: reverting
         drops those edits too.
 
-                                                        *:ReviewModeSuggestionList*
+                                                   *:ReviewModeSuggestionList*
 :ReviewModeSuggestionList
         List the trial suggestions that are applied but not saved, with the
         file and line each one now sits on.
 
-                                                        *:ReviewModeSuggestionCommit*
+                                                 *:ReviewModeSuggestionCommit*
 :ReviewModeSuggestionCommit
         Commit every live trial suggestion, and nothing else, crediting each
         suggester with a Co-authored-by trailer. One confirmation lists the
         trials and the message and can also resolve their threads. Local
         only; nothing is pushed. See |review-mode-suggestions|.
 
+                                                            *:ReviewModeLocal*
+:ReviewModeLocal [{base}] [{head}]
+        Review two refs in this checkout, with no PR, no remote and no
+        network. See |review-mode-local|.
+
+                                                    *:ReviewModeLocalComments*
+:ReviewModeLocalComments
+        Open the review-mode://local buffer listing every local comment.
+
 ==============================================================================
-KEYMAPS                                                    *review-mode-keymaps*
+KEYMAPS                                                  *review-mode-keymaps*
 
 Suggested navigation uses hunk keys for changed regions and comment keys for
 review discussion:
@@ -616,7 +660,7 @@ review discussion:
 <
 
 ==============================================================================
-PICKER PROVIDERS                                          *review-mode-pickers*
+PICKER PROVIDERS                                         *review-mode-pickers*
 
 ReviewMode can use vim.ui.select, snacks.nvim, or Telescope for
 :ReviewModeActions and :ReviewModeViewedList. The default picker.provider =
@@ -625,20 +669,20 @@ picker.provider to "native", "snacks", or "telescope" to prefer one provider.
 
 The "native" provider is plain vim.ui.select: same file labels, but no diff
 preview, no live filtering and no in-picker viewed toggle. External providers
-are optional. If a requested provider is unavailable or fails, ReviewMode falls
-back to vim.ui.select.
+are optional. If a requested provider is unavailable or fails, ReviewMode
+falls back to vim.ui.select.
 
 ==============================================================================
-SETUP                                                        *review-mode-setup*
+SETUP AND OPTIONS                    *review-mode-setup* *review-mode-options*
 
 >
   require("review_mode").setup({
     auto_open_first_change = true,
     follow_head = true,
-    -- see |review-mode-author|
+    -- see                                    |review-mode-author|
     author = { offer_resolve = true },
     no_pr = "local",
-    provider = "auto", -- "auto" | "github" | "gitlab"
+    provider = "auto", -- "auto" | "github" | "gitlab" | "local"
     gitlab_hosts = {}, -- self-hosted GitLab hosts for provider = "auto"
     comments = {
       enabled = true,
@@ -692,11 +736,35 @@ SETUP                                                        *review-mode-setup*
       workspace = "inplace",
       signs_when_out = true,
       gitsigns_follows = true,
-      keys = { ... },
+      keys = {
+        ["]c"] = "next_hunk",
+        ["[c"] = "prev_hunk",
+        ["]r"] = "next_comment",
+        ["[r"] = "prev_comment",
+        ["]f"] = "next_file",
+        ["[f"] = "prev_file",
+      },
+    },
+    session = { -- <leader> keys, live from :ReviewMode to :ReviewModeStop
+      keys = {
+        ["<leader>rt"] = "toggle_panel",
+        ["<leader>rr"] = { "comment_or_reply", mode = { "n", "v" } },
+        ["<leader>rR"] = { "comment", mode = { "n", "v" } },
+        ["<leader>rx"] = "toggle_resolve",
+        ["<leader>rf"] = "list_viewed",
+        ["<leader>rv"] = "toggle_viewed",
+        ["<leader>rh"] = "toggle_hunk_viewed",
+        ["<leader>rd"] = "old_toggle",
+        ["<leader>rD"] = "toggle_diff_layout",
+        ["<leader>ra"] = "actions",
+        ["<leader>rs"] = "open_pending",
+        ["<leader>rq"] = "stop",
+      },
     },
     picker = {
       provider = "auto",
     },
+    hooks = {}, -- see                        |review-mode-events|
     checkout = {
       cleanup = "manual",
     },
@@ -723,13 +791,13 @@ SETUP                                                        *review-mode-setup*
       gh_metadata_cache = "10m",
     },
     files = {
-      order = "smart", -- or "diff"; see |review-mode-order|
+      order = "smart", -- or "diff"; see      |review-mode-order|
     },
     commands = true,
   })
 <
 
-FEWER GITHUB API CALLS                                  *review-mode-api-calls*
+FEWER GITHUB API CALLS                                 *review-mode-api-calls*
 
 comments.conditional_requests (default true) revalidates the REST comment list
 with If-None-Match once comments.cache_ttl_seconds is up, instead of
@@ -753,17 +821,18 @@ invocations the session spent and how many were answered 304.
 
 ReviewMode loads PR metadata and changed-file status asynchronously. If
 GH_REVIEW_BASE is set by a launcher, changed-file loading starts immediately
-without waiting for GitHub metadata. Hunk locations are loaded lazily per file,
-with immediate focused-file prefetch, opportunistic gitsigns.nvim hunk-cache
-reuse, and an optional delayed background scan for PRs under
+without waiting for GitHub metadata. Hunk locations are loaded lazily per
+file, with immediate focused-file prefetch, opportunistic gitsigns.nvim
+hunk-cache reuse, and an optional delayed background scan for PRs under
 performance.background_hunk_scan.max_files.
 
 The nvim-tree integration marks unviewed changed files and closed parent
 folders with `☐ N`, where `N` is the number of unviewed changed files under
 that node. Viewed files and closed folders use `✓`, and files and closed
-folders with unresolved threads also use ` N`, counting threads. An open folder hides these
-folder markers because its children show the same state inline. A folder
-switches to viewed after every changed file under it is viewed.
+folders with unresolved threads also use ` N`, counting threads. An open
+folder hides these folder markers because its children show the same state
+inline. A folder switches to viewed after every changed file under it is
+viewed.
 
 External launchers can provide GH_REVIEW_REPO, GH_REVIEW_PR, GH_REVIEW_BASE,
 and GH_REVIEW_HEAD to avoid startup discovery calls, or GL_REVIEW_MR,
@@ -776,54 +845,57 @@ hooks.prepare_checkout override decides where that worktree comes from, and
 the checkout_ready and checkout_removed events report when one is ready or
 gone.
 
-Viewed state is persisted in stdpath("state")/review-mode-state.json by default.
-Set viewed.sync = true or run :ReviewModeViewedSyncToggle to pull GitHub's PR file
-viewed state at startup and push local viewed/unviewed toggles back to GitHub.
+Viewed state is persisted in stdpath("state")/review-mode-state.json by
+default. Set viewed.sync = true or run :ReviewModeViewedSyncToggle to pull
+GitHub's PR file viewed state at startup and push local viewed/unviewed
+toggles back to GitHub.
 
-                                                        *review-mode-hunk-viewed*
+                                                     *review-mode-hunk-viewed*
 <leader>rh (|:ReviewModeHunkViewedToggle|) marks the hunk under the cursor
 viewed, or unviewed again. GitHub has no such mark, so it is kept locally next
 to the file viewed state, keyed by a hash of the hunk's +/- lines rather than
 its position. When the author pushes and the review follows HEAD, a hunk that
 only moved stays viewed and a hunk whose content changed comes back unviewed.
-Viewed hunks get a quiet sign, the changed-files picker shows how
-far through a file you are ("42%" for 3 of 7 hunks), and viewed.skip_viewed_hunks = true
-makes ]c / [c pass over them. Viewing the last unviewed hunk of a file marks the
-file viewed, and un-viewing a hunk of a viewed file un-views it, both exactly as
-<leader>rv would (so they sync to GitHub when viewed.sync is on). A file you
-un-view by hand stays unviewed until a hunk toggle completes it again.
+Viewed hunks get a quiet sign, the changed-files picker shows how far through
+a file you are ("42%" for 3 of 7 hunks), and viewed.skip_viewed_hunks = true
+makes ]c / [c pass over them. Viewing the last unviewed hunk of a file marks
+the file viewed, and un-viewing a hunk of a viewed file un-views it, both
+exactly as <leader>rv would (so they sync to GitHub when viewed.sync is on). A
+file you un-view by hand stays unviewed until a hunk toggle completes it
+again.
 
 ReviewModeOldToggle uses the built-in Neovim side-by-side diff backend by
-default. Set diff.layout = "unified" or run :ReviewModeDiffLayoutToggle to use an
-inline unified diff buffer in the current window instead. Closing unified mode
-restores the original file buffer. Both layouts hold the whole file and fold
-the unchanged regions, so zR shows everything, zM condenses again and zo / zc
-open or close one gap. Unified diffs keep diff.unified_context lines visible
-around each change; diff.full_file = true opens diffs with every fold open. When diff.use_fast_diffopt is
-enabled, side-by-side diffs temporarily apply diff.fast_diffopt and restore the
-previous diffopt when the split closes. Unified diffs highlight changed spans
-inside modified lines with DiffText; set diff.partial_line_highlights = false
-to disable those inline spans.
+default. Set diff.layout = "unified" or run :ReviewModeDiffLayoutToggle to use
+an inline unified diff buffer in the current window instead. Closing unified
+mode restores the original file buffer. Both layouts hold the whole file and
+fold the unchanged regions, so zR shows everything, zM condenses again and zo
+/ zc open or close one gap. Unified diffs keep diff.unified_context lines
+visible around each change; diff.full_file = true opens diffs with every fold
+open. When diff.use_fast_diffopt is enabled, side-by-side diffs temporarily
+apply diff.fast_diffopt and restore the previous diffopt when the split
+closes. Unified diffs highlight changed spans inside modified lines with
+DiffText; set diff.partial_line_highlights = false to disable those inline
+spans.
 
-Set diff.ignore_whitespace = true or run :ReviewModeDiffWhitespaceToggle to hide
-whitespace-only changes, like GitHub's "Hide whitespace": side-by-side diffs add
-iwhiteall to the applied diffopt, unified diffs and the hunks behind ]c / [c use
-git diff -w. A file whose only changes are whitespace stays in the changed
-files; the changed-files picker marks it "(whitespace only)" and
+Set diff.ignore_whitespace = true or run :ReviewModeDiffWhitespaceToggle to
+hide whitespace-only changes, like GitHub's "Hide whitespace": side-by-side
+diffs add iwhiteall to the applied diffopt, unified diffs and the hunks behind
+]c / [c use git diff -w. A file whose only changes are whitespace stays in the
+changed files; the changed-files picker marks it "(whitespace only)" and
 api.file(path).whitespace_only is true once its hunks have loaded.
 
-                                                        *review-mode-moved*
+                                                           *review-mode-moved*
 Moved code is found once per load from one git diff of the whole review: a run
-of added lines matching a run of deleted lines anywhere in the review, ignoring
-indentation, of at least 3 lines and 20 letters or digits. Moved-in lines get a
-"»" sign, and a block's first line says "moved from a.lua:120", in
+of added lines matching a run of deleted lines anywhere in the review,
+ignoring indentation, of at least 3 lines and 20 letters or digits. Moved-in
+lines get a "»" sign, and a block's first line says "moved from a.lua:120", in
 ReviewModeMoved (linked to Comment). A block edited on the way is not a match.
 With diff.skip_moved = true (the default), ]c / [c pass over hunks that are
 nothing but moved code, deleted side included; blank lines around the block do
 not count against it. Toggle it from the actions picker; diff.detect_moved =
 false turns detection off.
 
-                                                    *review-mode-diagnostics*
+                                                     *review-mode-diagnostics*
 Set comments.diagnostics.enabled = true (or run :ReviewModeDiagnosticsToggle)
 to publish every visible thread as a vim.diagnostic entry in the
 review_mode_diagnostics namespace, so ]d, vim.diagnostic.open_float, Trouble
@@ -834,32 +906,33 @@ resolved and outdated ones to HINT; comments.show_resolved decides whether
 resolved threads appear at all.
 
 It is off by default because it mixes review comments into every diagnostic
-consumer. The namespace itself draws nothing (comments.diagnostics.display sets
-signs, virtual_text and underline to false), because the plugin already draws
-comment signs and end-of-line virtual text and the two displays would double up.
+consumer. The namespace itself draws nothing (comments.diagnostics.display
+sets signs, virtual_text and underline to false), because the plugin already
+draws comment signs and end-of-line virtual text and the two displays would
+double up.
 
 :ReviewModeQuickfix fills the quickfix list with the same threads across every
 changed file, and review_mode.api.quickfix_items() returns those items without
 setting the list.
 
-                                                    *review-mode-ci*
+                                                              *review-mode-ci*
 On GitHub, check-run annotations on the PR head (lint errors, failing
 assertions, type errors) are published too, in their own review_mode_ci
-namespace with source "review-mode CI", so ]d walks CI failures and they toggle
-apart from the threads. failure is ERROR, warning WARN, notice INFO; the message
-is "[check name] title: message". This namespace keeps vim.diagnostic's normal
-display. They are fetched in the background on start and on :ReviewModeRefresh
-(not when HEAD moves mid-review): one request for the check runs, then one per
-run that has annotations. Toggle with :ReviewModeCIToggle, or set
-ci = { diagnostics = false } to never fetch them. Local and GitLab reviews
-skip it. review_mode.api.ci_annotations(path) returns the annotations for a
-file, and the ci_loaded event fires when they arrive.
+namespace with source "review-mode CI", so ]d walks CI failures and they
+toggle apart from the threads. failure is ERROR, warning WARN, notice INFO;
+the message is "[check name] title: message". This namespace keeps
+vim.diagnostic's normal display. They are fetched in the background on start
+and on :ReviewModeRefresh (not when HEAD moves mid-review): one request for
+the check runs, then one per run that has annotations. Toggle with
+:ReviewModeCIToggle, or set ci = { diagnostics = false } to never fetch them.
+Local and GitLab reviews skip it. review_mode.api.ci_annotations(path) returns
+the annotations for a file, and the ci_loaded event fires when they arrive.
 
-                                                   *review-mode-blast-radius*
-:ReviewModeBlastRadius finds the function definitions in the current file whose
-signature (first line through the end of the parameter list) the PR changes,
-by treesitter node type, so any language with a parser works. It asks the
-attached LSP clients for textDocument/references at each function's name,
+                                                    *review-mode-blast-radius*
+:ReviewModeBlastRadius finds the function definitions in the current file
+whose signature (first line through the end of the parameter list) the PR
+changes, by treesitter node type, so any language with a parser works. It asks
+the attached LSP clients for textDocument/references at each function's name,
 drops references on lines the PR added or rewrote, and fills the quickfix list
 with the rest: callers the PR did not update. With ! it also includes
 functions changed only in their body. It runs only on demand, never starts a
@@ -868,12 +941,12 @@ seconds. Only "+" lines count as changed, so a signature change that only
 deletes lines is not seen.
 
 ==============================================================================
-GITLAB                                                      *review-mode-gitlab*
+GITLAB                                                    *review-mode-gitlab*
 
-GitLab merge requests are reviewed the same way pull requests are. The provider
-comes from the origin remote: any host containing "gitlab", or listed in
-gitlab_hosts, uses `glab` instead of `gh`. Set provider = "github" or "gitlab"
-to decide it yourself, and authenticate glab for the project. glab is
+GitLab merge requests are reviewed the same way pull requests are. The
+provider comes from the origin remote: any host containing "gitlab", or listed
+in gitlab_hosts, uses `glab` instead of `gh`. Set provider = "github" or
+"gitlab" to decide it yourself, and authenticate glab for the project. glab is
 pointed at the remote's host (--repo https://{host}/{project}, glab api
 --hostname {host}), so self-hosted instances work.
 
@@ -881,36 +954,39 @@ A launcher can hand the session over with GL_REVIEW_MR, optionally with
 GL_REVIEW_REPO, GL_REVIEW_BASE and GL_REVIEW_HEAD, mirroring GH_REVIEW_*.
 Setting GL_REVIEW_MR also selects the GitLab provider.
 
-Supported: MR metadata, diff discussions loaded as threads, starting a thread on
-a line or range, replying, and resolving. A thread id is a GitLab discussion id,
-so |review_mode.api| reply and resolve take that instead of a review thread id.
-A range comment anchors to its last line. A note on a removed line sits on the
-base side, like a GitHub LEFT thread. New positions are placed on the MR's own
-diff (start_sha...head_sha) when those commits are local. Tested against glab
-mocks built from GitLab's REST documentation, not a live server.
+Supported: MR metadata, diff discussions loaded as threads, starting a thread
+on a line or range, replying, and resolving. A thread id is a GitLab
+discussion id, so |review-mode-api| reply and resolve take that instead of a
+review thread id. A range comment anchors to its last line. A note on a
+removed line sits on the base side, like a GitHub LEFT thread. New positions
+are placed on the MR's own diff (start_sha...head_sha) when those commits are
+local. Tested against glab mocks built from GitLab's REST documentation, not a
+live server.
 
 GitHub-only for now, and reported as "not supported on GitLab yet" instead of
 calling gh: viewed-state sync (local viewed state still works), reactions,
 comment edit and delete, pending comments and review submission,
-:ReviewModeCheckout, :ReviewModeStatus and :ReviewModeChecks. Review diagnostics
-and :ReviewModeQuickfix are forge-independent and work on GitLab too. :ReviewModeSuggest posts GitHub suggestion syntax, which
-GitLab does not read the same way.
+:ReviewModeCheckout, :ReviewModeStatus and :ReviewModeChecks. Review
+diagnostics and :ReviewModeQuickfix are forge-independent and work on GitLab
+too. :ReviewModeSuggest posts GitHub suggestion syntax, which GitLab does not
+read the same way.
 
 ==============================================================================
-LOCAL REVIEWS                                                *review-mode-local*
+LOCAL REVIEWS                                              *review-mode-local*
 
 :ReviewModeLocal [<base>] [<head>] reviews two refs in this checkout, with no
-PR, no remote and no network. <base> defaults to the merge base with the repo's
-default branch; <head> defaults to the working tree, so uncommitted edits are
-part of the review. One argument may be a range ("main..feature"). The base is
-always resolved to the merge base with the head, so a local review compares what
-a PR would.
+PR, no remote and no network. <base> defaults to the merge base with the
+repo's default branch; <head> defaults to the working tree, so uncommitted
+edits are part of the review. One argument may be a range ("main..feature").
+The base is always resolved to the merge base with the head, so a local review
+compares what a PR would.
 
 provider = "local" selects it explicitly, and a repo with no origin remote
 selects it on its own. The changed-file list, hunk navigation, the diff views,
 viewed state, the panel, diagnostics and the quickfix list are unchanged.
-:ReviewModeChecks, :ReviewModeStatus, :ReviewModeBrowser and :ReviewModeCopyUrl
-report that they are not supported in a local review instead of calling gh.
+:ReviewModeChecks, :ReviewModeStatus, :ReviewModeBrowser and
+:ReviewModeCopyUrl report that they are not supported in a local review
+instead of calling gh.
 
 Comments are kept on disk, at:
 
@@ -928,12 +1004,14 @@ agent can read it. Comments load into the same normalized shape GitHub and
 GitLab comments do.
 
 :ReviewModeLocalComments opens a review-mode://local buffer with every local
-comment grouped by file: <CR> jumps, r replies, R resolves, e edits, dd deletes.
+comment grouped by file: <CR> jumps, r replies, R resolves, e edits, dd
+deletes.
 
-For agents, the whole loop works headless through |review_mode.api|:
+For agents, the whole loop works headless through |review-mode-api|:
 
     api.review_local(args)                    start the session
-    api.local_comment(opts, cb)               create a thread; cb(true, thread)
+    api.local_comment(opts, cb)               create a thread;
+                                              cb(true, thread)
     api.threads(opts)                         read them back
     api.reply / api.resolve                   add to, or resolve, a thread
     api.edit_comment / api.delete_comment     change or remove a comment
@@ -949,7 +1027,7 @@ For example: >
 local_comment's author defaults to git config user.name and falls back to
 "agent"; it is never a GitHub login.
 ==============================================================================
-SUGGESTIONS                                            *review-mode-suggestions*
+SUGGESTIONS                                          *review-mode-suggestions*
 
                                                 *review-mode-edit-suggestions*
 To write a suggestion, make the change in the file, with your LSP and
@@ -960,9 +1038,9 @@ suggestion. |:ReviewModeSuggestEdits| queues every edit in the file at once,
 and with ! every edit across the PR's files.
 
 An edit is what the buffer says that HEAD does not. A pure insertion takes the
-line above into the suggestion; a deletion suggests no lines. GitHub only takes
-a suggestion inside the PR diff (the changes and three lines around them), so
-an edit elsewhere is refused with a message. Lines applied as trial
+line above into the suggestion; a deletion suggests no lines. GitHub only
+takes a suggestion inside the PR diff (the changes and three lines around
+them), so an edit elsewhere is refused with a message. Lines applied as trial
 suggestions are not your edits and are left out.
 
 A `suggestion` block in a review comment is a concrete replacement for the
@@ -972,13 +1050,13 @@ suggestion blocks like any other, and the same keys work on them.
 
 In the code: the panel's `p` key and |:ReviewModeSuggestionPreview| draw the
 suggested lines as virtual lines under the lines they would replace, in the
-panel's diff colours, with the replaced range painted as a deletion. Nothing is
-written and no window opens.
+panel's diff colours, with the replaced range painted as a deletion. Nothing
+is written and no window opens.
 
 Side by side: |:ReviewModeSuggestionPreview| split shows the file with the
-suggestion applied against the file as it stands, in the same side-by-side diff
-|:ReviewModeOldToggle| uses, folds and partial-line highlights included. It
-replaces an open base diff, and toggling it again closes it.
+suggestion applied against the file as it stands, in the same side-by-side
+diff |:ReviewModeOldToggle| uses, folds and partial-line highlights included.
+It replaces an open base diff, and toggling it again closes it.
 
 Trial apply: the panel's `a` key and |:ReviewModeApplySuggestion| write the
 suggestion into the buffer and leave it there, unsaved, with a "T" sign and a
@@ -999,25 +1077,25 @@ A suggestion on an outdated thread, on a deleted line (the base side of the
 diff), or anchored past the end of the buffer is refused with a message rather
 than previewed or applied over whatever code sits at that line now.
 
-Accept all: the panel's `A` key and |:ReviewModeSuggestionAcceptAll| apply every
-suggestion on an unresolved, current thread in the file after a confirmation. Bottom-up, because a suggestion can
-replace one line with three, and applying the top one first would move every
-line number below it.
+Accept all: the panel's `A` key and |:ReviewModeSuggestionAcceptAll| apply
+every suggestion on an unresolved, current thread in the file after a
+confirmation. Bottom-up, because a suggestion can replace one line with three,
+and applying the top one first would move every line number below it.
 
 Commit with credit: |:ReviewModeSuggestionCommit| (or "Commit trial
-suggestions, crediting reviewers" in the actions picker) makes one local commit
-of every live trial, as GitHub's "Commit suggestion" would: titled "Apply
-suggestions from code review" (singular for one), with one trailer per distinct
-suggester:
+suggestions, crediting reviewers" in the actions picker) makes one local
+commit of every live trial, as GitHub's "Commit suggestion" would: titled
+"Apply suggestions from code review" (singular for one), with one trailer per
+distinct suggester:
 >
     Co-authored-by: Name <id+login@users.noreply.github.com>
 <
 The name is the user's display name, else the login. A comment cached before
 the author's id was fetched falls back to <login@users.noreply.github.com>.
 Your own suggestions get no trailer, and neither do local or GitLab reviews,
-whose authors have no GitHub address. The confirmation lists each trial and the
-message, and its second choice also resolves the suggestion threads. Nothing
-is pushed.
+whose authors have no GitHub address. The confirmation lists each trial and
+the message, and its second choice also resolves the suggestion threads.
+Nothing is pushed.
 
 The commit holds the trial lines and nothing else: they are written into
 HEAD's version of the file, which goes into the index directly, so your own
@@ -1028,16 +1106,163 @@ inside a trial, or when your edits reach into the lines a trial replaced.
 
 Trials are buffer state, not review state, and the plugin does not track git:
 
-- Save or commit while a trial is live and it becomes an ordinary edit. Nothing
-  is unwound, and reverting afterwards only changes the buffer again; it does
-  not touch what was written to disk or committed.
+- Save or commit while a trial is live and it becomes an ordinary edit.
+  Nothing is unwound, and reverting afterwards only changes the buffer again;
+  it does not touch what was written to disk or committed.
 - Reloading the buffer (:e!, or an autoread re-read) drops its trials and
   previews. Whatever the file holds then is what you have.
 - Stopping the session forgets every trial for the same reason, and does not
   undo them.
 
-The hooks on_suggestion_accepted and on_suggestion_reverted, and the API calls
-behind all of this, are in |review-mode-setup| and the README.
+The events suggestion_accepted and suggestion_reverted are in
+|review-mode-events|, and the API calls behind all of this in
+|review-mode-api|.
 
+==============================================================================
+API                                                          *review-mode-api*
+
+`local api = require("review_mode.api")` is the surface to build on: the
+bundled panel, picker and nvim-tree decorations use nothing else. Writes take
+a callback(ok, err). Signatures and return shapes are in the docstrings of
+lua/review_mode/api.lua; the README has worked examples.
+
+Session and lifecycle ~
+  api.session()               the session { repo, pr, base, head, root,
+                              in_mode, provider }, or nil
+  api.is_active()             a session is loaded
+  api.is_in_mode()            the key layer is live
+  api.config()                the resolved configuration
+  api.root() / api.base_ref() the repo root / the ref compared against
+  api.start() / api.stop()    start or end the session
+  api.enter() / api.leave()   step into or out of the mode
+  api.toggle() / api.refresh() as |:ReviewMode| / |:ReviewModeRefresh|
+  api.review_pr(opts, cb)     review a PR in its own worktree
+  api.review_local(args)      start a local review|review-mode-local|
+
+Files and progress ~
+  api.files()                 every changed file, in review order
+  api.file(path)              one changed file, or nil
+  api.set_viewed(path, bool)  mark a file viewed or unviewed
+  api.hunks(path, cb)         hunk ranges (lazy)
+  api.hunk_progress(path)     viewed, total hunks
+  api.review_fraction(path)   how far one file is reviewed, 0..1
+  api.thread_counts(path)     total, resolved threads on a file
+  api.review_percent()        the review done, 0..100, by changed lines
+  api.review_progress()       { percent, files, files_viewed, files_left,
+                              threads, resolved, added, removed }
+  api.review_readiness()      what an APPROVE has not covered yet
+  api.is_changed_file(path) / api.is_changed_dir(path)
+  api.is_viewed_file(path) / api.is_viewed_dir(path)
+  api.unviewed_count(path) / api.comment_count(path) /
+  api.unresolved_count(path)  per-file or per-directory counts
+  api.goto_file(path, line)   open a changed file at a line
+  api.file_diff(path, cb)     the PR diff for one file, as text
+  api.goto_next(kind) / api.goto_prev(kind)
+                              kind: "hunk", "comment", "unresolved", "file"
+  api.diff_windows()          windows showing the plugin's diff buffer
+
+Threads and comments ~
+  api.threads(opts)           threads, filtered by path, line, resolved
+  api.threads_at(path, line)  the threads a line action means
+  api.comment(opts, cb)       start a thread on a line or range
+  api.reply(opts, cb)         add to a thread
+  api.resolve(id, bool, cb)   resolve or unresolve a thread
+  api.can_modify_comment(id)  true, or false and why not
+  api.edit_comment(opts, cb)  replace the body of your own comment
+  api.delete_comment(id, cb)  delete your own comment
+  api.reload_comments()       refetch, bypassing the disk cache
+  api.ensure_comments()       serve the cache, fetch if nothing is loaded
+  api.react(opts, cb)         toggle a reaction
+  api.reaction_contents       the eight reactions and their emoji
+  api.comment_paths()         every path that carries comments
+  api.open_url(url, cb)       open the PR or a comment in the browser
+  api.local_comment(opts, cb) create a local comment thread on disk
+  api.local_store()           the local review's comment file, or nil
+
+Rendering ~
+  api.render_threads(threads, opts)  lines and marks, as the panel draws
+  api.apply_render(buf, ns, lines, marks)  write them into a buffer
+  api.ensure_highlights()     define the thread highlight groups
+  api.highlights              the groups and what they link to
+  api.comment_sign()          the configured comment sign glyph
+  api.comment_count_label(n)  the glyph with a count
+  api.suggestion(comment)     a comment's suggestion lines, or nil
+  api.suggestion_block(lines) the fences of a draft's suggestion block
+
+Pending review ~
+  api.pending()               queued draft comments
+  api.add_pending(opts)       queue a new comment
+  api.can_add_pending()       false where add_pending would refuse
+  api.remove_pending(id) / api.discard_pending()
+  api.submit_review(opts, cb) submit the drafts as one review
+
+Suggestions and edits ~
+  api.suggestions(path)       suggestion-bearing threads (all when nil)
+  api.suggestions_at(path, line)
+  api.preview_suggestion(entry, opts)  toggle an inline or split preview
+  api.accept_suggestion(entry, opts)   apply one as a trial
+  api.accept_all_suggestions(path, opts)
+  api.revert_suggestion(id)   undo a trial (nil: the one under the cursor)
+  api.suggestion_trials()     trials applied but not saved
+  api.suggestion_commit_plan() / api.commit_suggestions(plan)
+                              commit the trials, crediting suggesters
+  api.edits(opts) / api.edit_at(line, opts)
+                              your edits against HEAD
+  api.edit_suggestion_body(edit, message)
+  api.track_edit(edit) / api.undo_edit(edit)
+
+Diagnostics, CI and accounting ~
+  api.quickfix_items(opts)    review threads as quickfix items
+  api.set_quickfix(opts)      fill and open the quickfix list
+  api.ci_annotations(path)    check-run annotations for a file
+  api.reload_ci()             refetch them
+  api.request_stats()         { calls, not_modified } for gh / glab
+
+Events ~
+  api.events                  the event names, see|review-mode-events|
+  api.on(event, fn)           subscribe; returns an unsubscribe function
+  api.unstable_state()        the raw session table (escape hatch)
+
+==============================================================================
+EVENTS                                                    *review-mode-events*
+
+Every event reaches, in order, subscribers from api.on(), the on_{event}
+function in the `hooks` config table, and a |User| autocommand whose pattern
+is ReviewMode plus the event in CamelCase. The event data is the callback
+argument and the autocommand's `data`.
+
+  event                User pattern                  fires when
+  start                ReviewModeStart               a session loads
+  enter                ReviewModeEnter               you step into the mode
+  leave                ReviewModeLeave               you step out
+  stop                 ReviewModeStop                the session ends
+  comments_loaded      ReviewModeCommentsLoaded      comments finish loading
+  highlights_changed   ReviewModeHighlightsChanged   the colorscheme changed
+                                                     and the groups are reset
+  viewed_changed       ReviewModeViewedChanged       viewed state changes
+  panel_open           ReviewModePanelOpen           the panel opens
+  panel_close          ReviewModePanelClose          the panel closes
+  comment_posted       ReviewModeCommentPosted       a comment or reply posts
+  thread_resolved      ReviewModeThreadResolved      a thread is (un)resolved
+  checkout_ready       ReviewModeCheckoutReady       a PR worktree is ready
+  checkout_removed     ReviewModeCheckoutRemoved     a review worktree is gone
+  reaction_changed     ReviewModeReactionChanged     a reaction is toggled
+  comment_edited       ReviewModeCommentEdited       you edit a comment
+  comment_deleted      ReviewModeCommentDeleted      you delete a comment
+  pending_changed      ReviewModePendingChanged      pending comments change
+  review_submitted     ReviewModeReviewSubmitted     a review is submitted
+  suggestion_accepted  ReviewModeSuggestionAccepted  a trial is applied
+  suggestion_reverted  ReviewModeSuggestionReverted  a trial is reverted
+  ci_loaded            ReviewModeCiLoaded            CI annotations arrive
+  head_moved           ReviewModeHeadMoved           HEAD moves mid-review
+
+Two hooks are overrides rather than observers: what they return replaces the
+built-in behavior, and nil keeps it.
+
+  open_panel_window    { buf, position, width, origin } -> the panel window
+  prepare_checkout     { repo, pr, head, base, ref, root, default_path }
+                       -> the path of a worktree at ref
+
+A hook that errors is reported once and then ignored.
 
  vim:tw=78:ts=8:noet:ft=help:norl:
