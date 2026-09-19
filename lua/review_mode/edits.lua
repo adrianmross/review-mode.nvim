@@ -135,6 +135,67 @@ function M.list(bufnr, path)
   return out
 end
 
+-- A file whose edits are about to become suggestions. saved: the file on disk
+-- differs from HEAD, so some edits were written. clean: the buffer is what is
+-- on disk, so once its edits are undone writing it loses nothing of yours;
+-- compared by content, not 'modified', which misses a buffer gone stale. A
+-- file that cannot be read (deleted, say) is never clean: there is nothing on
+-- disk to prove a write would lose nothing.
+local function edited_file(path, bufnr, saved)
+  local readable, disk = pcall(vim.fn.readfile, vim.api.nvim_buf_get_name(bufnr))
+  return {
+    path = path,
+    buf = bufnr,
+    saved = saved,
+    clean = saved and readable and vim.deep_equal(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), disk),
+  }
+end
+
+--- The files you have edited, as { path, buf, saved, clean, created }: opts.buf
+--- alone, or every file the PR changes that differs from HEAD in a buffer or on
+--- disk, loading a buffer for a file that has none so list() can read it
+--- (created: this call made the buffer, so the caller can wipe it). Also
+--- returns the edited paths the PR does not change: no suggestion can land
+--- there.
+function M.edited_files(opts)
+  local saved = {}
+  for _, path in ipairs(git_lines({ "diff", "--name-only", "HEAD" }) or {}) do
+    saved[path] = true
+  end
+  if opts and opts.buf then
+    local path = util.buf_relpath(opts.buf)
+    return path and { edited_file(path, opts.buf, saved[path] == true) } or {}, {}
+  end
+
+  local edited, existing = vim.deepcopy(saved), {}
+  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+    existing[bufnr] = true
+    local path = vim.api.nvim_buf_is_loaded(bufnr) and vim.bo[bufnr].modified and util.buf_relpath(bufnr)
+    if path then
+      edited[path] = true
+    end
+  end
+
+  local files, outside = {}, {}
+  for _, path in ipairs(state.file_order) do
+    if edited[path] then
+      -- by number, not name: bufadd finds a buffer by file, so one opened
+      -- through a symlinked path is still the one that was already there
+      local bufnr = vim.fn.bufadd(state.root .. "/" .. path)
+      vim.fn.bufload(bufnr)
+      files[#files + 1] = edited_file(path, bufnr, saved[path] == true)
+      files[#files].created = not existing[bufnr]
+    end
+  end
+  for path in pairs(edited) do
+    if not state.file_index[path] then
+      outside[#outside + 1] = path
+    end
+  end
+  table.sort(outside)
+  return files, outside
+end
+
 --- The edit covering a buffer line, if any.
 function M.at(bufnr, path, line)
   local row = line - 1
