@@ -15,6 +15,8 @@ package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. 
 
 local pr = require("review_mode")
 local api = require("review_mode.api")
+local github = require("review_mode.github")
+local state = require("review_mode.state").state
 pr.setup({
   gitsigns = { enabled = false },
   nvim_tree = { enabled = false },
@@ -35,11 +37,22 @@ local function has_sign()
   return false
 end
 
--- Cold: nothing cached, gh answers at full speed.
+-- The branch pointer is named by a hash, not by cache_path's lossy sanitizing.
+assert(
+  github.cache_path(github.branch_pointer("/a/b", "c")) ~= github.cache_path(github.branch_pointer("/a_b", "c")),
+  "roots that sanitize alike must not share a branch pointer"
+)
+assert(
+  #vim.fs.basename(github.cache_path(github.branch_pointer("/" .. string.rep("d", 300), "feature"))) < 255,
+  "a deep root must not overflow the pointer's filename"
+)
+
+-- Cold: nothing cached, gh answers at full speed. Waits for the metadata too:
+-- that is when the branch remembers its PR.
 pr.start()
 assert(
   vim.wait(5000, function()
-    return api.comment_count("file.txt") > 0 and has_sign()
+    return api.comment_count("file.txt") > 0 and has_sign() and state.metadata_loaded
   end, 5),
   "cold start never placed a comment sign"
 )
@@ -48,22 +61,43 @@ assert(not has_sign(), "stop must clear the signs, or the warm run measures noth
 
 -- Warm: same cache, slow gh.
 vim.env.REVIEW_MODE_GH_DELAY = tostring(delay)
-local started = vim.uv.hrtime()
-pr.start()
-local placed = vim.wait(delay * 1000 + 5000, has_sign, 5)
-local elapsed_ms = (vim.uv.hrtime() - started) / 1e6
-pr.stop()
 
-print(
-  string.format(
-    "startup budget: first comment sign on a warm cache in %.1f ms (budget %d ms, gh delay %ss)",
-    elapsed_ms,
-    budget_ms,
-    delay
+local function warm(label)
+  local started = vim.uv.hrtime()
+  pr.start()
+  local placed = vim.wait(delay * 1000 + 5000, has_sign, 5)
+  local elapsed_ms = (vim.uv.hrtime() - started) / 1e6
+  pr.stop()
+
+  print(
+    string.format(
+      "startup budget: first comment sign on a warm cache (%s) in %.1f ms (budget %d ms, gh delay %ss)",
+      label,
+      elapsed_ms,
+      budget_ms,
+      delay
+    )
   )
-)
-assert(placed, "warm start never placed a comment sign")
-assert(
-  elapsed_ms < budget_ms,
-  string.format("warm start took %.1f ms to its first comment sign, over the %d ms budget", elapsed_ms, budget_ms)
-)
+  assert(placed, "warm start never placed a comment sign")
+  assert(
+    elapsed_ms < budget_ms,
+    string.format(
+      "warm start (%s) took %.1f ms to its first comment sign, over the %d ms budget",
+      label,
+      elapsed_ms,
+      budget_ms
+    )
+  )
+end
+
+if vim.env.GH_REVIEW_PR then
+  warm("GH_REVIEW_*")
+  -- A GH_REVIEW_* start must still teach the branch its PR, or a later plain
+  -- start on the same branch waits on gh.
+  for _, name in ipairs({ "GH_REVIEW_REPO", "GH_REVIEW_PR", "GH_REVIEW_BASE", "GH_REVIEW_HEAD" }) do
+    vim.env[name] = nil
+  end
+  warm("discovery after a GH_REVIEW_* start")
+else
+  warm("discovery")
+end

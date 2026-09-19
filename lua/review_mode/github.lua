@@ -155,13 +155,22 @@ end
 -- round trip. Each branch remembers the PR it last resolved to, and start draws
 -- that PR's cached comments while gh is still being asked; start reconciles
 -- against gh's answer when it arrives.
-local function branch_pointer(root)
+--
+-- The pointer's name is a hash: cache_path's sanitizing is lossy ("/a/b" and
+-- "/a_b" come out the same) and a deep root would overflow a filename. "\n" is
+-- the separator because a git branch name cannot hold one (and vim.fn cannot
+-- take a NUL).
+function M.branch_pointer(root, branch)
+  return "branch-" .. vim.fn.sha256(root .. "\n" .. branch)
+end
+
+local function current_branch_pointer(root)
   local branch = util.system({ "git", "symbolic-ref", "--short", "-q", "HEAD" }, { cwd = root })
-  return branch and branch ~= "" and ("branch-" .. root .. "@" .. branch) or nil
+  return branch and branch ~= "" and M.branch_pointer(root, branch) or nil
 end
 
 function M.remember_branch(root)
-  local pointer, key = branch_pointer(root), core.cache_key()
+  local pointer, key = current_branch_pointer(root), core.cache_key()
   if pointer and key then
     pcall(util.write_json_file, M.cache_path(pointer), { key = key })
   end
@@ -173,7 +182,7 @@ function M.hydrate_for_branch(root)
   if not state.config.comments.enabled then
     return nil
   end
-  local pointer = branch_pointer(root)
+  local pointer = current_branch_pointer(root)
   local entry = pointer and M.read_comment_cache(pointer)
   local key = entry and entry.key
   local cached = type(key) == "string" and M.read_comment_cache(key) or nil

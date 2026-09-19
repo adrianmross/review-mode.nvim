@@ -1505,7 +1505,7 @@ function M.start(opts)
     state.base = state.base or meta.baseRefName or "main"
     state.head = state.head or meta.headRefOid
     state.metadata_loaded = true
-    if not review_loading_started then
+    if state.provider == "github" then
       github.remember_branch(root)
     end
     if seeded_key and seeded_key ~= core.cache_key() then
