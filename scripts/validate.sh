@@ -47,6 +47,9 @@ REVIEW_MODE_HELP_DIR="$tmp/help" nvim --headless -u NONE -i NONE \
   -c "try | execute 'helptags' fnameescape(\$REVIEW_MODE_HELP_DIR) | catch | call writefile([v:exception], '/dev/stderr') | cquit 1 | endtry" \
   -c qa
 
+# every command tagged in :help, every |link| resolving, every event documented
+nvim --headless -u NONE -i NONE -l scripts/check-docs.lua
+
 # The bundled UI must build on the public API, the same as anyone else's would.
 # If one of these needs a plugin internal, the API is missing something: add it
 # to review_mode.api rather than reaching around it.
@@ -150,8 +153,12 @@ run_fixture() {
     export REVIEW_MODE_PLUGIN_ROOT="$repo_root" REVIEW_MODE_DONE="$dir/done"
     local word words
     read -ra words <<<"$header"
-    for word in ${words[@]+"${words[@]}"}; do
+    # guarded, not ${words[@]+...}: an empty array trips set -u on bash 3.2, and
+    # the quoted expansion keeps a token with glob characters whole
+    [[ ${#words[@]} -gt 0 ]] || words=("")
+    for word in "${words[@]}"; do
       case "$word" in
+        "") ;; # a fixture with no header words
         gh) export PATH="$repo_root/scripts/mock:$PATH" ;;
         pr) export GH_REVIEW_REPO=owner/repo GH_REVIEW_PR=123 GH_REVIEW_BASE=main GH_REVIEW_HEAD=abc123 ;;
         *=*) export "${word//\{tmp\}/$dir}" ;;

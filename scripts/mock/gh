@@ -112,11 +112,13 @@ case "$1 $2" in
     args="$*"
     if [[ "$args" == *"viewerViewedState"* ]]; then
       printf '{"data":{"repository":{"pullRequest":{"id":"PR_node","files":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"path":"file.txt","viewerViewedState":"VIEWED"}]}}}}}\n'
+    # unresolve first: "unresolveReviewThread" contains "resolveReviewThread"
+    elif [[ "$args" == *"unresolveReviewThread"* ]]; then
+      printf 'unresolve %s\n' "$args" >> "${REVIEW_MODE_AUTHOR_LOG:-/dev/null}"
+      printf '{"data":{"unresolveReviewThread":{"thread":{"id":"thread_1","isResolved":false}}}}\n'
     elif [[ "$args" == *"resolveReviewThread"* ]]; then
       printf 'resolve %s\n' "$args" >> "${REVIEW_MODE_AUTHOR_LOG:-/dev/null}"
       printf '{"data":{"resolveReviewThread":{"thread":{"id":"thread_1","isResolved":true}}}}\n'
-    elif [[ "$args" == *"unresolveReviewThread"* ]]; then
-      printf '{"data":{"unresolveReviewThread":{"thread":{"id":"thread_1","isResolved":false}}}}\n'
     # comment anchoring fixture: the fixture writes the thread payload (and the
     # second page of a long thread's comments) as JSON files of its own
     elif [[ -n "${REVIEW_MODE_THREADS_FILE:-}" && "$args" == *"reviewThreads"* ]]; then

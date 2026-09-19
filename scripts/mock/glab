@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-printf 'ARGS %s\n' "$*" >> "$GLAB_LOG"
+# a fixture that doesn't expect glab sets no log; still answer, so the mock's
+# own "unexpected glab" diagnostics are what it sees
+printf 'ARGS %s\n' "$*" >> "${GLAB_LOG:-/dev/null}"
 args="$*"
 case "$args" in
   "mr view --output json"|"mr view 7 --repo https://gitlab.com/group/project --output json")
