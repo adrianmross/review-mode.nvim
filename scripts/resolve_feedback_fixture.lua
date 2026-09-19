@@ -1,3 +1,4 @@
+-- fixture: gh pr
 -- Resolving a thread used to be silent: the comment simply stopped being drawn.
 -- These checks pin the confirmation flash -- both directions, both entry points,
 -- and the switch that turns it off.
@@ -37,9 +38,13 @@ local flash_ns =
   assert(vim.api.nvim_get_namespaces()["review_mode_resolve_flash"], "the resolve-feedback namespace does not exist")
 
 pr.start()
+-- the flash looks its thread up through the changed-file list, which can land
+-- after the comments: wait for both
 wait_for(function()
-  return api.comment_count("file.txt") == 3 and not api.unstable_state().comments_loading
-end, "resolve feedback fixture comments did not load")
+  return api.comment_count("file.txt") == 3
+    and not api.unstable_state().comments_loading
+    and api.is_changed_file("file.txt")
+end, "resolve feedback fixture comments or changed files did not load")
 
 vim.cmd.edit("file.txt")
 local bufnr = vim.api.nvim_get_current_buf()

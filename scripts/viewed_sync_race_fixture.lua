@@ -1,3 +1,4 @@
+-- fixture: gh pr
 -- GitHub viewed sync around refreshes and in-flight writes: a refresh mid-query
 -- does not wedge the next sync, a queued change survives an older write
 -- settling, turning sync on keeps local marks, and clearing tells GitHub.

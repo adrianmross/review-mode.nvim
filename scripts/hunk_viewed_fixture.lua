@@ -1,3 +1,4 @@
+-- fixture: gh pr
 -- Hunk-level viewed: mark the hunk under the cursor, see it in the picker and
 -- the sign column, skip it on ]c when asked, keep it across sessions, and after
 -- a push get back only the hunks whose content changed.
@@ -65,8 +66,10 @@ end
 
 local function start()
   pr.start()
+  -- is_changed_file turns true with the name list; the stored viewed state is
+  -- read only once maps_loaded does, after the numstat call
   wait_for(function()
-    return api.is_changed_file(path)
+    return api.is_changed_file(path) and state.maps_loaded
   end, "changed file map did not load")
   vim.cmd.edit(path)
   assert(vim.deep_equal(hunks(), { 2, 8 }), "unexpected hunks: " .. vim.inspect(hunks()))

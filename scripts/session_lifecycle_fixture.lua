@@ -1,3 +1,4 @@
+-- fixture: gh pr
 -- How a session begins and ends: setup against the plugin file, the key layers
 -- handing back the user's own mappings, one teardown for stop, restart and a
 -- failed start, a missing gh, signs_when_out, the statusline and :checkhealth.

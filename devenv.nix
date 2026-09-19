@@ -19,7 +19,7 @@
   '';
 
   scripts.validate.exec = ''
-    bash scripts/validate.sh
+    bash scripts/validate.sh "$@"
   '';
 
   scripts.benchmark.exec = ''
@@ -29,7 +29,7 @@
   tasks = {
     "dev:validate".exec = "validate";
     "dev:benchmark".exec = "benchmark";
-    "dev:format".exec = "stylua lua plugin scripts/fixture.lua scripts/rest_fallback_fixture.lua";
+    "dev:format".exec = "stylua lua plugin scripts";
     "release:check".exec = "bash scripts/release-check.sh";
   };
 

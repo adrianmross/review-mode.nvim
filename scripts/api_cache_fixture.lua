@@ -1,3 +1,4 @@
+-- fixture: gh pr REVIEW_MODE_FORCE_REST_COMMENTS=1 REVIEW_MODE_GH_LOG={tmp}/gh.log
 -- Fewer GitHub API calls: gh's response cache for repeating metadata reads, and
 -- If-None-Match revalidation of the REST comment list.
 --

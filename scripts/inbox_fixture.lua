@@ -1,3 +1,4 @@
+-- fixture: gh GH_REVIEW_REPO=owner/repo REVIEW_MODE_GH_LOG={tmp}/gh.log TZ=America/New_York
 -- :ReviewModeInbox: PRs waiting on you, from one gh call, with no session
 -- running; choosing one reviews it in its own worktree.
 local harness = dofile(
@@ -92,7 +93,7 @@ assert(inbox.ci_symbol({ { status = "QUEUED", conclusion = "" }, { state = "SUCC
 assert(inbox.ci_symbol({ { status = "IN_PROGRESS" }, { state = "ERROR" } }) == "✗", "a failure outranks pending")
 -- `now` is epoch seconds: 2024-01-01T03:00:00Z
 assert(inbox.age("2024-01-01T00:00:00Z", 1704067200 + 3 * 3600) == "3h")
--- and without one, the real clock. validate.sh runs this under
+-- and without one, the real clock. The header runs this under
 -- America/New_York: reading the UTC stamp as local time is an hour off in DST.
 local two_hours_ago = os.date("!%Y-%m-%dT%H:%M:%SZ", os.time() - 2 * 3600 - 60)
 assert(inbox.age(two_hours_ago) == "2h", "age of a stamp two hours old: " .. inbox.age(two_hours_ago))

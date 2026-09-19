@@ -1,3 +1,4 @@
+-- fixture: gh pr REVIEW_MODE_AUTHOR_LOG={tmp}/author.log
 -- Author mode: stepping through unresolved threads, offering to resolve the
 -- threads a mid-review commit touched, and re-requesting review. Runs in its
 -- own copy of the repo, since it commits. The gh mock answers the author query

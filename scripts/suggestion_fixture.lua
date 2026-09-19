@@ -1,3 +1,4 @@
+-- fixture: gh pr REVIEW_MODE_FIXTURE=suggestions
 -- Suggestion preview, trial apply, revert and accept-all.
 --
 -- The mock branch this runs against (REVIEW_MODE_FIXTURE=suggestions) puts

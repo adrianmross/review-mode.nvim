@@ -1,3 +1,4 @@
+-- fixture: gh pr REVIEW_MODE_FIXTURE=reactions REVIEW_MODE_GH_LOG={tmp}/gh.log
 local harness = dofile(
   assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
 )

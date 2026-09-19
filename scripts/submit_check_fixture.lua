@@ -1,3 +1,4 @@
+-- fixture: gh pr REVIEW_MODE_FIXTURE=ci REVIEW_MODE_REVIEW_CAPTURE={tmp}/review.json
 -- The readiness check before submitting: counts from state already in memory,
 -- and only the non-zero ones in the APPROVE confirmation.
 local harness = dofile(

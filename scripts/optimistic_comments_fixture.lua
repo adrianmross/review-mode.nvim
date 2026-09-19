@@ -1,3 +1,4 @@
+-- fixture: gh pr
 -- Optimistic posting: a comment or reply shows at once, marked sending, is
 -- swapped for GitHub's answer without a duplicate, and on failure is taken
 -- back with its text left in the unnamed register. The gh mock reads

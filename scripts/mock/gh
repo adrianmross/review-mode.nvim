@@ -1,0 +1,267 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# startup budget fixture: a slow network, so cache-first rendering can be told
+# apart from waiting on gh
+if [[ -n "${REVIEW_MODE_GH_DELAY:-}" ]]; then
+  sleep "$REVIEW_MODE_GH_DELAY"
+fi
+
+case "$1 $2" in
+  "pr view")
+    args="$*"
+    # local-fallback fixture: the two ways `gh pr view` exits 1. Real gh writes
+    # both to stderr, and only the wording tells them apart.
+    if [[ "${REVIEW_MODE_FIXTURE:-}" == "no_pr" ]]; then
+      echo 'no pull requests found for branch "feature"' >&2
+      exit 1
+    elif [[ "${REVIEW_MODE_FIXTURE:-}" == "unknown_host" ]]; then
+      # gh in a repo whose remotes are on no GitHub host (Gitea, Codeberg, ...)
+      echo 'none of the git remotes configured for this repository point to a known GitHub host. To tell gh about a new GitHub host, please use `gh auth login`' >&2
+      exit 1
+    elif [[ "${REVIEW_MODE_FIXTURE:-}" == "gh_auth_fail" ]]; then
+      echo 'HTTP 401: Bad credentials (https://api.github.com/graphql)' >&2
+      exit 1
+    elif [[ "$args" == *"--json url"* && "$args" == *"-q .url"* ]]; then
+      printf 'https://github.com/owner/repo/pull/123\n'
+    elif [[ "$args" == *"title,state,isDraft,mergeable,reviewDecision,headRefName,baseRefName,url"* ]]; then
+      printf '{"title":"Improve review tools","state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","reviewDecision":"REVIEW_REQUIRED","headRefName":"feature","baseRefName":"main","url":"https://github.com/owner/repo/pull/123"}\n'
+    elif [[ "$args" == *"number,headRefOid,baseRefName,url"* ]]; then
+      # checkout: the PR's head is whatever its repo's pull ref holds, unless a
+      # fixture says the server reports another; the URL names the PR's repo
+      if [[ -n "${REVIEW_MODE_PR_VIEW_LOG:-}" ]]; then
+        printf '%s\n' "$args" >> "$REVIEW_MODE_PR_VIEW_LOG"
+      fi
+      head="${REVIEW_MODE_HEAD_OID:-$(git -C "${REVIEW_MODE_PR_REPO_DIR:-.}" rev-parse -q --verify refs/pull/123/head || echo abc123)}"
+      printf '{"number":123,"headRefOid":"%s","baseRefName":"main","url":"%s"}\n' "$head" "${REVIEW_MODE_PR_URL:-https://github.com/owner/repo/pull/123}"
+    else
+      printf '{"baseRefName":"main","headRefOid":"abc123","number":123}\n'
+    fi
+    ;;
+  # review inbox: one call, CI state included
+  "pr list")
+    if [[ -n "${REVIEW_MODE_GH_LOG:-}" ]]; then
+      printf '%s\n' "$*" >> "$REVIEW_MODE_GH_LOG"
+    fi
+    printf '%s\n' '[{"number":7,"title":"Fix flaky test","author":{"login":"alice"},"additions":12,"deletions":3,"updatedAt":"2024-01-02T03:04:05Z","isDraft":true,"url":"https://github.com/owner/repo/pull/7","statusCheckRollup":[{"__typename":"CheckRun","status":"COMPLETED","conclusion":"SUCCESS"},{"__typename":"CheckRun","status":"COMPLETED","conclusion":"FAILURE"}]},{"number":123,"title":"Improve review tools","author":{"login":"bob"},"additions":40,"deletions":0,"updatedAt":"2024-01-02T03:04:05Z","isDraft":false,"url":"https://github.com/owner/repo/pull/123","statusCheckRollup":[{"__typename":"StatusContext","state":"SUCCESS"},{"__typename":"CheckRun","status":"IN_PROGRESS","conclusion":""}]}]'
+    ;;
+  "pr checks")
+    printf 'validate\tpass\t0\thttps://example.test/checks/validate\n'
+    ;;
+  "repo view")
+    printf 'owner/repo\n'
+    ;;
+  "api repos/owner/repo/pulls/123/comments?per_page=100"|"api repos/owner/repo/pulls/123/comments?per_page=100&page=1")
+    printf '%s\n' '[{"id":1,"path":"file.txt","line":2,"body":"Needs review","user":{"login":"reviewer"},"created_at":"2024-01-02T03:04:05Z","html_url":"https://github.com/owner/repo/pull/123#discussion_r1","author_association":"OWNER","reactions":{"+1":2,"laugh":0,"hooray":1,"heart":0,"rocket":0,"eyes":0,"total_count":3}},{"id":2,"path":"file.txt","line":4,"body":"Check final line","user":{"login":"reviewer"},"created_at":"2024-01-02T03:04:05Z","author_association":"NONE","reactions":{"+1":0,"total_count":0}}]'
+    ;;
+  "api repos/owner/repo/pulls/123/comments/1/replies"|"api repos/owner/repo/pulls/123/comments/2/replies"|"api repos/owner/repo/pulls/123/comments/3/replies"|"api repos/owner/repo/pulls/123/comments/41/replies")
+    args="$*"
+    if [[ "$args" == *"--method POST"* ]]; then
+      # author fixture: which thread got a "Fixed in" reply, and what it said
+      if [[ -n "${REVIEW_MODE_AUTHOR_LOG:-}" ]]; then
+        printf 'reply %s\n' "$args" >> "$REVIEW_MODE_AUTHOR_LOG"
+      fi
+      # optimistic posting: slow the answer down, or fail it
+      if [[ -n "${REVIEW_MODE_POST_DELAY:-}" ]]; then
+        sleep "$REVIEW_MODE_POST_DELAY"
+      fi
+      if [[ "${REVIEW_MODE_FAIL_POST:-}" == "1" ]]; then
+        echo "forced post failure" >&2
+        exit 1
+      fi
+      printf '{"id":100,"path":"file.txt","line":2,"body":"replied"}\n'
+    else
+      echo "unexpected gh replies args: $*" >&2
+      exit 1
+    fi
+    ;;
+  # edit and delete: PATCH answers the updated comment, DELETE answers 204 with
+  # an empty body, as GitHub does
+  "api --method")
+    if [[ -n "${REVIEW_MODE_GH_LOG:-}" ]]; then
+      printf '%s\n' "$*" >> "$REVIEW_MODE_GH_LOG"
+    fi
+    if [[ "$3 $4" == "POST repos/owner/repo/pulls/123/requested_reviewers" ]]; then
+      printf 'rerequest %s\n' "$*" >> "${REVIEW_MODE_AUTHOR_LOG:-/dev/null}"
+      printf '{"number":123}\n'
+    elif [[ "$3 $4" == "PATCH repos/owner/repo/pulls/comments/11" ]]; then
+      printf '{"id":11,"path":"file.txt","line":2,"body":"edited"}\n'
+    elif [[ "$3 $4" != "DELETE repos/owner/repo/pulls/comments/11" ]]; then
+      echo "unexpected gh --method args: $*" >&2
+      exit 1
+    fi
+    ;;
+  "api repos/owner/repo/pulls/123/comments")
+    args="$*"
+    if [[ "$args" == *"--method POST"* ]]; then
+      # optimistic posting: slow the answer down, or fail it
+      if [[ -n "${REVIEW_MODE_POST_DELAY:-}" ]]; then
+        sleep "$REVIEW_MODE_POST_DELAY"
+      fi
+      if [[ "${REVIEW_MODE_FAIL_POST:-}" == "1" ]]; then
+        echo "forced post failure" >&2
+        exit 1
+      fi
+      printf '{"id":99,"path":"file.txt","line":2,"body":"created"}\n'
+    else
+      echo "unexpected gh comments args: $*" >&2
+      exit 1
+    fi
+    ;;
+  "api graphql")
+    args="$*"
+    if [[ "$args" == *"viewerViewedState"* ]]; then
+      printf '{"data":{"repository":{"pullRequest":{"id":"PR_node","files":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"path":"file.txt","viewerViewedState":"VIEWED"}]}}}}}\n'
+    elif [[ "$args" == *"resolveReviewThread"* ]]; then
+      printf 'resolve %s\n' "$args" >> "${REVIEW_MODE_AUTHOR_LOG:-/dev/null}"
+      printf '{"data":{"resolveReviewThread":{"thread":{"id":"thread_1","isResolved":true}}}}\n'
+    elif [[ "$args" == *"unresolveReviewThread"* ]]; then
+      printf '{"data":{"unresolveReviewThread":{"thread":{"id":"thread_1","isResolved":false}}}}\n'
+    # comment anchoring fixture: the fixture writes the thread payload (and the
+    # second page of a long thread's comments) as JSON files of its own
+    elif [[ -n "${REVIEW_MODE_THREADS_FILE:-}" && "$args" == *"reviewThreads"* ]]; then
+      printf 'graphql reviewThreads\n' >> "${REVIEW_MODE_GH_LOG:-/dev/null}"
+      cat "$REVIEW_MODE_THREADS_FILE"
+    elif [[ -n "${REVIEW_MODE_THREADS_FILE:-}" && "$args" == *"PullRequestReviewThread"* ]]; then
+      printf 'graphql thread page %s\n' "$args" >> "${REVIEW_MODE_GH_LOG:-/dev/null}"
+      cat "$REVIEW_MODE_THREADS_FILE.page"
+    elif [[ "$args" == *"reviewThreads"* && "${REVIEW_MODE_FIXTURE:-}" == "reactions" ]]; then
+      printf '%s\n' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"id":"thread_1","path":"file.txt","line":2,"originalLine":2,"startLine":null,"diffSide":"RIGHT","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_1","databaseId":1,"path":"file.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r1","state":"SUBMITTED","authorAssociation":"OWNER","viewerDidAuthor":false,"body":"Needs review","author":{"login":"reviewer"},"reactionGroups":[{"content":"THUMBS_UP","viewerHasReacted":true,"reactors":{"totalCount":2}},{"content":"HOORAY","viewerHasReacted":false,"reactors":{"totalCount":1}}]},{"id":"comment_5","databaseId":5,"path":"file.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-03T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r5","state":"SUBMITTED","authorAssociation":"MEMBER","viewerDidAuthor":true,"body":"Done","author":{"login":"maintainer"},"reactionGroups":[]}]}}]}}}}}'
+    elif [[ "$args" == *"reviewThreads"* && "${REVIEW_MODE_FIXTURE:-}" == "edit_delete" ]]; then
+      if [[ -n "${REVIEW_MODE_GH_LOG:-}" ]]; then
+        printf 'graphql reviewThreads\n' >> "$REVIEW_MODE_GH_LOG"
+      fi
+      printf '%s\n' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"id":"thread_ed","path":"file.txt","line":2,"originalLine":2,"startLine":null,"diffSide":"RIGHT","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_10","databaseId":10,"path":"file.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r10","state":"SUBMITTED","authorAssociation":"MEMBER","viewerDidAuthor":false,"body":"Please rename this","author":{"login":"alice"},"reactionGroups":[]},{"id":"comment_11","databaseId":11,"path":"file.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-03T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r11","state":"SUBMITTED","authorAssociation":"OWNER","viewerDidAuthor":true,"body":"Renamed in the next push\nsecond line","author":{"login":"adrian"},"reactionGroups":[]}]}}]}}}}}'
+    elif [[ "$args" == *"reviewThreads"* && "${REVIEW_MODE_FIXTURE:-}" == "suggestions" ]]; then
+      # Several suggestions in one file, at different lines and of different
+      # lengths, so accept-all has something to get the ordering wrong on. Two
+      # suggesters, one with no id or name, for the commit's credit trailers.
+      printf '%s\n' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"id":"thread_s1","path":"file.txt","line":2,"originalLine":2,"startLine":null,"diffSide":"RIGHT","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_s1","databaseId":21,"path":"file.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r21","state":"SUBMITTED","authorAssociation":"OWNER","viewerDidAuthor":false,"body":"Two needs more\n\n```suggestion\ntwo improved\ntwo extra\n```","author":{"login":"reviewer","databaseId":101,"name":"Rita Reviewer"},"reactionGroups":[]}]}},{"id":"thread_s2","path":"file.txt","line":4,"originalLine":4,"startLine":null,"diffSide":"RIGHT","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_s2","databaseId":22,"path":"file.txt","line":4,"originalLine":4,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r22","state":"SUBMITTED","authorAssociation":"OWNER","viewerDidAuthor":false,"body":"```suggestion\nbase improved\n```","author":{"login":"reviewer","databaseId":101,"name":"Rita Reviewer"},"reactionGroups":[]}]}},{"id":"thread_s3","path":"file.txt","line":6,"originalLine":6,"startLine":null,"diffSide":"RIGHT","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_s3","databaseId":23,"path":"file.txt","line":6,"originalLine":6,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r23","state":"SUBMITTED","authorAssociation":"OWNER","viewerDidAuthor":false,"body":"No suggestion in this one","author":{"login":"reviewer","databaseId":101,"name":"Rita Reviewer"},"reactionGroups":[]}]}},{"id":"thread_s4","path":"file.txt","line":10,"originalLine":10,"startLine":null,"diffSide":"RIGHT","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_s4","databaseId":24,"path":"file.txt","line":10,"originalLine":10,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r24","state":"SUBMITTED","authorAssociation":"OWNER","viewerDidAuthor":false,"body":"```suggestion\ntail improved\n```","author":{"login":"alice","name":null},"reactionGroups":[]}]}}]}}}}}'
+    elif [[ "$args" == *"reviewThreads"* ]]; then
+      if [[ "${REVIEW_MODE_FORCE_REST_COMMENTS:-}" == "1" ]]; then
+        echo "forced reviewThreads failure" >&2
+        exit 1
+      fi
+      # printf '%s\n' so the escaped newlines inside comment bodies survive as
+      # JSON escapes instead of being expanded into real newlines.
+      printf '%s\n' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"id":"thread_1","path":"file.txt","line":2,"originalLine":2,"startLine":null,"diffSide":"RIGHT","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_1","databaseId":1,"path":"file.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r1","state":"SUBMITTED","authorAssociation":"OWNER","viewerDidAuthor":false,"body":"Needs review\n\n```suggestion\ntwo improved\n```","author":{"login":"reviewer"},"reactionGroups":[{"content":"THUMBS_UP","reactors":{"totalCount":2}},{"content":"HOORAY","reactors":{"totalCount":1}},{"content":"EYES","reactors":{"totalCount":0}}]}]}},{"id":"thread_2","path":"file.txt","line":4,"originalLine":4,"startLine":null,"diffSide":"RIGHT","isResolved":true,"isOutdated":false,"comments":{"nodes":[{"id":"comment_2","databaseId":2,"path":"file.txt","line":4,"originalLine":4,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r2","authorAssociation":"CONTRIBUTOR","body":"Check final line","author":{"login":"reviewer"},"reactionGroups":[]},{"id":"comment_4","databaseId":4,"path":"file.txt","line":4,"originalLine":4,"startLine":null,"createdAt":"2024-01-03T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r4","authorAssociation":"MEMBER","body":"Fixed in the follow-up commit.","author":{"login":"maintainer"},"reactionGroups":[{"content":"HEART","reactors":{"totalCount":1}}]}]}},{"id":"thread_3","path":"nested/other.txt","line":2,"originalLine":2,"startLine":null,"diffSide":"RIGHT","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_3","databaseId":3,"path":"nested/other.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r3","authorAssociation":"NONE","body":"Review nested change","author":{"login":"reviewer"},"reactionGroups":[]}]}}]}}}}}'
+    elif [[ "$args" == *"reviews(last"* ]]; then
+      # author mode: whether the viewer wrote the PR, and who has reviewed it.
+      # Not the author unless a fixture says so, since any fixture that commits
+      # mid-review asks.
+      printf 'people\n' >> "${REVIEW_MODE_AUTHOR_LOG:-/dev/null}"
+      author="false"
+      if [[ "${REVIEW_MODE_AUTHOR:-}" == "1" ]]; then
+        author="true"
+      fi
+      printf '%s\n' '{"data":{"repository":{"pullRequest":{"viewerDidAuthor":'"$author"',"author":{"login":"adrian"},"reviews":{"nodes":[{"author":{"__typename":"User","login":"alice"}},{"author":{"__typename":"User","login":"adrian"}},{"author":{"__typename":"Bot","login":"ci-bot"}},{"author":{"__typename":"User","login":"bob"}},{"author":{"__typename":"User","login":"alice"}}]}}}}}'
+    elif [[ "$args" == *"pullRequest(number"* ]]; then
+      printf '{"data":{"repository":{"pullRequest":{"id":"PR_node"}}}}\n'
+    elif [[ "$args" == *"markFileAsViewed"* ]]; then
+      # "markFileAsViewed" is also a substring of "unmarkFileAsViewed": test
+      # for the longer name, not the order of two branches
+      field=markFileAsViewed
+      if [[ "$args" == *"unmarkFileAsViewed"* ]]; then
+        field=unmarkFileAsViewed
+      fi
+      printf 'graphql %s\n' "$field" >> "${REVIEW_MODE_GH_LOG:-/dev/null}"
+      # hold the mutation open so a test can land a second flush mid-flight
+      sleep "${REVIEW_MODE_SLOW_MUTATION:-0}"
+      if [[ "${REVIEW_MODE_FAIL_MUTATION:-}" == "1" ]]; then
+        echo "forced viewed mutation failure" >&2
+        exit 1
+      fi
+      printf '{"data":{"%s":{"clientMutationId":null}}}\n' "$field"
+    elif [[ "$args" == *"addReaction"* || "$args" == *"removeReaction"* ]]; then
+      printf '%s\n' "$*" >> "${REVIEW_MODE_GH_LOG:-/dev/null}"
+      printf '{"data":{"reaction":{"reaction":{"content":"THUMBS_UP"}}}}\n'
+    else
+      echo "unexpected gh graphql args: $*" >&2
+      exit 1
+    fi
+    ;;
+  # CI annotations: check runs on the PR head, then each annotated run's
+  # annotations. Real gh applies the --jq filter (one @json row per line); the
+  # mock prints the rows that filter would. Only the ci fixture has any.
+  "api --paginate")
+    if [[ "${REVIEW_MODE_FIXTURE:-}" != "ci" ]]; then
+      exit 0
+    fi
+    printf 'paginate %s\n' "$3" >> "${REVIEW_MODE_GH_LOG:-/dev/null}"
+    case "$3" in
+      "repos/owner/repo/commits/abc123/check-runs?per_page=100")
+        if [[ "${REVIEW_MODE_FAIL_CI:-}" == "1" ]]; then
+          echo "forced check-runs failure" >&2
+          exit 1
+        fi
+        printf '%s\n' '["7","lint"]' '["8","test"]'
+        ;;
+      "repos/owner/repo/check-runs/7/annotations?per_page=100")
+        printf '%s\n' '["file.txt",2,2,"failure","Unused variable","x is never used"]' '["file.txt",4,5,"warning",null,"line too long"]'
+        ;;
+      "repos/owner/repo/check-runs/8/annotations?per_page=100")
+        printf '%s\n' '["nested/other.txt",2,2,"notice","","flaky"]'
+        ;;
+      *)
+        echo "unexpected gh paginate args: $*" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  "api repos/owner/repo/pulls/comments/1/reactions")
+    printf '%s\n' "$*" >> "${REVIEW_MODE_GH_LOG:-/dev/null}"
+    printf '{"id":7,"content":"+1"}\n'
+    ;;
+  "api repos/owner/repo/pulls/123/reviews")
+    # review submission: keep the --input payload where the fixture can read it
+    args=("$@")
+    input=""
+    for ((i = 0; i < ${#args[@]}; i++)); do
+      if [[ "${args[$i]}" == "--input" ]]; then
+        input="${args[$((i + 1))]}"
+      fi
+    done
+    if [[ "$*" != *"--method POST"* || -z "$input" ]]; then
+      echo "unexpected gh reviews args: $*" >&2
+      exit 1
+    fi
+    if [[ "${REVIEW_MODE_FAIL_REVIEW:-}" == "1" ]]; then
+      echo "forced review submission failure" >&2
+      exit 1
+    fi
+    if [[ -n "${REVIEW_MODE_REVIEW_CAPTURE:-}" ]]; then
+      cp "$input" "$REVIEW_MODE_REVIEW_CAPTURE"
+    fi
+    printf '{"id":500,"state":"COMMENTED"}\n'
+    ;;
+  # Conditional comment fetch. "--include" is passed immediately after "api", so
+  # this branch owns those calls without touching the plain ones above. Real gh
+  # prints the status line and headers ahead of the body, and answers a matched
+  # If-None-Match with 304 and exit code 1 (verified against gh 2.72.0).
+  "api --include")
+    endpoint=""
+    inm=""
+    for arg in "$@"; do
+      case "$arg" in
+        repos/*) endpoint="$arg" ;;
+        "If-None-Match: "*) inm="${arg#If-None-Match: }" ;;
+      esac
+    done
+    # per page, as GitHub's are: the page number is part of the ETag
+    etag="\"etag-${REVIEW_MODE_ETAG_GENERATION:-1}-${endpoint##*page=}\""
+    if [[ -n "${REVIEW_MODE_GH_LOG:-}" ]]; then
+      printf 'include %s if-none-match=%s\n' "$endpoint" "${inm:-none}" >> "$REVIEW_MODE_GH_LOG"
+    fi
+    if [[ "$inm" == "$etag" ]]; then
+      printf 'HTTP/2.0 304 Not Modified\nEtag: %s\r\n\r\n' "$etag"
+      exit 1
+    fi
+    printf 'HTTP/2.0 200 OK\nEtag: %s\r\nContent-Type: application/json; charset=utf-8\r\n\r\n' "$etag"
+    # reuse the payload the plain branch already answers with
+    "$0" api "$endpoint"
+    ;;
+  *)
+    echo "unexpected gh args: $*" >&2
+    exit 1
+    ;;
+esac

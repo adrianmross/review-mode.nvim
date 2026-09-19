@@ -1,3 +1,4 @@
+-- fixture: gh pr
 -- The base diff hands the user's window back as it found it: window options
 -- restored on close, :close of the file window in side by side, the unified
 -- view after ]f, and ]c / ]f pressed inside the base pane or unified buffer.

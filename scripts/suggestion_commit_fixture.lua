@@ -1,3 +1,4 @@
+-- fixture: gh pr REVIEW_MODE_FIXTURE=suggestions
 -- Committing trial suggestions, crediting the suggesters.
 --
 -- Runs in a copy of the fixture repo, since it commits. file.txt at HEAD is
