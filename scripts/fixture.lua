@@ -241,10 +241,12 @@ end, "stale comment cache entry was not pruned")
 assert(vim.uv.fs_stat(fresh_cache_path), "current comment cache entry was pruned")
 
 local function fake_snacks_preview()
-  local preview = { lines = {}, ft = nil }
+  -- a real buffer behind it, so the preview's highlights can be read back
+  local preview = { lines = {}, ft = nil, win = { buf = vim.api.nvim_create_buf(false, true) } }
   preview.reset = function() end
   preview.set_lines = function(_, lines)
     preview.lines = lines
+    vim.api.nvim_buf_set_lines(preview.win.buf, 0, -1, false, lines)
   end
   preview.highlight = function(_, opts)
     preview.ft = opts and opts.ft
@@ -295,7 +297,7 @@ for _, segment in ipairs(snacks_files_opts.format(snacks_files_opts.items[1])) d
 end
 assert((colored.ReviewModePickerAdded or ""):match("^%+%d"), "added lines are not colored: " .. vim.inspect(colored))
 assert(
-  (colored.ReviewModePickerRemoved or ""):match("^%-%d"),
+  (colored.ReviewModePickerRemoved or ""):match("^−%d"),
   "removed lines are not colored: " .. vim.inspect(colored)
 )
 assert(
@@ -305,6 +307,88 @@ assert(
 assert(vim.fn.hlexists("ReviewModePickerAdded") == 1, "picker highlight groups were not defined")
 assert(require("review_mode.picker")._thousands(5449) == "5,449", "line counts lack thousands separators")
 assert(require("review_mode.picker")._thousands(1234567) == "1,234,567", "long counts lack separators")
+-- rows abbreviate; the preview header keeps the exact figure
+local short = require("review_mode.picker")._short_count
+for value, text in pairs({
+  [39] = "39",
+  [999] = "999",
+  [1234] = "1.2k",
+  [1000] = "1k",
+  [9960] = "10k",
+  [12345] = "12k",
+  [999999] = "1M",
+}) do
+  assert(short(value) == text, string.format("short_count(%d) = %s, want %s", value, short(value), text))
+end
+assert(short(1234567) == "1.2M", "a million-line count is not abbreviated: " .. short(1234567))
+-- matched text carries GitHub-style qualifiers for the fuzzy query
+local texts = {}
+for _, entry in ipairs(snacks_files_opts.items) do
+  texts[entry.item.path] = entry.text
+end
+assert(texts["new.txt"]:find("is:unviewed", 1, true), "rows are not searchable by is:unviewed: " .. texts["new.txt"])
+assert(texts["new.txt"]:find("is:added", 1, true), "an added file lacks is:added: " .. texts["new.txt"])
+local discussed
+for _, entry in ipairs(snacks_files_opts.items) do
+  if entry.item.unresolved > 0 then
+    discussed = entry
+  end
+end
+assert(discussed, "fixture: expected a listed file with open threads")
+assert(discussed.text:find("has:comments", 1, true), "a file with threads lacks has:comments: " .. discussed.text)
+assert(discussed.text:find("is:unresolved", 1, true), "a file with open threads lacks is:unresolved")
+assert(not texts["new.txt"]:find("has:comments", 1, true), "a file with no threads claims has:comments")
+for _, entry in ipairs(snacks_files_opts.items) do
+  assert(
+    vim.startswith(entry.text, entry.item.label),
+    "matched text does not start with the row as drawn: " .. entry.text
+  )
+end
+-- <C-s> cycles the order, and the title names it once it is not the default.
+-- On "all": its sizes differ (file.txt is 3 lines, the rest 2), so a sort that
+-- did nothing could not pass for largest-first.
+local function listed_paths()
+  return vim.tbl_map(function(entry)
+    return entry.item.path
+  end, snacks_files_opts.items)
+end
+pr.list_viewed("all")
+local unsorted = listed_paths()
+assert(snacks_files_opts.actions.cycle_sort, "the files picker has no sort action")
+snacks_files_opts.actions.cycle_sort(nil)
+wait_for(function()
+  return snacks_files_opts.title:find("by least reviewed", 1, true) ~= nil
+end, "cycling the sort did not reopen the picker by least reviewed")
+-- file.txt is the one viewed file here: first in reading order, last by review
+assert(unsorted[1] == "file.txt" and api.is_viewed_file("file.txt"), "fixture: expected viewed file.txt first")
+local by_review = listed_paths()
+assert(
+  by_review[#by_review] == "file.txt",
+  "least-reviewed did not move the viewed file last: " .. vim.inspect(by_review)
+)
+snacks_files_opts.actions.cycle_sort(nil)
+wait_for(function()
+  return snacks_files_opts.title:find("by largest", 1, true) ~= nil
+end, "cycling the sort did not reach largest")
+assert(
+  listed_paths()[1] == "file.txt",
+  "largest-first did not put the 3-line file first: " .. vim.inspect(listed_paths())
+)
+local sizes = vim.tbl_map(function(entry)
+  return entry.item.added + entry.item.removed
+end, snacks_files_opts.items)
+for index = 2, #sizes do
+  assert(sizes[index - 1] >= sizes[index], "largest-first is out of order: " .. vim.inspect(sizes))
+end
+for _ = 1, 3 do
+  snacks_files_opts.actions.cycle_sort(nil)
+  vim.wait(200)
+end
+wait_for(function()
+  return not snacks_files_opts.title:find(" by ", 1, true)
+end, "the sort did not cycle back to the reading order")
+assert(vim.deep_equal(listed_paths(), unsorted), "back in reading order, the rows moved")
+pr.list_viewed("unviewed")
 assert(type(snacks_files_opts.preview) == "function", "snacks file preview should be built per selection")
 assert(snacks_files_preview, "snacks lazy preview was not invoked")
 assert(snacks_files_preview.ft == "diff", "snacks file preview filetype was wrong")
@@ -314,6 +398,19 @@ assert(has_line(snacks_files_preview.lines, snacks_files_opts.items[1].item.path
 wait_for(function()
   return has_line(snacks_files_preview.lines, "+feature") or has_line(snacks_files_preview.lines, "+new")
 end, "snacks file preview diff missing")
+-- the preview is colored: the header like the row, and the diff's lines
+local painted = {}
+local preview_ns = vim.api.nvim_get_namespaces().review_mode_picker
+for _, mark in
+  ipairs(vim.api.nvim_buf_get_extmarks(snacks_files_preview.win.buf, preview_ns, 0, -1, { details = true }))
+do
+  painted[mark[4].hl_group] = painted[mark[4].hl_group] or mark[2]
+end
+assert(painted.ReviewModePickerTitle == 0, "the preview's file name is not titled: " .. vim.inspect(painted))
+assert(painted.ReviewModePickerAdded == 1, "the preview's added count is not colored: " .. vim.inspect(painted))
+assert(painted.DiffAdd and painted.DiffAdd > 2, "the preview's added lines are not colored: " .. vim.inspect(painted))
+assert(painted.ReviewModePickerMeta, "the preview's diff header is not dimmed: " .. vim.inspect(painted))
+assert(snacks_files_preview.lines[2]:find("reviewed", 1, true), "the preview does not say how far it is reviewed")
 _G.Snacks = original_snacks
 
 local telescope_state = { maps = {} }
@@ -402,7 +499,7 @@ for _, range in ipairs(ranges) do
 end
 assert((ranged.ReviewModePickerAdded or ""):match("^%+%d+$"), "telescope added range is off: " .. vim.inspect(ranged))
 assert(
-  (ranged.ReviewModePickerRemoved or ""):match("^%-%d+$"),
+  (ranged.ReviewModePickerRemoved or ""):match("^−%d+$"),
   "telescope removed range is off: " .. vim.inspect(ranged)
 )
 assert(ranged.ReviewModePickerProgressNone == "0%", "telescope progress range is off: " .. vim.inspect(ranged))
@@ -788,18 +885,26 @@ local native_labels = vim.tbl_map(function(item)
 end, native_select.items)
 assert(
   -- reviewed share, lines, every thread with how many are resolved, path
-  has_line_parts(native_labels, { "0%", "+2", "-1", comment_sign .. " 2 ✓1", "file.txt" }),
+  has_line_parts(native_labels, { "0%", "+2 −1", comment_sign .. " 2 ✓1", "file.txt" }),
   "native picker file label was wrong"
 )
 assert(
-  has_line_parts(native_labels, { "0%", "+1", "-1", comment_sign .. " 1", "nested/other.txt" }),
+  has_line_parts(native_labels, { "0%", "+1 −1", comment_sign .. " 1", "nested/other.txt" }),
   "native picker nested file label was wrong"
 )
 assert(
-  has_line_parts(native_labels, { "0%", "+1", "-1", "nested/deeper/more.txt" }),
+  has_line_parts(native_labels, { "0%", "+1 −1", "nested/deeper/more.txt" }),
   "native picker deep file label was wrong"
 )
-assert(has_line_parts(native_labels, { "0%", "+2", "-0", "new.txt" }), "native picker added file label was wrong")
+assert(has_line_parts(native_labels, { "0%", "+2", "new.txt" }), "native picker added file label was wrong")
+-- a zero is left blank, and the columns are only as wide as this PR needs
+for _, label in ipairs(native_labels) do
+  assert(not label:find("−0", 1, true), "a zero count was printed: " .. label)
+  -- the counts sit together, as in a diffstat, and the progress column is no
+  -- wider than "0%" plus one space of padding
+  assert(not label:find("−", 1, true) or label:find("%+%d+ −%d"), "added and removed are split apart: " .. label)
+  assert(label:find("^%s?%S+%s%s[%+%S]"), "the progress column is wider than it needs: " .. label)
+end
 -- the title carries the whole review
 assert(
   -- short enough for a border; the full totals live in the statusline and summary

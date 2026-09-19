@@ -151,8 +151,10 @@ its viewed hunks, and reads 100% only once every file is viewed. The
 changed-files picker's rows show the same per file (with +/-, threads and how
 many are resolved), colored in snacks.nvim and Telescope through the
 ReviewModePicker* groups (Added, Removed, Progress, ProgressNone, Viewed,
-Threads, Resolved, Dir), which link to Added, Removed and the Diagnostic*
-groups. Its title is short, "Files [all] · 62% · 4 left";
+Unviewed, Threads, Resolved, Dir, Title, Meta), which link to Added, Removed,
+Title, Comment and the Diagnostic* groups. Counts are abbreviated (5.4k), a
+zero is left blank, and each column is only as wide as the PR needs.
+Its title is short, "Files [all] · 62% · 4 left";
 api.review_progress() returns the full totals.
 
 Review is a key layer over normal mode, not a real Vim mode, so mode() never
@@ -505,8 +507,14 @@ COMMANDS                                                *review-mode-commands*
                                                        *:ReviewModeViewedList*
 :ReviewModeViewedList [all | viewed | unviewed]
         Open a PR file list by viewed state, with additions/deletions. The
-        snacks.nvim and Telescope providers add a diff preview and toggle
-        viewed state for the selected file with <Tab> or <C-t>.
+        snacks.nvim and Telescope providers add a colored preview (status,
+        how much is reviewed, exact counts, threads, CI failures, the diff),
+        toggle viewed state with <Tab> or <C-t>, and cycle the sort with
+        <C-s> (reading order, least reviewed, largest, most comments, path).
+        The fuzzy query also matches qualifiers: is:viewed, is:unviewed,
+        is:partial, is:added/modified/deleted/renamed, has:comments,
+        is:unresolved, is:resolved, has:ci-failure, with fzf syntax such as
+        "is:unviewed !test".
 
                                              *:PrViewedToggle* *:PrViewedList*
 :PrViewedToggle

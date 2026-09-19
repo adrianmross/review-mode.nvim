@@ -126,18 +126,37 @@ The changed-files picker (`<leader>rf`) is also the review's progress report.
 Each row reads
 
 ```
- 42%  +5,449  -2,666  3 ✓1  lua/review_mode/init.lua
+ 42%  +5.4k −2.7k  3 ✓1  lua/review_mode/init.lua
+  ✓    +39        new/settings/page.tsx
 ```
 
 how much of the file is reviewed (`✓` once viewed, else the share of its hunks
 viewed), lines added and removed, then its comment threads and how many of
-them are resolved. In snacks.nvim and Telescope the columns are colored:
+them are resolved. Counts are abbreviated (`5.4k`), a zero is left blank, and
+each column is only as wide as this PR needs. In snacks.nvim and Telescope the columns are colored:
 added lines green, removed red, the share in an accent (dim at 0%, green once
 viewed), threads in a warning color while any are open and green once all are
 resolved, and the directory dimmed beside the file name. The colors link to
 `Added`, `Removed` and the `Diagnostic*` groups; override any
 `ReviewModePicker*` group (`Added`, `Removed`, `Progress`, `ProgressNone`,
-`Viewed`, `Threads`, `Resolved`, `Dir`) to restyle. `vim.ui.select` has no
+`Viewed`, `Unviewed`, `Threads`, `Resolved`, `Dir`, `Title`, `Meta`) to restyle.
+
+The preview on the right spells out what the row abbreviates: the file and
+whether it was added, modified, renamed or deleted; `✓ viewed` or how much is
+reviewed (`40% reviewed · 2/5 hunks`); the exact `+1,234 −56`; threads open and
+resolved; CI failures; and the diff, colored the same way in snacks.nvim and
+Telescope.
+
+**Filter** with the picker's own fuzzy query. Each row is also matched on
+GitHub-style qualifiers: `is:viewed`, `is:unviewed`, `is:partial`,
+`is:added` / `is:modified` / `is:deleted` / `is:renamed`, `has:comments`,
+`is:unresolved` / `is:resolved`, `has:ci-failure`. They combine with the fzf
+syntax snacks.nvim and telescope-fzf-native understand: `is:unviewed !test`,
+`'has:comments`, `^src/ is:unresolved`.
+
+**Sort** with `<C-s>` (or `s` in the list), cycling reading order → least
+reviewed → largest → most comments → path. The title names the order once it
+is not the default: `Files [all] · 62% · 4 left · by largest`. `vim.ui.select` has no
 colors, so it shows the same text plain.
 
 The title stays short enough for a picker border, `Files [all] · 62% · 4 left`;
@@ -763,7 +782,7 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeViewedNext` marks the current PR file viewed and jumps to the next unviewed file
 - `:ReviewModeViewedFeatureToggle` toggles viewed-state tracking on or off
 - `:ReviewModeCommentsToggle` toggles PR comments on or off
-- `:ReviewModeViewedList [all|viewed|unviewed]` opens a PR file list with diff stats; snacks.nvim and Telescope add a diff preview and toggle viewed state with `<Tab>`/`<C-t>`
+- `:ReviewModeViewedList [all|viewed|unviewed]` opens a PR file list with diff stats; snacks.nvim and Telescope add a diff preview and toggle viewed state with `<Tab>`/`<C-t>`, cycle the sort with `<C-s>`, and filter with `is:`/`has:` qualifiers
 - `:PrViewedToggle` / `:PrViewedList` are aliases for `:ReviewModeViewedToggle` / `:ReviewModeViewedList`
 - `:ReviewModeViewedClear` clears viewed state for the current PR, on GitHub too when viewed sync is on
 - `:ReviewModeViewedSync` pulls viewed state from GitHub

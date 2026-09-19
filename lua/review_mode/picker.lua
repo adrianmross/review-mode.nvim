@@ -59,40 +59,12 @@ local function close_picker_object(picker)
   end
 end
 
-local picker_hls = {
-  add = "ReviewModePickerAdd",
-  delete = "ReviewModePickerDelete",
-  prompt = "ReviewModePickerPrompt",
-  viewed = "ReviewModePickerViewed",
-  unviewed = "ReviewModePickerUnviewed",
-}
-
-local function ensure_viewed_picker_highlights()
-  pcall(vim.api.nvim_set_hl, 0, picker_hls.add, { default = true, fg = "#22C55E" })
-  pcall(vim.api.nvim_set_hl, 0, picker_hls.delete, { default = true, fg = "#EF4444" })
-  pcall(vim.api.nvim_set_hl, 0, picker_hls.prompt, { default = true, fg = "#38BDF8", bold = true })
-  pcall(vim.api.nvim_set_hl, 0, picker_hls.viewed, { default = true, fg = "#22C55E" })
-  pcall(vim.api.nvim_set_hl, 0, picker_hls.unviewed, { default = true, fg = "#F59E0B" })
-end
-
 local function normalize_viewed_filter(filter)
   filter = filter or "all"
   if filter == "viewed" or filter == "unviewed" then
     return filter
   end
   return "all"
-end
-
-local function file_stats(path)
-  local entry = api.file(path)
-  return { additions = entry and entry.added or 0, deletions = entry and entry.removed or 0 }
-end
-
-local function stat_text(value, prefix)
-  if value == nil then
-    return prefix .. "-"
-  end
-  return prefix .. tostring(value)
 end
 
 -- Colors for the file rows, linked to standard groups so any colorscheme
@@ -106,6 +78,9 @@ local picker_highlights = {
   ReviewModePickerThreads = "DiagnosticWarn",
   ReviewModePickerResolved = "DiagnosticOk",
   ReviewModePickerDir = "Comment",
+  ReviewModePickerTitle = "Title",
+  ReviewModePickerUnviewed = "DiagnosticWarn",
+  ReviewModePickerMeta = "Comment",
 }
 
 local function ensure_picker_highlights()
@@ -124,51 +99,130 @@ local function thousands(value)
 end
 M._thousands = thousands
 
--- A row as { text, highlight } segments, so snacks and Telescope can color it
--- and the plain label is just the texts joined. Columns: how much is reviewed,
--- lines added and removed, comment threads (and how many are resolved), path.
-local function row_segments(path, viewed, stats, threads, resolved, unresolved)
-  local segments = {}
-  local function cell(text, hl, width, right)
-    local gap = string.rep(" ", math.max(0, (width or 0) - vim.fn.strdisplaywidth(text)))
-    if right then
-      segments[#segments + 1] = { gap }
-    end
-    segments[#segments + 1] = { text, hl }
-    if not right then
-      segments[#segments + 1] = { gap }
-    end
-    segments[#segments + 1] = { " " }
+-- 39 -> "39", 1234 -> "1.2k", 12345 -> "12k", 1234567 -> "1.2M": a row's
+-- counts stay a few columns wide, and the preview shows the exact figure.
+local function short_count(value)
+  value = tonumber(value) or 0
+  if value < 1000 then
+    return tostring(value)
   end
+  -- rounded, not truncated: 9,960 is "10k", and 999,999 is "1M", not "1000k"
+  local scaled, suffix = value / 1e3, "k"
+  if scaled >= 999.5 then
+    scaled, suffix = value / 1e6, "M"
+  end
+  if scaled < 9.95 then
+    return (string.format("%.1f", scaled):gsub("%.0$", "")) .. suffix
+  end
+  return string.format("%.0f", scaled) .. suffix
+end
+M._short_count = short_count
 
-  if viewed then
-    cell("✓", "ReviewModePickerViewed", 4)
+-- git's name-status letter, as the word GitHub uses
+local status_words = { A = "added", D = "deleted", R = "renamed", C = "copied", M = "modified" }
+
+local function file_status(entry)
+  return status_words[tostring(entry and entry.status or ""):sub(1, 1)] or "modified"
+end
+
+local function ci_failures(path)
+  local count = 0
+  for _, annotation in ipairs(api.ci_annotations(path) or {}) do
+    if annotation.severity == vim.diagnostic.severity.ERROR then
+      count = count + 1
+    end
+  end
+  return count
+end
+
+-- What a file is, as GitHub-style qualifiers in its searchable text, so the
+-- picker's own fuzzy query filters on them: `is:unviewed`, `has:comments`,
+-- and with fzf syntax `!is:viewed` or `'is:added`.
+local function qualifiers(facts)
+  local out = { facts.viewed and "is:viewed" or "is:unviewed", "is:" .. facts.status }
+  -- strictly between: every hunk seen but the file not yet marked is not "partial"
+  if not facts.viewed and facts.fraction > 0 and facts.fraction < 1 then
+    out[#out + 1] = "is:partial"
+  end
+  if facts.threads > 0 then
+    out[#out + 1] = "has:comments"
+    out[#out + 1] = facts.unresolved > 0 and "is:unresolved" or "is:resolved"
+  end
+  if facts.ci_failures > 0 then
+    out[#out + 1] = "has:ci-failure"
+  end
+  return out
+end
+
+-- A row's cells before layout, each a list of { text, highlight } segments.
+-- Columns: how much is reviewed, lines added, lines removed, threads. A zero
+-- count is left blank rather than printed, so a new file reads "+39".
+local function row_cells(facts)
+  local progress
+  if facts.viewed then
+    progress = { { "✓", "ReviewModePickerViewed" } }
   else
-    local percent = math.floor(api.review_fraction(path) * 100)
-    cell(percent .. "%", percent > 0 and "ReviewModePickerProgress" or "ReviewModePickerProgressNone", 4, true)
+    local percent = math.floor(facts.fraction * 100)
+    progress = { { percent .. "%", percent > 0 and "ReviewModePickerProgress" or "ReviewModePickerProgressNone" } }
   end
-  cell("+" .. thousands(stats.additions or 0), "ReviewModePickerAdded", 7, true)
-  cell("-" .. thousands(stats.deletions or 0), "ReviewModePickerRemoved", 7, true)
 
-  local width = 8
-  if threads > 0 then
-    local count = api.comment_count_label(threads)
-    segments[#segments + 1] = { count, unresolved > 0 and "ReviewModePickerThreads" or "ReviewModePickerResolved" }
-    width = width - vim.fn.strdisplaywidth(count)
-    if resolved > 0 then
-      local done = " ✓" .. resolved
-      segments[#segments + 1] = { done, "ReviewModePickerResolved" }
-      width = width - vim.fn.strdisplaywidth(done)
+  local threads = {}
+  if facts.threads > 0 then
+    threads[1] = {
+      api.comment_count_label(facts.threads),
+      facts.unresolved > 0 and "ReviewModePickerThreads" or "ReviewModePickerResolved",
+    }
+    if facts.resolved > 0 then
+      threads[2] = { " ✓" .. facts.resolved, "ReviewModePickerResolved" }
     end
   end
-  segments[#segments + 1] = { string.rep(" ", math.max(0, width)) .. " " }
 
-  local dir, name = path:match("^(.*/)([^/]+)$")
+  return {
+    progress,
+    facts.added > 0 and { { "+" .. short_count(facts.added), "ReviewModePickerAdded" } } or {},
+    facts.removed > 0 and { { "−" .. short_count(facts.removed), "ReviewModePickerRemoved" } } or {},
+    threads,
+  }
+end
+
+local function cell_width(cell)
+  local width = 0
+  for _, segment in ipairs(cell) do
+    width = width + vim.fn.strdisplaywidth(segment[1])
+  end
+  return width
+end
+
+-- Lay a row out against the widest cell of each column in the list, so the
+-- columns are as narrow as this PR allows. A column no file uses takes no space.
+-- The first two columns right-align (numbers read against their ones place);
+-- removed follows added directly, like "+39 −2" in a diffstat.
+local function row_segments(item, widths)
+  local segments = {}
+  for column, cell in ipairs(item.cells) do
+    local width = widths[column]
+    if width > 0 then
+      local gap = { string.rep(" ", width - cell_width(cell)) }
+      if column <= 2 then
+        segments[#segments + 1] = gap
+      end
+      vim.list_extend(segments, cell)
+      if column > 2 then
+        segments[#segments + 1] = gap
+      end
+      segments[#segments + 1] = { column == 2 and " " or "  " }
+    end
+  end
+
+  local dir, name = item.path:match("^(.*/)([^/]+)$")
   if dir then
     segments[#segments + 1] = { dir, "ReviewModePickerDir" }
     segments[#segments + 1] = { name }
   else
-    segments[#segments + 1] = { path }
+    segments[#segments + 1] = { item.path }
+  end
+  if item.whitespace_only then
+    segments[#segments + 1] = { "  (whitespace only)", "ReviewModePickerProgressNone" }
   end
   return segments
 end
@@ -193,8 +247,50 @@ local function segments_highlights(segments)
   return out
 end
 
+-- The orders the list can be put in, cycled with <C-s>; "review" is the
+-- reading order the rest of the plugin walks.
+local sorts = {
+  { key = "review", label = "reading order" },
+  {
+    key = "unreviewed",
+    label = "least reviewed",
+    less = function(a, b)
+      return a.fraction < b.fraction
+    end,
+  },
+  {
+    key = "size",
+    label = "largest",
+    less = function(a, b)
+      return a.added + a.removed > b.added + b.removed
+    end,
+  },
+  {
+    key = "comments",
+    label = "most comments",
+    less = function(a, b)
+      if a.unresolved ~= b.unresolved then
+        return a.unresolved > b.unresolved
+      end
+      return a.threads > b.threads
+    end,
+  },
+  {
+    key = "path",
+    label = "path",
+    less = function(a, b)
+      return a.path < b.path
+    end,
+  },
+}
+local sort_index = 1
+
+local function next_sort()
+  sort_index = sort_index % #sorts + 1
+end
+
 -- Short enough for a picker's border: the rest is in the statusline and
--- :ReviewModeSummary.
+-- :ReviewModeSummary. The order is named only when it is not the default.
 local function files_title(filter)
   -- the share and a viewed count only: review_progress() would build every
   -- file's threads just for a title
@@ -204,64 +300,131 @@ local function files_title(filter)
       left = left + 1
     end
   end
-  return string.format("Files [%s] · %d%% · %d left", filter, api.review_percent(), left)
+  local title = string.format("Files [%s] · %d%% · %d left", filter, api.review_percent(), left)
+  if sort_index > 1 then
+    title = title .. " · by " .. sorts[sort_index].label
+  end
+  return title
 end
 
-local function viewed_picker_item(path)
-  local viewed = api.is_viewed_file(path)
-  local unviewed = api.unviewed_count(path)
-  local comments = api.unresolved_count(path)
-  local threads, resolved = api.thread_counts(path)
-  local stats = file_stats(path)
-  local segments = row_segments(path, viewed, stats, threads, resolved, comments)
+local function viewed_picker_item(path, index)
   local entry = api.file(path)
-  if entry and entry.whitespace_only then
-    segments[#segments + 1] = { "  (whitespace only)", "ReviewModePickerProgressNone" }
-  end
-  -- trailing space only: Telescope's highlight ranges count from column 0
-  local label = (segments_text(segments):gsub("%s+$", ""))
-
-  return {
+  local threads, resolved = api.thread_counts(path)
+  local facts = {
     path = path,
-    viewed = viewed,
-    unviewed = unviewed,
-    comments = comments,
-    additions = stats.additions,
-    deletions = stats.deletions,
-    segments = segments,
-    label = label,
-    search = table.concat({
-      path,
-      viewed and "viewed" or "unviewed",
-      comments > 0 and "comments unresolved" or "",
-    }, " "),
+    index = index,
+    viewed = api.is_viewed_file(path),
+    fraction = api.review_fraction(path),
+    added = entry and entry.added or 0,
+    removed = entry and entry.removed or 0,
+    threads = threads,
+    resolved = resolved,
+    unresolved = api.unresolved_count(path),
+    status = file_status(entry),
+    ci_failures = ci_failures(path),
+    whitespace_only = entry and entry.whitespace_only or false,
   }
+  facts.cells = row_cells(facts)
+  facts.qualifiers = table.concat(qualifiers(facts), " ")
+  facts.search = path .. " " .. facts.qualifiers
+  return facts
 end
 
 local function viewed_picker_items(filter)
   local items = {}
-  for _, entry in ipairs(api.files()) do
+  for index, entry in ipairs(api.files()) do
     local path = entry.path
     local viewed = api.is_viewed_file(path)
     if filter == "all" or (filter == "viewed" and viewed) or (filter == "unviewed" and not viewed) then
-      items[#items + 1] = viewed_picker_item(path)
+      items[#items + 1] = viewed_picker_item(path, index)
     end
+  end
+
+  local less = sorts[sort_index].less
+  if less then
+    -- stable: ties keep the reading order
+    table.sort(items, function(a, b)
+      if less(a, b) then
+        return true
+      elseif less(b, a) then
+        return false
+      end
+      return a.index < b.index
+    end)
+  end
+
+  local widths = { 0, 0, 0, 0 }
+  for _, item in ipairs(items) do
+    for column, cell in ipairs(item.cells) do
+      widths[column] = math.max(widths[column], cell_width(cell))
+    end
+  end
+  for _, item in ipairs(items) do
+    item.segments = row_segments(item, widths)
+    -- trailing space only: Telescope's highlight ranges count from column 0
+    item.label = (segments_text(item.segments):gsub("%s+$", ""))
   end
   return items
 end
 
+-- The preview's header: everything the row abbreviates, spelled out, as
+-- segment lines so it can be colored like the row.
+local function preview_header(item)
+  local dir, name = item.path:match("^(.*/)([^/]+)$")
+  local title = dir and { { dir, "ReviewModePickerDir" }, { name, "ReviewModePickerTitle" } }
+    or { { item.path, "ReviewModePickerTitle" } }
+  title[#title + 1] = { "  " .. item.status, "ReviewModePickerProgressNone" }
+
+  local state
+  if item.viewed then
+    state = { { "✓ viewed", "ReviewModePickerViewed" } }
+  else
+    local seen, total = api.hunk_progress(item.path)
+    local text = string.format("%d%% reviewed", math.floor(item.fraction * 100))
+    if seen and total and total > 0 then
+      text = text .. string.format(" · %d/%d hunks", seen, total)
+    end
+    state = { { text, item.fraction > 0 and "ReviewModePickerProgress" or "ReviewModePickerUnviewed" } }
+  end
+  vim.list_extend(state, {
+    { "   " },
+    { "+" .. thousands(item.added), "ReviewModePickerAdded" },
+    { " " },
+    { "−" .. thousands(item.removed), "ReviewModePickerRemoved" },
+  })
+
+  local lines = { title, state }
+  local notes = {}
+  if item.threads > 0 then
+    notes[#notes + 1] = {
+      string.format("%d open", item.unresolved),
+      item.unresolved > 0 and "ReviewModePickerThreads" or "ReviewModePickerResolved",
+    }
+    notes[#notes + 1] = { string.format(" · %d resolved", item.resolved), "ReviewModePickerResolved" }
+    table.insert(notes, 1, { api.comment_count_label(item.threads) .. " threads: " })
+  end
+  if item.ci_failures > 0 then
+    if #notes > 0 then
+      notes[#notes + 1] = { "   " }
+    end
+    notes[#notes + 1] = { string.format("✗ %d CI failure(s)", item.ci_failures), "ReviewModePickerRemoved" }
+  end
+  if item.whitespace_only then
+    notes[#notes + 1] = { (#notes > 0 and "   " or "") .. "whitespace only", "ReviewModePickerProgressNone" }
+  end
+  if #notes > 0 then
+    lines[#lines + 1] = notes
+  end
+  return lines
+end
+
 local function viewed_picker_preview_header(item)
-  local stats = file_stats(item.path)
-  return {
-    item.path,
-    string.format(
-      "%s  %s  %s",
-      item.viewed and "viewed" or "unviewed",
-      stat_text(stats.additions, "+"),
-      stat_text(stats.deletions, "-")
-    ),
-    "",
-  }
+  local lines = {}
+  for _, segments in ipairs(preview_header(item)) do
+    lines[#lines + 1] = segments_text(segments)
+  end
+  lines[#lines + 1] = ""
+  return lines
 end
 
 local function viewed_picker_preview_lines(item, diff)
@@ -314,27 +477,45 @@ local function viewed_picker_preview(item, preview_cache, still_showing, render)
   return lines
 end
 
-local function highlight_diff_preview(bufnr)
-  if not vim.api.nvim_buf_is_valid(bufnr) then
+-- Color a preview: the header's segments as the row colors them, then the diff
+-- below it. Done with extmarks rather than left to filetype highlighting, so it
+-- reads the same in every colorscheme and in both snacks and Telescope.
+local function highlight_preview(bufnr, item)
+  if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
-
+  ensure_picker_highlights()
   vim.api.nvim_buf_clear_namespace(bufnr, picker_ns, 0, -1)
+
+  local header = item and preview_header(item) or {}
+  for row, segments in ipairs(header) do
+    for _, range in ipairs(segments_highlights(segments)) do
+      pcall(vim.api.nvim_buf_set_extmark, bufnr, picker_ns, row - 1, range[1][1], {
+        end_col = range[1][2],
+        hl_group = range[2],
+      })
+    end
+  end
+
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  for index, line in ipairs(lines) do
-    local hl = nil
-    if line:match("^%+") and not line:match("^%+%+%+") then
+  for index = #header + 1, #lines do
+    local line = lines[index]
+    local hl
+    if line:match("^%+%+%+ ") or line:match("^%-%-%- ") or line:match("^diff %-%-git ") then
+      hl = "ReviewModePickerMeta"
+    elseif line:match("^index ") or line:match("^new file mode") or line:match("^deleted file mode") then
+      hl = "ReviewModePickerMeta"
+    elseif line:match("^similarity index") or line:match("^rename ") then
+      hl = "ReviewModePickerMeta"
+    elseif line:match("^%+") then
       hl = "DiffAdd"
-    elseif line:match("^%-") and not line:match("^%-%-%-") then
+    elseif line:match("^%-") then
       hl = "DiffDelete"
     elseif line:match("^@@") then
       hl = "DiffText"
     end
     if hl then
-      vim.api.nvim_buf_set_extmark(bufnr, picker_ns, index - 1, 0, {
-        end_col = #line,
-        hl_group = hl,
-      })
+      vim.api.nvim_buf_set_extmark(bufnr, picker_ns, index - 1, 0, { end_col = #line, hl_group = hl })
     end
   end
 end
@@ -376,7 +557,10 @@ local function open_snacks_viewed_picker(filter)
   local showing = nil
   local snacks_items = vim.tbl_map(function(item)
     return {
-      text = item.label,
+      -- matched against the row as shown, then its qualifiers (is:unviewed,
+      -- has:comments...): snacks highlights a match by its position in this
+      -- text, so the visible part must come first and read exactly as drawn
+      text = item.label .. "  " .. item.qualifiers,
       item = item,
       file = item.path,
     }
@@ -399,6 +583,7 @@ local function open_snacks_viewed_picker(filter)
         pcall(function()
           preview:set_lines(lines)
           preview:highlight({ ft = "diff" })
+          highlight_preview(ctx.buf or (preview.win and preview.win.buf), item)
         end)
       end
       preview:reset()
@@ -427,6 +612,13 @@ local function open_snacks_viewed_picker(filter)
           M.list_viewed(filter)
         end)
       end,
+      cycle_sort = function(instance)
+        close_picker_object(instance)
+        next_sort()
+        vim.schedule(function()
+          M.list_viewed(filter)
+        end)
+      end,
       filter_all = function(instance)
         close_picker_object(instance)
         vim.schedule(function()
@@ -451,6 +643,7 @@ local function open_snacks_viewed_picker(filter)
         keys = {
           ["<C-t>"] = { "toggle_viewed", mode = { "i", "n" } },
           ["<Tab>"] = { "toggle_viewed", mode = { "i", "n" } },
+          ["<C-s>"] = { "cycle_sort", mode = { "i", "n" } },
           ["<C-a>"] = { "filter_all", mode = { "i", "n" } },
           ["<C-v>"] = { "filter_viewed", mode = { "i", "n" } },
           ["<C-u>"] = { "filter_unviewed", mode = { "i", "n" } },
@@ -460,6 +653,8 @@ local function open_snacks_viewed_picker(filter)
         keys = {
           ["<C-t>"] = "toggle_viewed",
           ["<Tab>"] = "toggle_viewed",
+          ["<C-s>"] = "cycle_sort",
+          s = "cycle_sort",
           a = "filter_all",
           v = "filter_viewed",
           u = "filter_unviewed",
@@ -518,7 +713,7 @@ local function open_telescope_viewed_picker(filter)
           vim.bo[bufnr].filetype = "diff"
           local function render(lines)
             vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-            highlight_diff_preview(bufnr)
+            highlight_preview(bufnr, item)
           end
           render(viewed_picker_preview(item, preview_cache, function()
             return showing == item.path and vim.api.nvim_buf_is_valid(bufnr)
@@ -545,6 +740,10 @@ local function open_telescope_viewed_picker(filter)
         end
         map({ "i", "n" }, "<C-t>", toggle_selected)
         map({ "i", "n" }, "<Tab>", toggle_selected)
+        map({ "i", "n" }, "<C-s>", function()
+          next_sort()
+          refresh_filter(prompt_bufnr, filter)
+        end)
         map({ "i", "n" }, "<C-a>", function()
           refresh_filter(prompt_bufnr, "all")
         end)
