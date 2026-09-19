@@ -112,6 +112,10 @@ local function viewed_picker_item(path)
   local additions = stat_text(stats.additions, "+")
   local deletions = stat_text(stats.deletions, "-")
   local label = vim.trim(string.format("%-4s %5s %5s %-4s %s", review_icon, additions, deletions, comment_icon, path))
+  local entry = api.file(path)
+  if entry and entry.whitespace_only then
+    label = label .. "  (whitespace only)"
+  end
 
   return {
     path = path,

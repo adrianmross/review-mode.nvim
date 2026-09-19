@@ -22,14 +22,20 @@ local function restore_old_diffopt()
   end
 end
 
+-- iwhiteall, not iwhite: it is what git diff -w (and GitHub's ?w=1) ignores, so
+-- the split, the unified view and ]c agree on which changes are hidden.
 local function apply_old_diffopt()
-  if not state.config.diff.use_fast_diffopt then
+  local diffopt = state.config.diff.use_fast_diffopt and state.config.diff.fast_diffopt or vim.o.diffopt
+  if state.config.diff.ignore_whitespace and not vim.tbl_contains(vim.split(diffopt, ","), "iwhiteall") then
+    diffopt = diffopt .. ",iwhiteall"
+  end
+  if diffopt == vim.o.diffopt then
     return
   end
 
   state.old_diffopt = vim.o.diffopt
   local ok = pcall(function()
-    vim.o.diffopt = state.config.diff.fast_diffopt
+    vim.o.diffopt = diffopt
   end)
   if ok then
     return
@@ -335,6 +341,7 @@ local function apply_side_by_side_partial_diff_highlights(old_buf, old_lines, ne
   local hunks = vim.diff(buffer_text(old_lines), buffer_text(new_lines), {
     result_type = "indices",
     ctxlen = 0,
+    ignore_whitespace = state.config.diff.ignore_whitespace,
   })
 
   for _, hunk in ipairs(hunks or {}) do
@@ -417,60 +424,61 @@ local function open_old_unified(path, current_win, current_buf, base_content, ge
   local base_rel = base_missing and "/dev/null"
     or write_temp_diff_file(tmpdir, "base", path, util.split_blob_lines(base_content))
   -- the whole file, always: condensing is folding, so zR shows it all
-  vim.system(
-    { "git", "diff", "--no-index", "--no-color", "--unified=1000000", "--", base_rel, head_rel },
-    { text = true, cwd = tmpdir },
-    function(result)
-      vim.schedule(function()
-        pcall(vim.fn.delete, tmpdir, "rf")
-        if not core.is_current(generation) then
-          return
-        end
+  local args = { "git", "diff", "--no-index", "--no-color", "--unified=1000000" }
+  if state.config.diff.ignore_whitespace then
+    args[#args + 1] = "-w"
+  end
+  vim.list_extend(args, { "--", base_rel, head_rel })
+  vim.system(args, { text = true, cwd = tmpdir }, function(result)
+    vim.schedule(function()
+      pcall(vim.fn.delete, tmpdir, "rf")
+      if not core.is_current(generation) then
+        return
+      end
 
-        state.old_loading = false
-        if result.code ~= 0 and result.code ~= 1 then
-          vim.notify(
-            "Review Mode unified diff: " .. trim(result.stderr ~= "" and result.stderr or result.stdout),
-            vim.log.levels.WARN
-          )
-          return
-        end
+      state.old_loading = false
+      if result.code ~= 0 and result.code ~= 1 then
+        vim.notify(
+          "Review Mode unified diff: " .. trim(result.stderr ~= "" and result.stderr or result.stdout),
+          vim.log.levels.WARN
+        )
+        return
+      end
 
-        if not vim.api.nvim_win_is_valid(current_win) or not vim.api.nvim_buf_is_valid(current_buf) then
-          vim.notify("Review Mode unified diff: target window is no longer valid", vim.log.levels.WARN)
-          return
-        end
+      if not vim.api.nvim_win_is_valid(current_win) or not vim.api.nvim_buf_is_valid(current_buf) then
+        vim.notify("Review Mode unified diff: target window is no longer valid", vim.log.levels.WARN)
+        return
+      end
 
-        M.close_old_view()
+      M.close_old_view()
 
-        vim.api.nvim_set_current_win(current_win)
-        state.old_target_win = current_win
-        state.old_target_buf = current_buf
-        state.old_buf = vim.api.nvim_create_buf(false, true)
-        state.old_layout = "unified"
-        state.old_path = path
-        vim.api.nvim_win_set_buf(current_win, state.old_buf)
-        vim.api.nvim_buf_set_name(state.old_buf, "pr-diff://" .. core.base_ref() .. "/" .. path)
-        local lines = unified_diff_lines(result.stdout or "", path)
-        vim.api.nvim_buf_set_lines(state.old_buf, 0, -1, false, lines)
-        apply_partial_diff_highlights(state.old_buf)
-        vim.bo[state.old_buf].buftype = "nofile"
-        vim.bo[state.old_buf].bufhidden = "wipe"
-        vim.bo[state.old_buf].modifiable = false
-        vim.bo[state.old_buf].readonly = true
-        vim.bo[state.old_buf].filetype = "diff"
-        vim.api.nvim_set_current_win(current_win)
+      vim.api.nvim_set_current_win(current_win)
+      state.old_target_win = current_win
+      state.old_target_buf = current_buf
+      state.old_buf = vim.api.nvim_create_buf(false, true)
+      state.old_layout = "unified"
+      state.old_path = path
+      vim.api.nvim_win_set_buf(current_win, state.old_buf)
+      vim.api.nvim_buf_set_name(state.old_buf, "pr-diff://" .. core.base_ref() .. "/" .. path)
+      local lines = unified_diff_lines(result.stdout or "", path)
+      vim.api.nvim_buf_set_lines(state.old_buf, 0, -1, false, lines)
+      apply_partial_diff_highlights(state.old_buf)
+      vim.bo[state.old_buf].buftype = "nofile"
+      vim.bo[state.old_buf].bufhidden = "wipe"
+      vim.bo[state.old_buf].modifiable = false
+      vim.bo[state.old_buf].readonly = true
+      vim.bo[state.old_buf].filetype = "diff"
+      vim.api.nvim_set_current_win(current_win)
 
-        capture_fold_options(current_win)
-        vim.wo[current_win].foldmethod = "manual"
-        vim.cmd("silent! normal! zE")
-        for _, range in ipairs(unified_fold_ranges(lines, state.config.diff.unified_context)) do
-          vim.cmd(string.format("silent! %d,%dfold", range[1], range[2]))
-        end
-        apply_diff_context()
-      end)
-    end
-  )
+      capture_fold_options(current_win)
+      vim.wo[current_win].foldmethod = "manual"
+      vim.cmd("silent! normal! zE")
+      for _, range in ipairs(unified_fold_ranges(lines, state.config.diff.unified_context)) do
+        vim.cmd(string.format("silent! %d,%dfold", range[1], range[2]))
+      end
+      apply_diff_context()
+    end)
+  end)
 end
 
 local function open_old_view(path, current_win, current_buf)
@@ -687,6 +695,20 @@ function M.toggle_diff_full_file()
     util.redraw_status()
     return
   end
+  notify_diff_setting(label, show_old_view_in_new_shape())
+  util.redraw_status()
+end
+
+--- Hide or show whitespace-only changes (git diff -w). Hunks were computed with
+--- the old setting, so they are dropped and reload lazily on the next ]c.
+function M.toggle_diff_whitespace()
+  state.config.diff.ignore_whitespace = not state.config.diff.ignore_whitespace
+  -- ponytail: a hunk load already in flight lands with the old setting; give
+  -- hunk loads their own generation if that ever shows up in practice
+  state.hunks = {}
+  state.hunks_loaded = {}
+  state.prefetch_seen = {}
+  local label = "Review Mode diff whitespace: " .. (state.config.diff.ignore_whitespace and "hidden" or "shown")
   notify_diff_setting(label, show_old_view_in_new_shape())
   util.redraw_status()
 end

@@ -542,7 +542,8 @@ local function finish_hunks_for_path(path, hunks)
 end
 
 local function gitsigns_hunk_lines(bufnr)
-  if not state.config.gitsigns.enabled or not package.loaded["gitsigns"] then
+  -- gitsigns' hunks include whitespace-only ones
+  if not state.config.gitsigns.enabled or not package.loaded["gitsigns"] or state.config.diff.ignore_whitespace then
     return nil
   end
 
@@ -644,6 +645,9 @@ local function load_hunks_for_paths(paths, on_done)
     table.insert(args, 5, "--find-renames")
   else
     table.insert(args, 5, "--no-renames")
+  end
+  if state.config.diff.ignore_whitespace then
+    table.insert(args, 5, "-w")
   end
   vim.list_extend(args, pending_paths)
 
@@ -849,7 +853,7 @@ local function start_background_hunk_scan()
       return
     end
 
-    system_async({
+    local args = {
       "git",
       "diff",
       "--unified=0",
@@ -858,7 +862,11 @@ local function start_background_hunk_scan()
       "--no-ext-diff",
       "--no-color",
       core.diff_range(),
-    }, { cwd = state.root }, function(patch)
+    }
+    if state.config.diff.ignore_whitespace then
+      table.insert(args, 3, "-w")
+    end
+    system_async(args, { cwd = state.root }, function(patch)
       if not core.is_current(generation) then
         state.background_hunk_scan_loading = false
         return
@@ -1718,6 +1726,7 @@ end
 M.old_toggle = diff.old_toggle
 M.toggle_diff_layout = diff.toggle_diff_layout
 M.toggle_diff_full_file = diff.toggle_diff_full_file
+M.toggle_diff_whitespace = diff.toggle_diff_whitespace
 
 -- In a diff window ]c already means "next change"; leave that to Vim.
 function M.next_hunk()
@@ -2626,6 +2635,7 @@ function M.action_items()
     { category = "Diff", label = "Toggle base diff", run = M.old_toggle },
     { category = "Diff", label = "Toggle diff layout", run = M.toggle_diff_layout },
     { category = "Diff", label = "Expand / collapse unchanged lines (zR / zM)", run = M.toggle_diff_full_file },
+    { category = "Diff", label = "Hide / show whitespace changes", run = M.toggle_diff_whitespace },
     -- Review --
     { category = "Review", label = "Pending review", run = M.open_pending },
     {
@@ -2825,6 +2835,11 @@ function M.setup(opts)
       "ReviewModeDiffFullToggle",
       M.toggle_diff_full_file,
       { desc = "Toggle PR diff context between condensed and full file" }
+    )
+    vim.api.nvim_create_user_command(
+      "ReviewModeDiffWhitespaceToggle",
+      M.toggle_diff_whitespace,
+      { desc = "Hide or show whitespace-only changes in PR diffs and hunks" }
     )
     vim.api.nvim_create_user_command(
       "ReviewModeThread",

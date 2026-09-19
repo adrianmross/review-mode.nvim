@@ -120,6 +120,7 @@ end
 
 local function file_entry(path)
   local stats = state.file_stats[path] or {}
+  local changed = (stats.additions or 0) + (stats.deletions or 0) > 0
   return {
     path = path,
     status = state.files[path],
@@ -128,6 +129,11 @@ local function file_entry(path)
     viewed = state.viewed[path] == true,
     comments = #(state.comments[path] or {}),
     unresolved = M.unresolved_count(path),
+    -- known only once its hunks load: lines changed, yet none survive git diff -w
+    whitespace_only = state.config.diff.ignore_whitespace
+      and changed
+      and state.hunks_loaded[path] == true
+      and #(state.hunks[path] or {}) == 0,
   }
 end
 
