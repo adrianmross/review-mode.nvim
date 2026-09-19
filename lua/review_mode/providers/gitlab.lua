@@ -191,27 +191,20 @@ end
 --- Returns old_path, old_line; old_line is nil for an added line, which GitLab
 --- wants with new_line only. Unchanged lines need both.
 function M.line_position(patch, line)
-  local old_path
+  local file = require("review_mode.git").parse_patch(patch)[1] or { hunks = {} }
   local offset = 0
-  for text in (patch or ""):gmatch("[^\n]+") do
-    local from = text:match("^%-%-%- a/(.+)$")
-    if from then
-      old_path = from
+  for _, hunk in ipairs(file.hunks) do
+    local b, c, d = hunk.old_count, hunk.new_start, hunk.new_count
+    if d > 0 and line >= c and line < c + d then
+      return file.old_path, nil
     end
-    local a, b, c, d = text:match("^@@ %-(%d+),?(%d*) %+(%d+),?(%d*) @@")
-    if a then
-      b, c, d = tonumber(b) or 1, tonumber(c), tonumber(d) or 1
-      if d > 0 and line >= c and line < c + d then
-        return old_path, nil
-      end
-      if (d > 0 and c + d <= line) or (d == 0 and c < line) then
-        offset = offset + b - d
-      else
-        break
-      end
+    if (d > 0 and c + d <= line) or (d == 0 and c < line) then
+      offset = offset + b - d
+    else
+      break
     end
   end
-  return old_path, line + offset
+  return file.old_path, line + offset
 end
 
 local function with_diff_refs(callback)
@@ -252,17 +245,12 @@ function M.submit_comment(path, start_line, end_line, body, callback)
       return
     end
 
-    util.system_async({
-      "git",
-      "diff",
-      "-U0",
-      "--no-color",
-      "--no-ext-diff",
-      core.base_ref() .. "...HEAD",
-      "--",
-      path,
-    }, { cwd = state.root, raw = true }, function(patch)
-      -- ponytail: pathspec hides renames, so a renamed file posts old_path = new_path
+    local git = require("review_mode.git")
+    local args = git.diff({ "-U0", "--find-renames", core.diff_range(), "--" })
+    util.system_async(vim.list_extend(args, git.pathspec({ path }, state.renames)), {
+      cwd = state.root,
+      raw = true,
+    }, function(patch)
       local old_path, old_line = M.line_position(patch, end_line)
       local input = write_input({
         body = body,

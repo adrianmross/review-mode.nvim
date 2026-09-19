@@ -33,34 +33,31 @@ M.function_types = {
 --- { [path] = { { start, end }, ... } }, 1-based and inclusive. Only "+" lines
 --- count: a pure deletion leaves no line on the head side to point at.
 ---
---- line is nil between a "diff " line and the file's first "@@": only there is
---- "+++ " a header. Inside the hunks an added line can start with "++ " itself,
---- so only the next "diff " line ends them.
+--- The patch is read by review_mode.git, so an added line that reads "++ x"
+--- is content, not a header.
 function M.changed_lines(diff)
-  local by_path, path, line = {}, nil, nil
-  for text in (diff or ""):gmatch("[^\n]*") do
-    if text:match("^diff ") then
-      path, line = nil, nil
-    elseif not line and text:match("^%+%+%+ ") then
-      path = text:match("^%+%+%+ b/(.+)$")
-      if path then
-        by_path[path] = by_path[path] or {}
-      end
-    elseif text:match("^@@ ") and path then
-      line = tonumber(text:match("^@@ %-%d+,?%d* %+(%d+)"))
-    elseif path and line then
-      local mark = text:sub(1, 1)
-      if mark == "+" then
-        local ranges = by_path[path]
-        local last = ranges[#ranges]
-        if last and last[2] == line - 1 then
-          last[2] = line
-        else
-          ranges[#ranges + 1] = { line, line }
+  local by_path = {}
+  for _, file in ipairs(require("review_mode.git").parse_patch(diff)) do
+    local path = file.new_path
+    if path then
+      local ranges = by_path[path] or {}
+      by_path[path] = ranges
+      for _, hunk in ipairs(file.hunks) do
+        local line = hunk.new_start
+        for _, text in ipairs(hunk.lines) do
+          local mark = text:sub(1, 1)
+          if mark == "+" then
+            local last = ranges[#ranges]
+            if last and last[2] == line - 1 then
+              last[2] = line
+            else
+              ranges[#ranges + 1] = { line, line }
+            end
+            line = line + 1
+          elseif mark ~= "-" and mark ~= "\\" then
+            line = line + 1
+          end
         end
-        line = line + 1
-      elseif mark == " " then
-        line = line + 1
       end
     end
   end

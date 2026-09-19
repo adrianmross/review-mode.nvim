@@ -721,3 +721,15 @@ XDG_CACHE_HOME="$tmp/order-cache" \
 XDG_STATE_HOME="$tmp/order-state" \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 run_fixture review_order_fixture
+
+# Git plumbing: odd file names, renames, a moved base branch, and hostile git
+# config (noprefix, mnemonicPrefix, diff.external) set in its own repos.
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/git-plumbing-cache" \
+XDG_STATE_HOME="$tmp/git-plumbing-state" \
+GH_REVIEW_REPO=owner/repo \
+GH_REVIEW_PR=123 \
+GH_REVIEW_BASE=main \
+GH_REVIEW_HEAD=abc123 \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+run_fixture git_plumbing_fixture

@@ -202,6 +202,10 @@ local state = {
   head = nil,
   root = nil,
   files = {},
+  -- per renamed (or copied) path, the path it had at the base
+  renames = {},
+  -- the sha the base side of the review is read from (see M.base_rev)
+  merge_base = nil,
   file_stats = {},
   file_order = {},
   file_index = {},
@@ -377,6 +381,20 @@ function M.base_ref()
   return "origin/" .. base
 end
 
+--- The commit the base side of the review is read from (`git show`, the
+--- gitsigns base): the merge base `diff_range` compares from, not the tip of
+--- the base branch, which has moved on once main gets new commits. A local
+--- review's base already is that merge base (see providers/local.lua); a PR
+--- review resolves it on each load into state.merge_base.
+function M.base_rev()
+  return state.merge_base or M.base_ref()
+end
+
+--- The path `path` had at the base: its old name when the review renames it.
+function M.base_path(path)
+  return state.renames[path] or path
+end
+
 -- Local reviews -----------------------------------------------------------------
 
 --- The range every review `git diff` runs over.
@@ -416,6 +434,7 @@ end
 
 function M.reset_changed_data()
   state.files = {}
+  state.renames = {}
   state.file_stats = {}
   state.file_order = {}
   state.file_index = {}
@@ -436,6 +455,7 @@ end
 
 function M.reset_review_data()
   M.reset_changed_data()
+  state.merge_base = nil
   state.comments = {}
   state.comment_threads = {}
   state.comments_loading = false
