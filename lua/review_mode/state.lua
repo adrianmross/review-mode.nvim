@@ -378,8 +378,14 @@ function M.normalize_config(opts)
 end
 
 function M.base_ref()
+  -- a checkout fetches the base from the PR's own repo into a ref of its own
+  if state.base_ref then
+    return state.base_ref
+  end
   local base = state.base or "main"
-  if base:match("^origin/") or base:match("^refs/") or base:match("^%x%x%x%x%x%x%x+") then
+  -- a full object name only: "20250101-release" is a branch, not a commit
+  local sha = base:match("^%x+$") and (#base == 40 or #base == 64)
+  if sha or base:match("^origin/") or base:match("^refs/") then
     return base
   end
   return "origin/" .. base
@@ -420,11 +426,39 @@ end
 
 -- End local reviews ---------------------------------------------------------------
 
+-- host of the session's origin remote, looked up once per session
+local origin = {}
+local function origin_host()
+  if origin.root ~= state.root or origin.generation ~= state.generation then
+    local out = vim.system({ "git", "remote", "get-url", "origin" }, { cwd = state.root, text = true }):wait()
+    local host = out.code == 0 and require("review_mode.providers").remote_host(vim.trim(out.stdout))
+    -- a path remote ("." or /srv/repo.git) names no host
+    origin = { root = state.root, generation = state.generation, host = host and host:match("%w%.%w") and host or "" }
+  end
+  return origin.host
+end
+
+--- The key a PR's comment cache and viewed state are stored under. GitHub on
+--- github.com keeps the plain repo#pr it always had; anything else is scoped,
+--- so a GitLab project, an Enterprise repo and github.com's same-named repo,
+--- or two clones' local reviews of the same branch never share an entry.
 function M.cache_key()
   if not state.repo or not state.pr then
     return nil
   end
-  return string.format("%s#%s", state.repo, state.pr)
+  local key = string.format("%s#%s", state.repo, state.pr)
+  if state.provider == "local" then
+    -- the store path is under the clone's own .git, so it tells clones apart
+    return string.format("local:%s:%s", vim.fn.sha256(tostring(state.local_store)):sub(1, 12), key)
+  end
+  if state.provider == "gitlab" then
+    return string.format("gitlab:%s:%s", require("review_mode.providers.gitlab").host(), key)
+  end
+  local host = state.root and origin_host() or ""
+  if host ~= "" and host ~= "github.com" then
+    return string.format("github:%s:%s", host, key)
+  end
+  return key
 end
 
 function M.next_generation()

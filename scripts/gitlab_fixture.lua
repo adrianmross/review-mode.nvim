@@ -205,8 +205,100 @@ assert(
 )
 assert(#api.pending() == 0, "a pending draft was stored on GitLab")
 
+-- positions are placed on the MR's own diff (start_sha...head_sha) when its
+-- commits are here, and a local HEAD elsewhere is warned about
+local core = require("review_mode.state")
+local main_sha = vim.trim(vim.fn.system({ "git", "rev-parse", "main" }))
+core.state.gitlab.diff_refs = { base_sha = main_sha, start_sha = main_sha, head_sha = main_sha }
+vim.fn.writefile({}, glab_log)
+notifications = {}
+run(api.comment, { path = "file.txt", line = 2, body = "Against the MR diff" })
+position = assert(posted_input(), "comment on the MR diff did not post").position
+assert(
+  position.new_line == 2 and position.old_line == 2,
+  "line 2 is unchanged in main...main: " .. vim.inspect(position)
+)
+assert(notified("the MR at"), "a local HEAD other than the MR head was not warned about")
+
+-- a failed diff fails the comment, instead of calling every line unchanged
+core.state.gitlab.diff_refs = { base_sha = "basesha", start_sha = "startsha", head_sha = "headsha" }
+core.state.base_ref = "refs/review-mode/does-not-exist"
+vim.fn.writefile({}, glab_log)
+local failed
+api.comment({ path = "file.txt", line = 2, body = "Nowhere" }, function(ok, err)
+  failed = { ok = ok, err = err }
+end)
+wait_for(function()
+  return failed ~= nil
+end, "a comment with a failing diff did not answer")
+assert(not failed.ok and tostring(failed.err):find("git diff failed", 1, true), "diff failure: " .. vim.inspect(failed))
+assert(not posted_input(), "a comment was posted without its diff")
+core.state.base_ref = nil
+
+-- discussions are fetched page by page, bodies intact, JSON nulls as nil
+local gitlab = require("review_mode.providers.gitlab")
+gitlab.per_page = 2
+local paged
+gitlab.discussions_async(function(discussions, err)
+  paged = discussions or err
+end)
+wait_for(function()
+  return paged ~= nil
+end, "paged discussions did not load")
+gitlab.per_page = 100
+assert(type(paged) == "table" and #paged == 3, "expected three discussions over two pages: " .. vim.inspect(paged))
+assert(paged[1].notes[1].body == "- [x] [y] done", "page 1 body: " .. paged[1].notes[1].body)
+assert(paged[2].notes[1].body == "[a] [b]", "page 1 second body: " .. paged[2].notes[1].body)
+assert(paged[3].notes[1].body == "last] [page", "page 2 body: " .. paged[3].notes[1].body)
+local grouped = gitlab.group_discussions(paged)["file.txt"]
+assert(grouped[1].side == nil and grouped[1].line == 2, "a new-side note: " .. vim.inspect(grouped[1]))
+assert(grouped[2].start_line == 1 and grouped[2].line == 2, "line_range start: " .. vim.inspect(grouped[2]))
+local removed = grouped[3]
+assert(removed.side == "LEFT", "a note on a removed line is not base-side: " .. vim.inspect(removed))
+assert(removed.line == 3 and removed.original_line == 3, "removed-line note lines: " .. vim.inspect(removed))
+
+-- a forced reload that lands while a load is running is not dropped: the
+-- running result is superseded and discussions are fetched once more
+local github = require("review_mode.github")
+local function discussion_fetches()
+  local count = 0
+  for _, line in ipairs(log_lines()) do
+    if line:find("/discussions?per_page=100&page=1", 1, true) then
+      count = count + 1
+    end
+  end
+  return count
+end
+vim.fn.writefile({}, glab_log)
+github.load_comments_async({ force = true })
+github.load_comments_async({ force = true })
+wait_for(function()
+  return discussion_fetches() == 2 and not core.state.comments_loading
+end, "a forced reload during a GitLab load was dropped: " .. discussion_fetches() .. " fetch(es)")
+
 assert(#gh_calls == 0, "gitlab review called gh: " .. table.concat(gh_calls, "; "))
 
 pr.stop()
+
+-- start's own opts are the session's: GL_REVIEW_* (unset here) never clears them
+vim.fn.writefile({}, glab_log)
+pr.start({ provider = "gitlab", repo = "group/project", pr = "7", base = "main" })
+local session = api.session()
+assert(session.repo == "group/project" and session.pr == "7" and session.base == "main", vim.inspect(session))
+wait_for(function()
+  return logged("mr view 7 --repo https://gitlab.com/group/project --output json")
+end, "glab was not asked for the MR start was given")
+pr.stop()
+
+-- self-hosted: glab is pointed at the remote's host, not its default gitlab.com
+vim.fn.system({ "git", "remote", "set-url", "origin", "git@gitlab.example.com:group/project.git" })
+vim.fn.writefile({}, glab_log)
+pr.start({ provider = "gitlab", repo = "group/project", pr = "7", base = "main" })
+wait_for(function()
+  return logged("mr view 7 --repo https://gitlab.example.com/group/project")
+    and logged("api --hostname gitlab.example.com projects/group%2Fproject/merge_requests/7/discussions")
+end, "glab was not pointed at the self-hosted instance: " .. table.concat(log_lines(), "\n"))
+pr.stop()
+
 vim.fn.system({ "git", "remote", "set-url", "origin", original_url })
 harness.done()
