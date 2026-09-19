@@ -138,16 +138,16 @@ end
 -- A file whose edits are about to become suggestions. saved: the file on disk
 -- differs from HEAD, so some edits were written. clean: the buffer is what is
 -- on disk, so once its edits are undone writing it loses nothing of yours;
--- compared by content, not 'modified', which misses a buffer gone stale.
+-- compared by content, not 'modified', which misses a buffer gone stale. A
+-- file that cannot be read (deleted, say) is never clean: there is nothing on
+-- disk to prove a write would lose nothing.
 local function edited_file(path, bufnr, saved)
+  local readable, disk = pcall(vim.fn.readfile, vim.api.nvim_buf_get_name(bufnr))
   return {
     path = path,
     buf = bufnr,
     saved = saved,
-    clean = saved and vim.deep_equal(
-      vim.api.nvim_buf_get_lines(bufnr, 0, -1, false),
-      vim.fn.readfile(vim.api.nvim_buf_get_name(bufnr))
-    ),
+    clean = saved and readable and vim.deep_equal(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), disk),
   }
 end
 

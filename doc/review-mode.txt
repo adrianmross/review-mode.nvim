@@ -394,10 +394,11 @@ COMMANDS                                                  *review-mode-commands*
 :ReviewModeSuggestEdits[!]
         Queue every edit in the current file as a pending suggestion, and undo
         the edits. Edits outside the PR diff are left alone. With [!], every
-        file the PR changes that you edited, in a buffer or saved to disk; a
-        saved file is written back after its edits are undone unless its
-        buffer held other unsaved changes. Edited files outside the PR are
-        named and left alone.
+        file the PR changes that you edited, in a buffer or saved to disk;
+        edited files outside the PR are named and left alone.
+        Either way, a file whose edits were saved is written back after they
+        are undone, unless its buffer held other unsaved changes. Edits
+        outside the PR diff stay, so the file need not match HEAD.
 
                                                         *:ReviewModeViewedToggle*
 :ReviewModeViewedToggle

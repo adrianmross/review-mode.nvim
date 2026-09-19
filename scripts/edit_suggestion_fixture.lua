@@ -279,9 +279,38 @@ assert(noted("Left unsaved, the buffer has other unsaved changes: file.txt"), "t
 assert(disk("nested/deeper/more.txt") == "deep|feature saved", "a file outside the PR should be left alone")
 assert(not loaded("nested/deeper/more.txt"), "a file outside the PR should not be opened")
 
+-- a write that fails is reported as such, not as unsaved work of yours
+vim.api.nvim_buf_set_lines(other_buf, 1, 2, false, { "-- newest" })
+vim.api.nvim_buf_call(other_buf, function()
+  vim.cmd("silent write")
+end)
+local refuse = vim.api.nvim_create_autocmd("BufWritePre", {
+  pattern = "*/nested/other.txt",
+  callback = function()
+    error("disk says no")
+  end,
+})
+notes = {}
+pr.suggest_edits({ all = true })
+vim.api.nvim_del_autocmd(refuse)
+assert(noted("Could not write back, left modified: nested/other.txt ("), "a failed write should be reported")
+assert(noted("disk says no"), "a failed write should carry its error")
+assert(not noted("Left unsaved"), "a failed write is not unsaved work: " .. table.concat(notes, "\n"))
+assert(vim.bo[other_buf].modified, "a buffer that could not be written stays modified")
+assert(disk("nested/other.txt") == "alpha|-- newest|omega", "a failed write should leave the file alone")
+
+-- a file deleted on disk cannot be read to check it: not clean, no crash
+vim.api.nvim_win_set_buf(code_win, new_buf)
+os.remove("new.txt")
+notes = {}
+local survived, crash = pcall(pr.suggest_edits)
+assert(survived, "a deleted file should not crash the batch: " .. tostring(crash))
+vim.api.nvim_win_set_buf(code_win, buf)
+
 vim.fn.confirm = original_confirm
 vim.fn.system({ "git", "checkout", "--", "file.txt", "nested", "new.txt" })
 reset()
 vim.bo[buf].modified = false
 vim.bo[new_buf].modified = false
+vim.bo[other_buf].modified = false
 pr.stop()

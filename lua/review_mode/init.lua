@@ -2626,7 +2626,7 @@ function M.suggest_edits(opts)
     return
   end
 
-  local queued, written, unsaved = 0, {}, {}
+  local queued, written, unsaved, failed = 0, {}, {}, {}
   for _, file in ipairs(files) do
     -- bottom-up, so undoing one edit never moves the rows of those above it
     local undone, queued_here = 0, 0
@@ -2648,13 +2648,15 @@ function M.suggest_edits(opts)
     -- a saved edit is on disk too: now that it is a suggestion, the file goes
     -- back to HEAD there as well, unless the buffer holds other unsaved work
     -- that a write would take with it
-    if undone > 0 and file.saved then
-      local ok = file.clean
-        and pcall(vim.api.nvim_buf_call, file.buf, function()
-          -- write!: clean already checked the disk holds what the buffer held
-          vim.cmd("silent write!")
-        end)
-      table.insert(ok and written or unsaved, file.path)
+    if undone > 0 and file.saved and not file.clean then
+      unsaved[#unsaved + 1] = file.path
+    elseif undone > 0 and file.saved then
+      local ok, err = pcall(vim.api.nvim_buf_call, file.buf, function()
+        -- write!: clean already checked the disk holds what the buffer held
+        vim.cmd("silent write!")
+      end)
+      -- a failed write is not unsaved work of yours: say what went wrong
+      table.insert(ok and written or failed, ok and file.path or (file.path .. " (" .. tostring(err) .. ")"))
     end
     if queued_here == 0 then
       drop(file)
@@ -2664,7 +2666,9 @@ function M.suggest_edits(opts)
     string.format("Queued %d suggestion(s) from your edits; :ReviewModePending to add messages", queued)
       .. (#written > 0 and ("\nWrote back: " .. table.concat(written, ", ")) or "")
       .. (#unsaved > 0 and ("\nLeft unsaved, the buffer has other unsaved changes: " .. table.concat(unsaved, ", ")) or "")
-      .. not_in_pr
+      .. (#failed > 0 and ("\nCould not write back, left modified: " .. table.concat(failed, ", ")) or "")
+      .. not_in_pr,
+    #failed > 0 and vim.log.levels.WARN or nil
   )
 end
 

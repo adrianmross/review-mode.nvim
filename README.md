@@ -715,10 +715,14 @@ file at once, queueing each into the pending review, where
 `:ReviewModeSuggestEdits!` ("Turn all my edits into suggestions") does the same
 for every PR file you edited: files with unsaved edits in a buffer, and files
 whose saved content differs from HEAD, opened if they are not. One confirmation
-lists the count per file. A file whose edits you saved is written back once
-they are undone, so it matches the PR again on disk, but only if its buffer
-held nothing unsaved beyond what was on disk; otherwise it is left modified
-and named. Edited files the PR does not change are named and left alone.
+lists the count per file. Edited files the PR does not change are named and
+left alone.
+
+In both forms, a file whose edits you saved is written back once they are
+undone, so the queued edits leave the disk too; edits outside the PR diff stay,
+so the file need not match HEAD. It is written only if its buffer held nothing
+unsaved beyond what was on disk; otherwise it is left modified and named, as is
+a file whose write fails.
 
 Edits are what the buffer says that HEAD, the PR head, does not. A pure
 insertion takes the line above into the suggestion, since it has no line of its
