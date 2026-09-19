@@ -283,6 +283,16 @@ _G.Snacks = {
 pr.config().picker.provider = "snacks"
 pr.actions()
 assert(snacks_actions_opts, "snacks action picker was not used")
+-- The per-file line counts load asynchronously. A row drawn before they land
+-- has no counts (a zero is left blank), so wait: every file here changes lines.
+wait_for(function()
+  for _, entry in ipairs(api.files()) do
+    if entry.added + entry.removed == 0 then
+      return false
+    end
+  end
+  return #api.files() > 0
+end, "the per-file line counts never loaded")
 pr.list_viewed("unviewed")
 assert(snacks_files_opts, "snacks viewed picker was not used")
 assert(snacks_files_opts.title:find("unviewed", 1, true), "snacks file title filter missing")
