@@ -153,7 +153,8 @@ many are resolved), colored in snacks.nvim and Telescope through the
 ReviewModePicker* groups (Added, Removed, Progress, ProgressNone, Viewed,
 Unviewed, Threads, Resolved, Dir, Title, Meta), which link to Added, Removed,
 Title, Comment and the Diagnostic* groups. Counts are abbreviated (5.4k), a
-zero is left blank, and each column is only as wide as the PR needs. Its title is short, "Files [all] · 62% · 4 left";
+zero is left blank, and each column is only as wide as the PR needs.
+Its title is short, "Files [all] · 62% · 4 left";
 api.review_progress() returns the full totals.
 
 Review is a key layer over normal mode, not a real Vim mode, so mode() never

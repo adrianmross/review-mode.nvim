@@ -140,7 +140,8 @@ end
 -- and with fzf syntax `!is:viewed` or `'is:added`.
 local function qualifiers(facts)
   local out = { facts.viewed and "is:viewed" or "is:unviewed", "is:" .. facts.status }
-  if not facts.viewed and facts.fraction > 0 then
+  -- strictly between: every hunk seen but the file not yet marked is not "partial"
+  if not facts.viewed and facts.fraction > 0 and facts.fraction < 1 then
     out[#out + 1] = "is:partial"
   end
   if facts.threads > 0 then
