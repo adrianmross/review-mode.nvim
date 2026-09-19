@@ -1,7 +1,6 @@
-local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
-
-vim.opt.runtimepath:prepend(repo_root)
-package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
+local harness = dofile(
+  assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
+)
 
 local function wait_for(predicate, message)
   assert(vim.wait(10000, predicate, 20), message)
@@ -176,3 +175,4 @@ assert(real(seen.root) == real(user_repo), "hook ctx root is wrong")
 pr.stop()
 pr.config().hooks.prepare_checkout = nil
 git({ "worktree", "remove", alt }, user_repo)
+harness.done()

@@ -1,14 +1,11 @@
 -- The readiness check before submitting: counts from state already in memory,
 -- and only the non-zero ones in the APPROVE confirmation.
-local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
+local harness = dofile(
+  assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
+)
 local capture = assert(os.getenv("REVIEW_MODE_REVIEW_CAPTURE"), "REVIEW_MODE_REVIEW_CAPTURE is required")
 
-vim.opt.runtimepath:prepend(repo_root)
-package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
-
-local function wait_for(predicate, message)
-  assert(vim.wait(5000, predicate, 20), message)
-end
+local wait_for = harness.wait_for
 
 local pr = require("review_mode")
 local api = require("review_mode.api")
@@ -141,3 +138,4 @@ assert(#api.pending() == 1, "a declined review cleared the drafts")
 
 api.discard_pending()
 pr.stop()
+harness.done()

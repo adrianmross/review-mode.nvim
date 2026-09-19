@@ -1,14 +1,11 @@
 -- CI check-run annotations as diagnostics: fetched for the PR head, in their own
 -- namespace, toggled apart from the review threads.
-local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
+local harness = dofile(
+  assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
+)
 local log_path = assert(os.getenv("REVIEW_MODE_GH_LOG"), "REVIEW_MODE_GH_LOG is required")
 
-vim.opt.runtimepath:prepend(repo_root)
-package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
-
-local function wait_for(predicate, message)
-  assert(vim.wait(5000, predicate, 20), message)
-end
+local wait_for = harness.wait_for
 
 -- the fake gh appends one line per CI request
 local function gh_log()
@@ -135,3 +132,4 @@ vim.wait(200)
 assert(#gh_log() == before, "disabled CI diagnostics must not call gh")
 assert(#vim.diagnostic.get(nil, { namespace = ci_ns }) == 0, "disabled CI diagnostics set nothing")
 pr.stop()
+harness.done()

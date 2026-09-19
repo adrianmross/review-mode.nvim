@@ -4,14 +4,11 @@
 --   1 one  2 two  3 ""  4 base changed  5 same1 ... 9 same5  10 tail
 -- and the PR diff changes lines 2 and 4, so with GitHub's three lines of
 -- context a comment can land on lines 1-7, and 8-10 are outside the diff.
-local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
+local harness = dofile(
+  assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
+)
 
-vim.opt.runtimepath:prepend(repo_root)
-package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
-
-local function wait_for(predicate, message)
-  assert(vim.wait(5000, predicate, 20), message)
-end
+local wait_for = harness.wait_for
 
 vim.fn.system({ "git", "checkout", "-q", "feature" })
 assert(vim.v.shell_error == 0, "could not check out the feature branch for this fixture")
@@ -314,3 +311,4 @@ vim.bo[buf].modified = false
 vim.bo[new_buf].modified = false
 vim.bo[other_buf].modified = false
 pr.stop()
+harness.done()

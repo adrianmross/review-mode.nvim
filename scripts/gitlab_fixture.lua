@@ -1,12 +1,9 @@
-local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
+local harness = dofile(
+  assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
+)
 local glab_log = assert(os.getenv("GLAB_LOG"), "GLAB_LOG is required")
 
-vim.opt.runtimepath:prepend(repo_root)
-package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
-
-local function wait_for(predicate, message)
-  assert(vim.wait(5000, predicate, 20), message)
-end
+local wait_for = harness.wait_for
 
 -- A GitLab review must never fall through to gh. Wrap before the plugin loads,
 -- because init.lua keeps its own reference to system_async.
@@ -210,3 +207,4 @@ assert(#gh_calls == 0, "gitlab review called gh: " .. table.concat(gh_calls, "; 
 
 pr.stop()
 vim.fn.system({ "git", "remote", "set-url", "origin", original_url })
+harness.done()

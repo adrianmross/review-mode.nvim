@@ -3,14 +3,11 @@
 -- Builds its own repo so the shared fixture repo keeps its files: ws.txt is a
 -- reindent and nothing else, mixed.txt has a whitespace-only line 2 and a real
 -- change on line 10.
-local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
+local harness = dofile(
+  assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
+)
 
-vim.opt.runtimepath:prepend(repo_root)
-package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
-
-local function wait_for(predicate, message)
-  assert(vim.wait(5000, predicate, 20), message)
-end
+local wait_for = harness.wait_for
 
 local notifications = {}
 vim.notify = function(message)
@@ -165,3 +162,4 @@ assert(
 assert(vim.deep_equal(hunks("mixed.txt"), { 2, 10 }), "hunks did not recompute after toggling off")
 
 pr.stop()
+harness.done()

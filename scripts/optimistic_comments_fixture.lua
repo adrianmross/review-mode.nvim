@@ -2,14 +2,11 @@
 -- swapped for GitHub's answer without a duplicate, and on failure is taken
 -- back with its text left in the unnamed register. The gh mock reads
 -- REVIEW_MODE_POST_DELAY and REVIEW_MODE_FAIL_POST from this process's env.
-local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
+local harness = dofile(
+  assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
+)
 
-vim.opt.runtimepath:prepend(repo_root)
-package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
-
-local function wait_for(predicate, message)
-  assert(vim.wait(5000, predicate, 20), message)
-end
+local wait_for = harness.wait_for
 
 local notifications = {}
 vim.notify = function(message)
@@ -167,4 +164,5 @@ assert(count_body("doomed reply") == 0, "failed reply placeholder was not remove
 assert(vim.fn.getreg('"') == "doomed reply", "failed reply text was not kept in the register")
 
 print("optimistic comments fixture passed")
+harness.done()
 vim.cmd("qa!")

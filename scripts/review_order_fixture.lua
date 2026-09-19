@@ -3,14 +3,11 @@
 --
 -- Its own throwaway repo, so the file list can be shaped to the rules without
 -- touching what the shared fixtures expect.
-local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
+local harness = dofile(
+  assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
+)
 
-vim.opt.runtimepath:prepend(repo_root)
-package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
-
-local function wait_for(predicate, message)
-  assert(vim.wait(5000, predicate, 20), message)
-end
+local wait_for = harness.wait_for
 
 vim.notify = function() end
 
@@ -162,4 +159,5 @@ assert(vim.deep_equal(paths(), git_order), "diff order: " .. vim.inspect(paths()
 
 pr.stop()
 print("review order fixture passed")
+harness.done()
 vim.cmd("qa!")
