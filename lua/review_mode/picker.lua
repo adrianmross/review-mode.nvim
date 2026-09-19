@@ -196,8 +196,15 @@ end
 -- Short enough for a picker's border: the rest is in the statusline and
 -- :ReviewModeSummary.
 local function files_title(filter)
-  local progress = api.review_progress()
-  return string.format("Files [%s] · %d%% · %d left", filter, progress.percent, progress.files_left)
+  -- the share and a viewed count only: review_progress() would build every
+  -- file's threads just for a title
+  local left = 0
+  for _, entry in ipairs(api.files()) do
+    if not api.is_viewed_file(entry.path) then
+      left = left + 1
+    end
+  end
+  return string.format("Files [%s] · %d%% · %d left", filter, api.review_percent(), left)
 end
 
 local function viewed_picker_item(path)
