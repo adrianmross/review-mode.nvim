@@ -434,6 +434,7 @@ local function parse_changed_files(output)
   state.hunks_loaded = {}
   state.hunks_loading = {}
   state.hunk_hashes = {}
+  state.hunk_ranges = {}
   state.hunk_callbacks = {}
 
   for line in (output or ""):gmatch("[^\n]+") do
@@ -485,20 +486,29 @@ local function parse_changed_file_stats(output)
   end
 end
 
--- Returns start lines by path, and a content key per hunk (viewed.hunk_keys) by
--- path. Once inside a file's hunks only a new `diff` line ends them, so an
--- added line that reads "++ b/x" is content, not a header.
+-- Returns start lines by path, a content key per hunk (viewed.hunk_keys) by
+-- path, and each hunk's { first, last } new-side lines by path (last < first
+-- for a pure deletion, which changes no new line). Once inside a file's hunks
+-- only a new `diff` line ends them, so an added line that reads "++ b/x" is
+-- content, not a header.
 local function parse_hunks_by_path(patch)
   local by_path = {}
   local bodies = {}
+  local ranges = {}
   local current_path = nil
   local body = nil
   for line in (patch or ""):gmatch("[^\n]+") do
-    local new_start = current_path and line:match("^@@ %-%d+,?%d* %+(%d+),?%d* @@")
+    local new_start, new_count = nil, nil
+    if current_path then
+      new_start, new_count = line:match("^@@ %-%d+,?%d* %+(%d+),?(%d*) @@")
+    end
     if line:match("^diff ") then
       current_path, body = nil, nil
     elseif new_start then
       by_path[current_path][#by_path[current_path] + 1] = math.max(1, tonumber(new_start) or 1)
+      -- a missing count means one line, as in unified diff
+      local first = tonumber(new_start)
+      table.insert(ranges[current_path], { first, first + (tonumber(new_count) or 1) - 1 })
       body = {}
       table.insert(bodies[current_path], body)
     elseif body then
@@ -509,6 +519,7 @@ local function parse_hunks_by_path(patch)
       current_path = line:match("^%+%+%+ b/(.+)$")
       by_path[current_path] = by_path[current_path] or {}
       bodies[current_path] = bodies[current_path] or {}
+      ranges[current_path] = ranges[current_path] or {}
     elseif line:match("^%+%+%+ /dev/null$") then
       current_path = nil
     end
@@ -518,7 +529,7 @@ local function parse_hunks_by_path(patch)
   for path, path_bodies in pairs(bodies) do
     keys[path] = viewed_state.hunk_keys(path_bodies)
   end
-  return by_path, keys
+  return by_path, keys, ranges
 end
 
 local function build_changed_maps_async(generation, callback)
@@ -559,9 +570,10 @@ local function build_changed_maps_async(generation, callback)
   )
 end
 
-local function finish_hunks_for_path(path, hunks, keys)
+local function finish_hunks_for_path(path, hunks, keys, ranges)
   state.hunks[path] = hunks or {}
   state.hunk_hashes[path] = keys or {}
+  state.hunk_ranges[path] = ranges or {}
   if state.hunk_viewed[path] then
     -- the viewed-hunk signs can only be drawn once the keys are known
     schedule_comments_ui_refresh()
@@ -608,7 +620,11 @@ local function gitsigns_hunk_lines(bufnr)
     local line = type(added) == "table" and tonumber(added.start) or nil
     if line then
       -- gitsigns' hunk.lines are the same +/- lines git prints, so the keys match
-      found[#found + 1] = { line = math.max(1, line), body = type(hunk.lines) == "table" and hunk.lines or {} }
+      found[#found + 1] = {
+        line = math.max(1, line),
+        body = type(hunk.lines) == "table" and hunk.lines or {},
+        range = { line, line + (tonumber(added.count) or 1) - 1 },
+      }
     end
   end
 
@@ -619,12 +635,13 @@ local function gitsigns_hunk_lines(bufnr)
   table.sort(found, function(left, right)
     return left.line < right.line
   end)
-  local lines, bodies = {}, {}
+  local lines, bodies, ranges = {}, {}, {}
   for index, item in ipairs(found) do
     lines[index] = item.line
     bodies[index] = item.body
+    ranges[index] = item.range
   end
-  return lines, viewed_state.hunk_keys(bodies)
+  return lines, viewed_state.hunk_keys(bodies), ranges
 end
 
 local function should_delay_for_gitsigns(bufnr)
@@ -645,12 +662,12 @@ local function finish_hunks_from_gitsigns(path, bufnr)
     return false
   end
 
-  local lines, keys = gitsigns_hunk_lines(bufnr)
+  local lines, keys, ranges = gitsigns_hunk_lines(bufnr)
   if not lines then
     return false
   end
 
-  finish_hunks_for_path(path, lines, keys)
+  finish_hunks_for_path(path, lines, keys, ranges)
   return true
 end
 
@@ -700,9 +717,9 @@ local function load_hunks_for_paths(paths, on_done)
       return
     end
 
-    local by_path, keys = parse_hunks_by_path(patch or "")
+    local by_path, keys, ranges = parse_hunks_by_path(patch or "")
     for _, path in ipairs(pending_paths) do
-      finish_hunks_for_path(path, by_path[path] or {}, keys[path])
+      finish_hunks_for_path(path, by_path[path] or {}, keys[path], ranges[path])
     end
 
     if on_done then
@@ -916,10 +933,10 @@ local function start_background_hunk_scan()
         return
       end
 
-      local by_path, keys = parse_hunks_by_path(patch or "")
+      local by_path, keys, ranges = parse_hunks_by_path(patch or "")
       for _, path in ipairs(state.file_order) do
         if not state.hunks_loaded[path] then
-          finish_hunks_for_path(path, by_path[path] or {}, keys[path])
+          finish_hunks_for_path(path, by_path[path] or {}, keys[path], ranges[path])
         end
       end
       state.background_hunk_scan_loading = false

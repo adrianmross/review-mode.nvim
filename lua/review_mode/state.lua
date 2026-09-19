@@ -80,6 +80,12 @@ local defaults = {
   ci = {
     diagnostics = true,
   },
+  review = {
+    -- before an APPROVE, list what the review has not covered yet (unviewed
+    -- files and hunks, CI failures you have not commented on, unresolved
+    -- threads) in the confirmation
+    submit_check = true,
+  },
   gitsigns = {
     enabled = true,
   },
@@ -194,6 +200,8 @@ local state = {
   hunks_loading = {},
   -- per path, a content key for each entry of hunks (see viewed.hunk_keys)
   hunk_hashes = {},
+  -- per path, { first, last } new-side lines for each entry of hunks
+  hunk_ranges = {},
   hunk_callbacks = {},
   prefetch_queue = {},
   prefetch_seen = {},
@@ -400,6 +408,7 @@ function M.reset_changed_data()
   state.hunks_loaded = {}
   state.hunks_loading = {}
   state.hunk_hashes = {}
+  state.hunk_ranges = {}
   state.hunk_callbacks = {}
   state.prefetch_queue = {}
   state.prefetch_seen = {}

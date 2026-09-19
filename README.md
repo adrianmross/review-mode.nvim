@@ -279,6 +279,27 @@ are cleared only once GitHub accepts the review — a failed submission keeps
 them. GitHub needs a review body for `request_changes`, and for a `comment`
 review with no queued comments; approving needs neither.
 
+Approving also lists what the review has not covered yet, so a stray unread
+file does not slip through:
+
+```
+Submit review as APPROVE with 4 pending comments?
+
+  2 files not viewed (5 hunks)
+  1 CI failure on changed lines, not commented on
+  3 unresolved threads
+```
+
+Only non-zero lines show, and with nothing to report the prompt is unchanged.
+It is counted from what is already loaded and never waits on the network: hunks
+that have not loaded count nothing, and neither does CI until its annotations
+have. A CI failure counts when it sits on a line the PR changed and no comment
+of yours (posted or pending) covers it. Comment and request-changes reviews
+skip the list — they are routinely sent mid-review, and a warning that always
+fires is one you learn to ignore. `review = { submit_check = false }` turns it
+off; `api.review_readiness()` returns the same counts. A local review has no
+GitHub review to submit, so submitting there is refused without a prompt.
+
 Two limits: replies always post immediately, because the reviews endpoint only
 batches new comments; and a pending review you started in the GitHub web UI is
 separate from these drafts, so submitting here leaves that one open.
@@ -338,6 +359,7 @@ api.pending()                       --> { { id, path, start_line, end_line, side
 api.add_pending({ path = ..., start_line = ..., end_line = ..., body = ... })
 api.remove_pending(id) / api.discard_pending()
 api.submit_review({ event = "COMMENT", body = "..." }, cb)   -- or APPROVE, REQUEST_CHANGES
+api.review_readiness()   --> { unviewed_files, unviewed_hunks, ci_failures, unresolved_threads, pending }
 
 -- events (see Hooks); returns an unsubscribe function
 local unsubscribe = api.on("comments_loaded", function(ctx) ... end)
@@ -1011,6 +1033,9 @@ require("review_mode").setup({
   },
   ci = {
     diagnostics = true, -- CI check-run annotations as diagnostics (GitHub)
+  },
+  review = {
+    submit_check = true, -- list what an APPROVE has not covered yet in its confirmation
   },
   gitsigns = {
     enabled = true,

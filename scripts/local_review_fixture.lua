@@ -281,6 +281,16 @@ pr.copy_url()
 wait_for(function()
   return notified("a local review has no PR to open")
 end, "copy_url did not refuse in a local review")
+-- a local review has nowhere to submit to: refused up front, never confirmed
+local original_confirm, confirmed = vim.fn.confirm, false
+vim.fn.confirm = function()
+  confirmed = true
+  return 1
+end
+require("review_mode.review_buffer").submit("approve")
+vim.fn.confirm = original_confirm
+assert(not confirmed, "a local review asked to confirm a submission it cannot make")
+assert(notified("Submitting a review is not supported in a local review"), "submit did not refuse in a local review")
 
 pr.stop()
 vim.fn.writefile({ "deep", "feature" }, dirty)

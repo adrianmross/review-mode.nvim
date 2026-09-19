@@ -542,6 +542,17 @@ function M.submit_review(opts, callback)
   return review.submit(opts, callback)
 end
 
+--- What the review has not covered yet, counted from state already loaded (it
+--- never fetches): { unviewed_files, unviewed_hunks, ci_failures,
+--- unresolved_threads, pending }. unviewed_hunks counts not-viewed hunks in the
+--- unviewed files whose hunks have loaded; ci_failures counts CI failure
+--- annotations on a changed line with no comment of yours over it, and stays 0
+--- until CI annotations load. The APPROVE confirmation lists the non-zero ones
+--- (review.submit_check).
+function M.review_readiness()
+  return review.readiness()
+end
+
 -- Events ----------------------------------------------------------------------
 
 --- Subscribe to one of M.events. Returns a function that unsubscribes.

@@ -117,6 +117,37 @@ function M.close()
   end
 end
 
+local function plural(count, word)
+  return string.format("%d %s%s", count, word, count == 1 and "" or "s")
+end
+
+-- What an approval would gloss over, one line per non-zero count. Only APPROVE
+-- gets it: approving says you have looked at all of it, so an unviewed file or
+-- an unanswered CI failure contradicts the verdict. A COMMENT or
+-- REQUEST_CHANGES review is routinely sent with the rest of the diff still
+-- unread, and a warning that always fires is one you learn to ignore.
+local function readiness_lines(event)
+  local review = api.config().review
+  if event ~= "APPROVE" or type(review) ~= "table" or review.submit_check ~= true then
+    return {}
+  end
+  local counts = api.review_readiness()
+  local lines = {}
+  if counts.unviewed_files > 0 then
+    lines[#lines + 1] = plural(counts.unviewed_files, "file") .. " not viewed"
+    if counts.unviewed_hunks > 0 then
+      lines[#lines] = lines[#lines] .. " (" .. plural(counts.unviewed_hunks, "hunk") .. ")"
+    end
+  end
+  if counts.ci_failures > 0 then
+    lines[#lines + 1] = plural(counts.ci_failures, "CI failure") .. " on changed lines, not commented on"
+  end
+  if counts.unresolved_threads > 0 then
+    lines[#lines + 1] = plural(counts.unresolved_threads, "unresolved thread")
+  end
+  return lines
+end
+
 --- Submit the pending review. `kind` is comment, approve or request_changes;
 --- the body comes from the review buffer when it is open. Always confirmed.
 function M.submit(kind)
@@ -126,13 +157,22 @@ function M.submit(kind)
     return
   end
 
+  -- a local review (or GitLab) has nothing to submit to: say so up front
+  -- rather than confirm a submission that cannot happen
+  local provider = (api.session() or {}).provider
+  if provider == "local" or provider == "gitlab" then
+    return api.submit_review({ event = event })
+  end
+
   local count = #api.pending()
   local body = M.body()
+  local notes = readiness_lines(event)
   local prompt = string.format(
-    "Submit review as %s with %d pending comment%s?%s",
+    "Submit review as %s with %d pending comment%s?%s%s",
     event,
     count,
     count == 1 and "" or "s",
+    #notes > 0 and ("\n\n  " .. table.concat(notes, "\n  ")) or "",
     body ~= "" and ("\n\n  " .. body:match("[^\n]*")) or ""
   )
   if vim.fn.confirm(prompt, "&Submit\n&Cancel", 2) ~= 1 then
