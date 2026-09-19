@@ -463,8 +463,8 @@ end
 -- A forced load that arrived while another was running asked for data newer
 -- than that run can hold (a comment just posted, a thread just resolved): drop
 -- the run's result instead of showing or caching it, and fetch again. Returns
--- true when it did.
-local function superseded()
+-- true when it did. The GitLab provider's loads end through it too.
+function M.superseded()
   state.comments_loading = false
   if not state.comments_reload_queued then
     return false
@@ -480,7 +480,7 @@ function M.load_comments_from_rest_async(generation)
       return
     end
 
-    if superseded() then
+    if M.superseded() then
       return
     end
     if not comments then
@@ -544,7 +544,7 @@ function M.load_comments_async(opts)
       return
     end
 
-    if superseded() then
+    if M.superseded() then
       return
     end
     state.comments, state.comment_threads = M.group_review_threads(threads)

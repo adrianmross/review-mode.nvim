@@ -600,18 +600,30 @@ review, with no review running: size (`+adds −dels`), CI state (`✓` passed,
 `✗` failed, `…` running), how long since the last update, and a `[draft]`
 marker. Choose one and it opens as below, in its own worktree. `:ReviewModeInbox
 mine` lists the PRs you opened instead, and `:ReviewModeInbox all` every open
-PR. It is one `gh pr list` call, CI state included; the repo is `GH_REVIEW_REPO`
-or the running review's, else whatever `gh` sees from the cwd.
+PR. It is one `gh pr list` call (up to 100 PRs), CI state included; the repo is
+`GH_REVIEW_REPO` or the running review's, else whatever `gh` sees from the cwd.
+In a repo whose `origin` is GitLab it says the inbox is GitHub-only instead.
 
 ### Review a PR without checking it out
 
 `:ReviewModeCheckout 123` (or a PR URL, or `api.review_pr`) reviews a PR
 without touching your working tree or your branch. It fetches the PR head into
-`refs/review-mode/pr/<n>` — `pull/<n>/head`, so PRs from forks work — gives it
-a detached worktree of its own under
-`stdpath("cache")/review-mode/worktrees/<owner>_<repo>/pr-<n>`, and opens the
-review in its own tabpage with a tab-local `:tcd` into that worktree. Your own
-checkout, branch, cwd and windows are left alone.
+`refs/review-mode/pr/<n>` and its base branch into `refs/review-mode/base/<n>`,
+both from the repo the PR lives in — `pull/<n>/head`, so PRs from forks work,
+and PRs of another repo (from the inbox or a URL) too, whatever `origin` is.
+It uses a remote that already points at that repo when there is one (so its
+ssh or https auth keeps working), else the repo's https URL. The fetched head
+must be the one GitHub reports for the PR, or the checkout is refused. It then
+gives the PR a detached worktree of its own under
+`stdpath("cache")/review-mode/worktrees/<owner>_<repo>-<clone>/pr-<n>`, where
+`<clone>` is a short hash of the local clone's `.git`, so two clones of one repo
+never share (or reuse) a tree, and opens the review in its own tabpage with a
+tab-local `:tcd` into that worktree. Your own checkout, branch, cwd and windows
+are left alone.
+
+GitHub Enterprise works the same way: a PR URL on any host is read as
+`https://<host>/<owner>/<repo>/pull/<n>`, and `gh` is asked on that host. A bare
+number takes its repo from the PR URL `gh` answers with.
 
 The files are real files on disk, not virtual read-only diff buffers, so LSP,
 formatters, treesitter and the rest of your setup work on the PR exactly as
@@ -619,7 +631,9 @@ they do on your own code — that is the whole point of the plugin, and a PR you
 did not check out should not be a lesser review.
 
 Review worktrees are never removed for you. `:ReviewModeCheckoutClean [pr]`
-removes the clean ones after a confirmation and refuses the dirty ones, listing
+(a number, `#123` or a PR URL) removes the clean ones after a confirmation,
+reports trees whose directory was deleted by hand as prunable (`git worktree
+prune` clears them), and refuses the dirty ones, listing
 what is uncommitted in each; the worktree the current session is using is
 refused too. A tree holding commits that are on no branch, tag or remote and
 not in the PR (a trial suggestion committed there, say) counts as dirty: moving
@@ -968,9 +982,11 @@ require("review_mode").setup({
 })
 ```
 
-Requirements: `glab`, authenticated for the project. `auto` reads the host of
-`git remote get-url origin` — anything containing `gitlab`, or listed in
-`gitlab_hosts`, is GitLab. A launcher can hand the session over instead, the
+Requirements: `glab`, authenticated for the project's host. `auto` reads the
+host of `git remote get-url origin` — anything containing `gitlab`, or listed in
+`gitlab_hosts`, is GitLab. `glab` is always pointed at that host (the MR's web
+URL once it is known): `--repo https://<host>/<group>/<project>` and `glab api
+--hostname <host>`, so a self-hosted instance is never mistaken for gitlab.com. A launcher can hand the session over instead, the
 same way `GH_REVIEW_*` does:
 
 ```sh
@@ -984,6 +1000,13 @@ What works: MR metadata, diff discussions loaded as threads (signs, panel,
 tree, `api.threads`), starting a thread on a line or range, replying, and
 resolving/unresolving. Threads are GitLab discussions, so `api.reply` and
 `api.resolve` take a discussion id where GitHub takes a review thread id.
+Discussions are fetched 100 to a page until a short page. A note on a removed
+line sits on the base side, like a GitHub `LEFT` thread, and a multi-line note
+starts at its `line_range`. A new thread's position is worked out on the MR's
+own diff (`start_sha...head_sha` from its `diff_refs`) when those commits are
+here, with a warning when the checkout's HEAD is not the MR head; a diff that
+fails fails the comment. GitLab support has been tested against `glab` mocks
+built from GitLab's documented REST API, not against a live server.
 
 GitHub-only for now, and reported as "not supported on GitLab yet" rather than
 falling through to `gh`: viewed-state sync, reactions, editing and deleting
@@ -1029,14 +1052,17 @@ It says so (`no PR for "feat/x", reviewing it locally`), and the statusline read
 mistaken for a PR review. Open the PR later and `:ReviewMode` picks it up; the
 local comments stay in `.git/`, keyed by branch.
 
-It falls back **only** when `gh` answers that there is no PR. Any other failure
+It falls back **only** when the forge answers that there is no PR: `gh`'s "no
+pull requests found", `glab`'s "no open merge request available" on GitLab, or
+`gh` finding no GitHub host among the remotes at all (Codeberg, Gitea,
+Bitbucket: there is no forge to ask). Any other failure
 — an expired token, the network, a rate limit — is still reported as an error,
 because falling back then would review a branch that may well have a PR, without
-its comments, and look like it worked. A PR named with `GH_REVIEW_PR` is never a
-fallback candidate either. Set `no_pr = "error"` to be told instead.
+its comments, and look like it worked. A PR named with `GH_REVIEW_PR` (or an MR
+with `GL_REVIEW_MR`) is never a fallback candidate either. Set `no_pr = "error"` to be told instead.
 
-`gh` exits `1` for both "no PR" and a real failure, so this keys on its wording;
-the test suite pins that string so a `gh` change fails loudly.
+`gh` and `glab` exit `1` for both "no PR" and a real failure, so this keys on
+their wording; the test suite pins those strings so a CLI change fails loudly.
 
 ### Comments on disk
 

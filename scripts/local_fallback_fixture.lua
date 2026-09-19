@@ -100,8 +100,33 @@ end, "a named PR that failed was not reported")
 vim.wait(300)
 assert(not notified("reviewing it locally"), "a named PR fell back to a local review")
 vim.env.GH_REVIEW_PR = nil
-vim.env.REVIEW_MODE_FIXTURE = nil
 if api.is_active() then
   pr.stop()
 end
+
+-- 5. GitLab: glab's no-MR answer falls back the same way
+local origin_url = vim.trim(vim.fn.system({ "git", "remote", "get-url", "origin" }))
+vim.fn.system({ "git", "remote", "set-url", "origin", "https://gitlab.com/group/project.git" })
+vim.env.REVIEW_MODE_FIXTURE = "no_mr"
+reset()
+pr.start()
+wait_for(function()
+  return api.is_active() and api.session() and api.session().provider == "local"
+end, "a GitLab branch with no MR did not fall back to a local review: " .. vim.inspect(notes))
+assert(not notified("no open merge request", vim.log.levels.ERROR), "the no-MR answer was reported as an error")
+pr.stop()
+
+-- 6. a remote on no GitHub host (Codeberg, Gitea, ...): no forge, so local
+vim.fn.system({ "git", "remote", "set-url", "origin", "https://codeberg.org/someone/project.git" })
+vim.env.REVIEW_MODE_FIXTURE = "unknown_host"
+reset()
+pr.start()
+wait_for(function()
+  return api.is_active() and api.session() and api.session().provider == "local"
+end, "a non-GitHub remote did not fall back to a local review: " .. vim.inspect(notes))
+assert(not notified("known GitHub host", vim.log.levels.ERROR), "gh's unknown-host answer was reported as an error")
+pr.stop()
+vim.fn.system({ "git", "remote", "set-url", "origin", origin_url })
+
+vim.env.REVIEW_MODE_FIXTURE = nil
 harness.done()

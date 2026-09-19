@@ -94,6 +94,10 @@ case "$1 $2" in
     if [[ "${REVIEW_MODE_FIXTURE:-}" == "no_pr" ]]; then
       echo 'no pull requests found for branch "feature"' >&2
       exit 1
+    elif [[ "${REVIEW_MODE_FIXTURE:-}" == "unknown_host" ]]; then
+      # gh in a repo whose remotes are on no GitHub host (Gitea, Codeberg, ...)
+      echo 'none of the git remotes configured for this repository point to a known GitHub host. To tell gh about a new GitHub host, please use `gh auth login`' >&2
+      exit 1
     elif [[ "${REVIEW_MODE_FIXTURE:-}" == "gh_auth_fail" ]]; then
       echo 'HTTP 401: Bad credentials (https://api.github.com/graphql)' >&2
       exit 1
@@ -102,7 +106,13 @@ case "$1 $2" in
     elif [[ "$args" == *"title,state,isDraft,mergeable,reviewDecision,headRefName,baseRefName,url"* ]]; then
       printf '{"title":"Improve review tools","state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","reviewDecision":"REVIEW_REQUIRED","headRefName":"feature","baseRefName":"main","url":"https://github.com/owner/repo/pull/123"}\n'
     elif [[ "$args" == *"number,headRefOid,baseRefName,url"* ]]; then
-      printf '{"number":123,"headRefOid":"abc123","baseRefName":"main","url":"https://github.com/owner/repo/pull/123"}\n'
+      # checkout: the PR's head is whatever its repo's pull ref holds, unless a
+      # fixture says the server reports another; the URL names the PR's repo
+      if [[ -n "${REVIEW_MODE_PR_VIEW_LOG:-}" ]]; then
+        printf '%s\n' "$args" >> "$REVIEW_MODE_PR_VIEW_LOG"
+      fi
+      head="${REVIEW_MODE_HEAD_OID:-$(git -C "${REVIEW_MODE_PR_REPO_DIR:-.}" rev-parse -q --verify refs/pull/123/head || echo abc123)}"
+      printf '{"number":123,"headRefOid":"%s","baseRefName":"main","url":"%s"}\n' "$head" "${REVIEW_MODE_PR_URL:-https://github.com/owner/repo/pull/123}"
     else
       printf '{"baseRefName":"main","headRefOid":"abc123","number":123}\n'
     fi
@@ -363,6 +373,8 @@ git add file.txt nested/other.txt nested/deeper/more.txt new.txt
 git commit -q -m feature
 git remote add origin .
 git update-ref refs/remotes/origin/main refs/heads/main
+# a checkout fetches from the PR's repo URL; point that URL back at this repo
+git config url."$tmp/repo".insteadOf https://github.com/owner/repo
 
 PATH="$tmp/bin:$PATH" \
 XDG_CACHE_HOME="$tmp/cache" \
@@ -392,6 +404,15 @@ XDG_CACHE_HOME="$tmp/checkout-cache" \
 XDG_STATE_HOME="$tmp/checkout-state" \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 run_fixture no_checkout_fixture
+
+# Checkouts across repos, forks, GitHub Enterprise and clones. Builds its own
+# repos; the gh mock reads the PR's URL and head from the fixture's env.
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/checkout-forges-cache" \
+XDG_STATE_HOME="$tmp/checkout-forges-state" \
+REVIEW_MODE_PR_VIEW_LOG="$tmp/checkout-forges-gh.log" \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+run_fixture checkout_forges_fixture
 
 PATH="$tmp/bin:$PATH" \
 XDG_CACHE_HOME="$tmp/async-preview-cache" \
@@ -496,20 +517,39 @@ set -euo pipefail
 printf 'ARGS %s\n' "$*" >> "$GLAB_LOG"
 args="$*"
 case "$args" in
-  "mr view --output json"|"mr view 7 --repo group/project --output json")
+  "mr view --output json"|"mr view 7 --repo https://gitlab.com/group/project --output json")
+    # local-fallback fixture: glab's answer for a branch with no MR
+    if [[ "${REVIEW_MODE_FIXTURE:-}" == "no_mr" ]]; then
+      echo 'no open merge request available for "feature"' >&2
+      exit 1
+    fi
     printf '%s\n' '{"iid":7,"project_id":42,"target_branch":"main","source_branch":"feature","sha":"headsha","web_url":"https://gitlab.com/group/project/-/merge_requests/7","references":{"full":"group/project!7"},"diff_refs":{"base_sha":"basesha","start_sha":"startsha","head_sha":"headsha"}}'
     ;;
-  "api --paginate projects/group%2Fproject/merge_requests/7/discussions?per_page=100")
+  # two short pages, with checkbox-like "[x] [y]" bodies that a textual merge
+  # of back-to-back arrays would corrupt
+  "api --hostname gitlab.com projects/group%2Fproject/merge_requests/7/discussions?per_page=2&page=1")
+    printf '%s\n' '[{"id":"p1","notes":[{"id":41,"body":"- [x] [y] done","author":{"username":"a"},"system":false,"position":{"old_path":"file.txt","new_path":"file.txt","old_line":null,"new_line":2}}]},{"id":"p2","notes":[{"id":42,"body":"[a] [b]","author":{"username":"a"},"system":false,"position":{"old_path":"file.txt","new_path":"file.txt","old_line":null,"new_line":2,"line_range":{"start":{"line_code":"x_1_1","type":"new","old_line":null,"new_line":1},"end":{"line_code":"x_2_2","type":"new","old_line":null,"new_line":2}}}}]}]'
+    ;;
+  # p3 sits on a removed line: GitLab sends new_line null
+  "api --hostname gitlab.com projects/group%2Fproject/merge_requests/7/discussions?per_page=2&page=2")
+    printf '%s\n' '[{"id":"p3","notes":[{"id":43,"body":"last] [page","author":{"username":"a"},"system":false,"position":{"old_path":"file.txt","new_path":"file.txt","old_line":3,"new_line":null}}]}]'
+    ;;
+  # what older glab printed for --paginate: one array per page, back to back
+  "api --paginate projects/group%2Fproject/merge_requests/7/discussions?per_page=2")
+    "$0" api --hostname gitlab.com "projects/group%2Fproject/merge_requests/7/discussions?per_page=2&page=1"
+    "$0" api --hostname gitlab.com "projects/group%2Fproject/merge_requests/7/discussions?per_page=2&page=2"
+    ;;
+  "api --hostname gitlab.com projects/group%2Fproject/merge_requests/7/discussions?per_page=100&page=1")
     printf '%s\n' '[{"id":"disc1","individual_note":false,"notes":[{"id":11,"type":"DiffNote","body":"Needs review","author":{"username":"reviewer"},"created_at":"2024-01-02T03:04:05Z","system":false,"resolvable":true,"resolved":false,"position":{"base_sha":"basesha","start_sha":"startsha","head_sha":"headsha","old_path":"file.txt","new_path":"file.txt","position_type":"text","old_line":null,"new_line":2}},{"id":12,"type":"DiffNote","body":"Agreed","author":{"username":"maintainer"},"created_at":"2024-01-03T03:04:05Z","system":false,"resolvable":true,"resolved":false,"position":{"old_path":"file.txt","new_path":"file.txt","position_type":"text","old_line":null,"new_line":2}}]},{"id":"disc2","individual_note":false,"notes":[{"id":21,"type":"DiffNote","body":"Check final line","author":{"username":"reviewer"},"created_at":"2024-01-02T03:04:05Z","system":false,"resolvable":true,"resolved":true,"position":{"old_path":"file.txt","new_path":"file.txt","position_type":"text","old_line":3,"new_line":4}}]},{"id":"disc3","individual_note":true,"notes":[{"id":31,"type":null,"body":"Overall looks good","author":{"username":"reviewer"},"created_at":"2024-01-02T03:04:05Z","system":false,"resolvable":false}]}]'
     ;;
-  "api --method POST projects/group%2Fproject/merge_requests/7/discussions --input "*)
+  "api --hostname gitlab.com --method POST projects/group%2Fproject/merge_requests/7/discussions --input "*)
     printf 'INPUT %s\n' "$(cat "${!#}")" >> "$GLAB_LOG"
     printf '{"id":"disc_new"}\n'
     ;;
-  "api --method POST projects/group%2Fproject/merge_requests/7/discussions/disc1/notes --raw-field body="*)
+  "api --hostname gitlab.com --method POST projects/group%2Fproject/merge_requests/7/discussions/disc1/notes --raw-field body="*)
     printf '{"id":13}\n'
     ;;
-  "api --method PUT projects/group%2Fproject/merge_requests/7/discussions/disc1 --field resolved="*)
+  "api --hostname gitlab.com --method PUT projects/group%2Fproject/merge_requests/7/discussions/disc1 --field resolved="*)
     printf '{"id":"disc1"}\n'
     ;;
   *)
@@ -598,6 +638,7 @@ cp -R "$tmp/repo" "$tmp/commit-repo"
 PATH="$tmp/bin:$PATH" \
 XDG_CACHE_HOME="$tmp/fallback-cache" \
 XDG_STATE_HOME="$tmp/fallback-state" \
+GLAB_LOG="$tmp/fallback-glab.log" \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 run_fixture local_fallback_fixture
 
@@ -619,6 +660,7 @@ XDG_STATE_HOME="$tmp/inbox-state" \
 GH_REVIEW_REPO=owner/repo \
 REVIEW_MODE_GH_LOG="$tmp/inbox-gh.log" \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+TZ=America/New_York \
 run_fixture inbox_fixture
 
 # Your edits, as suggestions: found against HEAD, checked against the PR diff,

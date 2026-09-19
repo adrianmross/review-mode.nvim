@@ -120,6 +120,10 @@ function M.resolve(args, root)
   base_arg = base_arg or M.default_branch(root)
 
   local head_rev = head_arg or "HEAD"
+  -- a typo'd head would otherwise leave a session with no head at all
+  if head_arg and not git({ "rev-parse", "--verify", "--quiet", head_arg .. "^{commit}" }, root) then
+    return nil, string.format("could not resolve %s in this repo", head_arg)
+  end
   local base = git({ "merge-base", base_arg, head_rev }, root)
     or git({ "rev-parse", "--verify", "--quiet", base_arg .. "^{commit}" }, root)
   if not base then
