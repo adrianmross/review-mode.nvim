@@ -665,3 +665,12 @@ REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/blast_radius_fixture.lua"
+
+# Reading order: definitions before uses, tests last, "diff" for git's order.
+# The fixture builds its own repo of Lua files, so it needs no gh or env.
+XDG_CACHE_HOME="$tmp/order-cache" \
+XDG_STATE_HOME="$tmp/order-state" \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+nvim --headless -u NONE -i NONE \
+  -c "set noswapfile" \
+  -l "$repo_root/scripts/review_order_fixture.lua"

@@ -505,6 +505,29 @@ rebuilt and the PR head SHA is re-fetched, so new comments anchor to a commit
 GitHub knows about. Viewed state and loaded comments are kept. Set
 `follow_head = false` to require `:ReviewModeRefresh` instead.
 
+### Reading order
+
+`]f` / `[f`, the jump to the next unviewed file, the changed-files picker,
+`]r` / `[r` across files and `api.files()` all walk the PR in one order. By default (`files.order = "smart"`) it reads like a story
+rather than alphabetically:
+
+1. **Code**, with a file that another changed file mentions ahead of the file
+   that mentions it: `parser.lua` before the `app.lua` that requires it.
+2. **Docs and lockfiles**: `*.md`, `*.txt`, `*.rst`, `doc/`, `docs/`,
+   `CHANGELOG`, `LICENSE`, `*.lock`, `package-lock.json`, `*-lock.yaml`,
+   `go.sum`.
+3. **Tests**: anything under `test/`, `tests/`, `spec/`, `specs/`,
+   `__tests__/` or `fixtures/`, and `*_test.*`, `*.test.*`, `*_spec.*`,
+   `*.spec.*`, `*_fixture.*`, `test_*.py`.
+
+"Mentions" is cheap on purpose: file B follows file A when B's first 64 KiB
+contain A's file name without its extension as a whole word (`init`, `index`,
+`mod`, `main` and names under three letters are too common to count). No LSP
+and no process per file — it adds ~15 ms to a 100-file PR. Within a tier and
+wherever nothing links two files, git's order stands; a cycle is broken at its
+earliest file in git's order. `files.order = "diff"` keeps git's order
+throughout.
+
 ### Its own workspace (opt-in)
 
 With `mode.workspace = "tab"` the review gets its own tabpage. Entering
@@ -1100,6 +1123,9 @@ require("review_mode").setup({
       delay_ms = 250,
     },
     gh_metadata_cache = "10m", -- `gh api --cache` duration; "0" turns it off
+  },
+  files = {
+    order = "smart", -- "smart" | "diff": the order ]f and the file picker walk
   },
   commands = true,
 })

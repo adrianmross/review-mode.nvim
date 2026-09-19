@@ -174,6 +174,13 @@ local defaults = {
     gh_metadata_cache = "10m",
     -- End gh response cache ----------------------------------------------------
   },
+  -- the order ]f / [f, the next-unviewed jump and the file picker walk the PR
+  -- in: "smart" reads code before the files that use it, then docs and
+  -- lockfiles, then tests (see lua/review_mode/order.lua); "diff" is git's
+  -- alphabetical order
+  files = {
+    order = "smart",
+  },
   commands = true,
   -- review a PR without checking it out (:ReviewModeCheckout). Review worktrees
   -- are only ever removed by :ReviewModeCheckoutClean; "manual" is the only mode.

@@ -454,6 +454,10 @@ local function parse_changed_files(output)
       end
     end
   end
+
+  -- every consumer (]f, ]r across files, pickers, api.files) walks file_order, so
+  -- reordering it once here keeps them all in the same reading order
+  require("review_mode.order").apply(state)
 end
 
 local function parse_numstat_count(value)
