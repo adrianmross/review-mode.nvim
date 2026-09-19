@@ -5,13 +5,12 @@
 -- so a sign that shows up inside the budget can only have come from the cache:
 -- waiting on gh would cost the whole delay. The budget is deliberately loose
 -- (REVIEW_MODE_STARTUP_BUDGET_MS); it catches "waits on the network", not noise.
-local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
+local harness = dofile(
+  assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
+)
 local delay = assert(tonumber(os.getenv("REVIEW_MODE_STARTUP_GH_DELAY")), "REVIEW_MODE_STARTUP_GH_DELAY is required")
 local budget_ms = tonumber(os.getenv("REVIEW_MODE_STARTUP_BUDGET_MS") or "") or 500
 assert(budget_ms < delay * 1000, "the budget must sit below the gh delay, or it cannot tell cache from network")
-
-vim.opt.runtimepath:prepend(repo_root)
-package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
 
 local pr = require("review_mode")
 local api = require("review_mode.api")
@@ -101,3 +100,4 @@ if vim.env.GH_REVIEW_PR then
 else
   warm("discovery")
 end
+harness.done()

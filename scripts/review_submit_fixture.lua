@@ -1,12 +1,9 @@
-local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
+local harness = dofile(
+  assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
+)
 local capture = assert(os.getenv("REVIEW_MODE_REVIEW_CAPTURE"), "REVIEW_MODE_REVIEW_CAPTURE is required")
 
-vim.opt.runtimepath:prepend(repo_root)
-package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
-
-local function wait_for(predicate, message)
-  assert(vim.wait(5000, predicate, 20), message)
-end
+local wait_for = harness.wait_for
 
 local function has_line(lines, needle)
   for _, line in ipairs(lines) do
@@ -161,3 +158,4 @@ sent = vim.json.decode(table.concat(vim.fn.readfile(capture), "\n"))
 assert(sent.event == "APPROVE" and sent.body == nil and sent.comments == nil, "bare APPROVE payload wrong")
 
 pr.stop()
+harness.done()

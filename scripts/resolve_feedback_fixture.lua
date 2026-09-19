@@ -1,14 +1,11 @@
 -- Resolving a thread used to be silent: the comment simply stopped being drawn.
 -- These checks pin the confirmation flash -- both directions, both entry points,
 -- and the switch that turns it off.
-local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
+local harness = dofile(
+  assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
+)
 
-vim.opt.runtimepath:prepend(repo_root)
-package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
-
-local function wait_for(predicate, message)
-  assert(vim.wait(5000, predicate, 20), message)
-end
+local wait_for = harness.wait_for
 
 vim.notify = function() end
 
@@ -143,3 +140,4 @@ end)
 assert(#flash_marks() == 0, "resolve_flash_ms = 0 still drew a flash")
 
 pr.stop()
+harness.done()

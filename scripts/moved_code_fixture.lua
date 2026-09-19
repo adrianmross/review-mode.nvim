@@ -3,14 +3,11 @@
 --
 -- Builds its own small repo, so the shared fixture repo's files stay as the
 -- other fixtures expect them. A local review: no forge involved.
-local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
+local harness = dofile(
+  assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
+)
 
-vim.opt.runtimepath:prepend(repo_root)
-package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
-
-local function wait_for(predicate, message)
-  assert(vim.wait(5000, predicate, 20), message)
-end
+local wait_for = harness.wait_for
 
 vim.notify = function() end
 
@@ -198,3 +195,4 @@ pr.stop()
 assert(#vim.api.nvim_buf_get_extmarks(bufnr, moved.namespace, 0, -1, {}) == 0, "moved-code marks outlived the review")
 
 print("moved code fixture passed")
+harness.done()

@@ -1,10 +1,9 @@
 -- :ReviewModeInbox: PRs waiting on you, from one gh call, with no session
 -- running; choosing one reviews it in its own worktree.
-local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
+local harness = dofile(
+  assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
+)
 local gh_log = assert(os.getenv("REVIEW_MODE_GH_LOG"), "REVIEW_MODE_GH_LOG is required")
-
-vim.opt.runtimepath:prepend(repo_root)
-package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
 
 local function wait_for(predicate, message)
   assert(vim.wait(10000, predicate, 20), message)
@@ -144,3 +143,4 @@ assert(git({ "rev-parse", "--abbrev-ref", "HEAD" }, user_repo) == user_branch, "
 local tree = session.root
 pr.stop()
 git({ "worktree", "remove", "--force", tree }, user_repo)
+harness.done()

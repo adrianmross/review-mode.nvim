@@ -3,14 +3,11 @@
 -- There is deliberately no gh mock on PATH for this run. The point of the
 -- feature is that a local review never reaches a forge, so the fixture wraps
 -- util.system/util.system_async and asserts nothing ever shells out to gh.
-local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
+local harness = dofile(
+  assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
+)
 
-vim.opt.runtimepath:prepend(repo_root)
-package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
-
-local function wait_for(predicate, message)
-  assert(vim.wait(5000, predicate, 20), message)
-end
+local wait_for = harness.wait_for
 
 -- Wrap before the plugin loads: init.lua keeps its own reference to these.
 local util = require("review_mode.util")
@@ -295,3 +292,4 @@ assert(notified("Submitting a review is not supported in a local review"), "subm
 pr.stop()
 vim.fn.writefile({ "deep", "feature" }, dirty)
 assert(#forge_calls == 0, "a local review shelled out to a forge: " .. table.concat(forge_calls, "; "))
+harness.done()

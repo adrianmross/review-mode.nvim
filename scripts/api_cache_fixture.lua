@@ -4,15 +4,12 @@
 -- The GraphQL thread query is forced to fail here (REVIEW_MODE_FORCE_REST_COMMENTS)
 -- because the REST list is the only comment path that can carry an ETag at all:
 -- GraphQL is a POST and GitHub does not answer one with 304.
-local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
+local harness = dofile(
+  assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
+)
 local log_path = assert(os.getenv("REVIEW_MODE_GH_LOG"), "REVIEW_MODE_GH_LOG is required")
 
-vim.opt.runtimepath:prepend(repo_root)
-package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
-
-local function wait_for(predicate, message)
-  assert(vim.wait(5000, predicate, 20), message)
-end
+local wait_for = harness.wait_for
 
 -- the fake gh appends one line per conditional comment request
 local function gh_log()
@@ -160,3 +157,4 @@ assert(not local_summary:find("304", 1, true), "a local review's summary must no
 assert(api.request_stats().calls > 0, "this process already spent gh calls before the local session started")
 
 pr.stop()
+harness.done()

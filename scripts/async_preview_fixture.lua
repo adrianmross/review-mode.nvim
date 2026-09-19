@@ -4,14 +4,11 @@
 -- the shared preview helper: a fake _G.Snacks captures the pick options, and
 -- fake preview objects record every set_lines call so the placeholder and the
 -- late update can be told apart.
-local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
+local harness = dofile(
+  assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
+)
 
-vim.opt.runtimepath:prepend(repo_root)
-package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
-
-local function wait_for(predicate, message)
-  assert(vim.wait(5000, predicate, 20), message)
-end
+local wait_for = harness.wait_for
 
 local function has_line(lines, needle)
   for _, line in ipairs(lines or {}) do
@@ -143,3 +140,4 @@ assert(has_line(current_preview.renders[2], current.item.path), "the current pre
 
 vim.system = real_system
 pr.stop()
+harness.done()

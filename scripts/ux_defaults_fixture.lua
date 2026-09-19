@@ -1,11 +1,8 @@
-local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
+local harness = dofile(
+  assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
+)
 
-vim.opt.runtimepath:prepend(repo_root)
-package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
-
-local function wait_for(predicate, message)
-  assert(vim.wait(5000, predicate, 20), message)
-end
+local wait_for = harness.wait_for
 
 local function win_with_ft(ft)
   for _, win in ipairs(vim.api.nvim_list_wins()) do
@@ -253,3 +250,4 @@ assert(desc("]c") ~= "review-mode ]c", "mode.keys = {} still installed ]c")
 assert(vim.fn.maparg("<leader>rq", "n") == "", "session key set to false was still installed")
 assert(desc("<leader>rt") == "Review: toggle thread panel", "dropping one session key dropped the others")
 pr.stop()
+harness.done()

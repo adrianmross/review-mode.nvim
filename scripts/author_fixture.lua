@@ -3,15 +3,12 @@
 -- own copy of the repo, since it commits. The gh mock answers the author query
 -- with viewerDidAuthor only when REVIEW_MODE_AUTHOR=1, and writes every reply,
 -- resolve, people query and re-request to REVIEW_MODE_AUTHOR_LOG.
-local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
+local harness = dofile(
+  assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
+)
 local log_path = assert(os.getenv("REVIEW_MODE_AUTHOR_LOG"), "REVIEW_MODE_AUTHOR_LOG is required")
 
-vim.opt.runtimepath:prepend(repo_root)
-package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
-
-local function wait_for(predicate, message)
-  assert(vim.wait(5000, predicate, 20), message)
-end
+local wait_for = harness.wait_for
 
 vim.notify = function() end
 
@@ -230,4 +227,5 @@ assert(
 
 pr.stop()
 print("author fixture passed")
+harness.done()
 vim.cmd("qa!")

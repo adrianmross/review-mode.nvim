@@ -1,13 +1,10 @@
-local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
-
-vim.opt.runtimepath:prepend(repo_root)
-package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
+local harness = dofile(
+  assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
+)
 
 local comment_sign = ""
 
-local function wait_for(predicate, message)
-  assert(vim.wait(5000, predicate, 20), message)
-end
+local wait_for = harness.wait_for
 
 local function comment_marks()
   local ns = vim.api.nvim_get_namespaces().review_mode_normal
@@ -1353,3 +1350,4 @@ for _, winid in ipairs(vim.api.nvim_list_wins()) do
     "stopping the session left a panel window behind"
   )
 end
+harness.done()

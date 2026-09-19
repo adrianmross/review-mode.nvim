@@ -3,14 +3,11 @@
 -- Runs a local review over its own throwaway repo of Lua files (lua is a parser
 -- bundled with Neovim, so treesitter works under -u NONE), with the LSP stubbed:
 -- the point is the range intersection and subtraction, not a language server.
-local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
+local harness = dofile(
+  assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
+)
 
-vim.opt.runtimepath:prepend(repo_root)
-package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
-
-local function wait_for(predicate, message)
-  assert(vim.wait(5000, predicate, 20), message)
-end
+local wait_for = harness.wait_for
 
 local notifications = {}
 vim.notify = function(message)
@@ -227,4 +224,5 @@ assert(#result == 0 and cancelled == 1, "a silent server should time out and be 
 assert(notified("parse: timed out after 50 ms"), "the timeout was not reported")
 
 vim.lsp.get_clients = get_clients -- the real one runs on exit
+harness.done()
 vim.cmd("qa!")

@@ -4,14 +4,11 @@
 --
 -- Runs in a copy of the fixture repo: it moves origin/main so hunks.txt is the
 -- only changed file, and commits during the review.
-local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
+local harness = dofile(
+  assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
+)
 
-vim.opt.runtimepath:prepend(repo_root)
-package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
-
-local function wait_for(predicate, message)
-  assert(vim.wait(5000, predicate, 20), message)
-end
+local wait_for = harness.wait_for
 
 local function sh(cmd)
   local result = vim.system(cmd, { text = true }):wait()
@@ -195,4 +192,5 @@ assert(api.hunk_progress(path) == nil, "api.hunk_progress reported progress with
 api.config().viewed.enabled = true
 
 pr.stop()
+harness.done()
 vim.cmd("qa!")

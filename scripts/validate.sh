@@ -8,17 +8,55 @@ export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$repo_root/.cache}"
 export XDG_STATE_HOME="${XDG_STATE_HOME:-$repo_root/.local/state}"
 mkdir -p "$XDG_CACHE_HOME" "$XDG_STATE_HOME"
 
-nvim --headless -u NONE -i NONE \
-  -c "lua assert(loadfile('lua/review_mode/init.lua'))" \
-  -c "lua assert(loadfile('lua/review_mode/integrations/nvim_tree.lua'))" \
-  -c "lua assert(loadfile('lua/review_mode/health.lua'))" \
+# Everything throwaway lives here: removed when the run passes, kept for a look
+# when it fails.
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/review-mode-nvim-test.XXXXXX")"
+trap 'if [[ $? -eq 0 ]]; then rm -rf "$tmp"; else echo "kept $tmp" >&2; fi' EXIT
+
+# None of the developer's setup may reach a fixture: no ~/.gitconfig (signing,
+# diff prefixes, hooks, default branch) and no ~/.config/nvim or site dir on
+# the runtimepath.
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+export GIT_AUTHOR_NAME=Test GIT_AUTHOR_EMAIL=test@example.com
+export GIT_COMMITTER_NAME=Test GIT_COMMITTER_EMAIL=test@example.com
+export XDG_CONFIG_HOME="$tmp/config" XDG_DATA_HOME="$tmp/data"
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+
+# :helptags only reports a duplicate tag (E154); inside try, cquit makes it fail.
+mkdir -p "$tmp/help"
+cp doc/review-mode.txt "$tmp/help/review-mode.txt"
+# the directory goes through an env var and fnameescape, so a temp path with
+# spaces still reaches :helptags whole
+REVIEW_MODE_HELP_DIR="$tmp/help" nvim --headless -u NONE -i NONE \
+  -c "try | execute 'helptags' fnameescape(\$REVIEW_MODE_HELP_DIR) | catch | call writefile([v:exception], '/dev/stderr') | cquit 1 | endtry" \
   -c qa
 
-help_dir="$(mktemp -d "${TMPDIR:-/tmp}/review-mode-help.XXXXXX")"
-cp doc/review-mode.txt "$help_dir/review-mode.txt"
-nvim --headless -u NONE -i NONE \
-  -c "helptags $help_dir" \
-  -c qa
+# Runs one fixture headless; callers set its env as a prefix. A fixture fails on
+# a nonzero exit, on a missing harness.done() sentinel (it stopped early, e.g.
+# on an unstubbed prompt), or on an error Neovim only printed: errors in
+# scheduled callbacks and autocmds do not change the exit code.
+fixture_runs=0
+run_fixture() {
+  local name="$1" status=0 reason=""
+  fixture_runs=$((fixture_runs + 1))
+  local sentinel="$tmp/done/$fixture_runs-$name" err="$tmp/stderr/$fixture_runs-$name"
+  mkdir -p "$tmp/done" "$tmp/stderr"
+  REVIEW_MODE_DONE="$sentinel" nvim --headless -u NONE -i NONE \
+    -c "set noswapfile" \
+    -l "$repo_root/scripts/$name.lua" 2>"$err" || status=$?
+  cat "$err" >&2
+  if [[ $status -ne 0 ]]; then
+    reason="exit code $status"
+  elif [[ ! -f "$sentinel" ]]; then
+    reason="exited before harness.done()"
+  elif grep -qE "Error executing|Error detected while processing|E5108|stack traceback" "$err"; then
+    reason="error printed to stderr"
+  fi
+  if [[ -n "$reason" ]]; then
+    echo "FAIL $name: $reason" >&2
+    exit 1
+  fi
+}
 
 # The bundled UI must build on the public API, the same as anyone else's would.
 # If one of these needs a plugin internal, the API is missing something: add it
@@ -32,11 +70,10 @@ for ui in lua/review_mode/panel.lua lua/review_mode/picker.lua lua/review_mode/i
   fi
 done
 
-stylua --check lua plugin scripts/*.lua
+stylua --check lua plugin scripts
 git diff --check
 bash scripts/release-check.sh
 
-tmp="$(mktemp -d "${TMPDIR:-/tmp}/review-mode-nvim-test.XXXXXX")"
 mkdir -p "$tmp/bin" "$tmp/repo" "$tmp/cache" "$tmp/state"
 
 cat > "$tmp/bin/gh" <<'GH'
@@ -327,9 +364,7 @@ GH_REVIEW_PR=123 \
 GH_REVIEW_BASE=main \
 GH_REVIEW_HEAD=abc123 \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/fixture.lua"
+run_fixture fixture
 
 PATH="$tmp/bin:$PATH" \
 XDG_CACHE_HOME="$tmp/rest-cache" \
@@ -340,9 +375,7 @@ GH_REVIEW_BASE=main \
 GH_REVIEW_HEAD=abc123 \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 REVIEW_MODE_FORCE_REST_COMMENTS=1 \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/rest_fallback_fixture.lua"
+run_fixture rest_fallback_fixture
 
 # :ReviewModeCheckout: review the PR in a detached worktree, not this checkout.
 # No GH_REVIEW_* here: the session context must come from the checkout itself.
@@ -350,9 +383,7 @@ PATH="$tmp/bin:$PATH" \
 XDG_CACHE_HOME="$tmp/checkout-cache" \
 XDG_STATE_HOME="$tmp/checkout-state" \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/no_checkout_fixture.lua"
+run_fixture no_checkout_fixture
 
 PATH="$tmp/bin:$PATH" \
 XDG_CACHE_HOME="$tmp/async-preview-cache" \
@@ -362,9 +393,7 @@ GH_REVIEW_PR=123 \
 GH_REVIEW_BASE=main \
 GH_REVIEW_HEAD=abc123 \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/async_preview_fixture.lua"
+run_fixture async_preview_fixture
 
 # Review threads as diagnostics and quickfix.
 PATH="$tmp/bin:$PATH" \
@@ -375,9 +404,7 @@ GH_REVIEW_PR=123 \
 GH_REVIEW_BASE=main \
 GH_REVIEW_HEAD=abc123 \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/diagnostics_fixture.lua"
+run_fixture diagnostics_fixture
 
 PATH="$tmp/bin:$PATH" \
 XDG_CACHE_HOME="$tmp/reactions-cache" \
@@ -389,9 +416,7 @@ GH_REVIEW_HEAD=abc123 \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 REVIEW_MODE_FIXTURE=reactions \
 REVIEW_MODE_GH_LOG="$tmp/reactions-gh.log" \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/reactions_fixture.lua"
+run_fixture reactions_fixture
 
 PATH="$tmp/bin:$PATH" \
 XDG_CACHE_HOME="$tmp/edit-delete-cache" \
@@ -403,9 +428,7 @@ GH_REVIEW_HEAD=abc123 \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 REVIEW_MODE_FIXTURE=edit_delete \
 REVIEW_MODE_GH_LOG="$tmp/edit-delete-gh.log" \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/comment_edit_delete_fixture.lua"
+run_fixture comment_edit_delete_fixture
 
 # The resolve/unresolve confirmation flash.
 PATH="$tmp/bin:$PATH" \
@@ -416,9 +439,7 @@ GH_REVIEW_PR=123 \
 GH_REVIEW_BASE=main \
 GH_REVIEW_HEAD=abc123 \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/resolve_feedback_fixture.lua"
+run_fixture resolve_feedback_fixture
 
 PATH="$tmp/bin:$PATH" \
 XDG_CACHE_HOME="$tmp/review-cache" \
@@ -429,9 +450,7 @@ GH_REVIEW_BASE=main \
 GH_REVIEW_HEAD=abc123 \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 REVIEW_MODE_REVIEW_CAPTURE="$tmp/review-capture.json" \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/review_submit_fixture.lua"
+run_fixture review_submit_fixture
 
 # CI check-run annotations as diagnostics, in their own namespace.
 PATH="$tmp/bin:$PATH" \
@@ -444,9 +463,7 @@ GH_REVIEW_HEAD=abc123 \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 REVIEW_MODE_FIXTURE=ci \
 REVIEW_MODE_GH_LOG="$tmp/ci-gh.log" \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/ci_fixture.lua"
+run_fixture ci_fixture
 
 # The readiness check in the APPROVE confirmation. Runs with the CI mock, so a
 # failure annotation is loaded to count.
@@ -460,9 +477,7 @@ GH_REVIEW_HEAD=abc123 \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 REVIEW_MODE_FIXTURE=ci \
 REVIEW_MODE_REVIEW_CAPTURE="$tmp/check-capture.json" \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/submit_check_fixture.lua"
+run_fixture submit_check_fixture
 
 # GitLab: a fake glab answers for the merge request, and the fixture points the
 # repo's origin at gitlab.com so the provider is auto-detected.
@@ -502,18 +517,14 @@ XDG_CACHE_HOME="$tmp/gitlab-cache" \
 XDG_STATE_HOME="$tmp/gitlab-state" \
 GLAB_LOG="$tmp/glab.log" \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/gitlab_fixture.lua"
+run_fixture gitlab_fixture
 
 # Local reviews: two refs, no PR, no network, comments on disk. Deliberately no
 # gh mock on PATH for this run -- the fixture asserts nothing shells out to gh.
 XDG_CACHE_HOME="$tmp/local-cache" \
 XDG_STATE_HOME="$tmp/local-state" \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/local_review_fixture.lua"
+run_fixture local_review_fixture
 
 # Metadata caching and per-page ETag revalidation of the REST comment fetch.
 PATH="$tmp/bin:$PATH" \
@@ -526,9 +537,7 @@ GH_REVIEW_HEAD=abc123 \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 REVIEW_MODE_FORCE_REST_COMMENTS=1 \
 REVIEW_MODE_GH_LOG="$tmp/api-cache-gh.log" \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/api_cache_fixture.lua"
+run_fixture api_cache_fixture
 
 # Suggestion preview, trial apply and accept-all. Its own mock branch: the
 # default one carries a single suggestion, and accept-all ordering needs
@@ -542,9 +551,7 @@ GH_REVIEW_BASE=main \
 GH_REVIEW_HEAD=abc123 \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 REVIEW_MODE_FIXTURE=suggestions \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/suggestion_fixture.lua"
+run_fixture suggestion_fixture
 
 # Committing trial suggestions with credit, in a copy of the repo: the fixture
 # commits, and later fixtures expect the feature branch as built.
@@ -560,9 +567,7 @@ cp -R "$tmp/repo" "$tmp/commit-repo"
   GH_REVIEW_HEAD=abc123 \
   REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
   REVIEW_MODE_FIXTURE=suggestions \
-  nvim --headless -u NONE -i NONE \
-    -c "set noswapfile" \
-    -l "$repo_root/scripts/suggestion_commit_fixture.lua"
+  run_fixture suggestion_commit_fixture
 )
 
 # :ReviewMode on a branch with no PR reviews it locally; any other failure
@@ -571,9 +576,7 @@ PATH="$tmp/bin:$PATH" \
 XDG_CACHE_HOME="$tmp/fallback-cache" \
 XDG_STATE_HOME="$tmp/fallback-state" \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/local_fallback_fixture.lua"
+run_fixture local_fallback_fixture
 
 # Defaults: no end-of-line text, no <Tab>/<S-Tab> mode keys, comments draft in the panel.
 PATH="$tmp/bin:$PATH" \
@@ -584,9 +587,7 @@ GH_REVIEW_PR=123 \
 GH_REVIEW_BASE=main \
 GH_REVIEW_HEAD=abc123 \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/ux_defaults_fixture.lua"
+run_fixture ux_defaults_fixture
 
 # :ReviewModeInbox with no session running: one gh call, then review_pr.
 PATH="$tmp/bin:$PATH" \
@@ -595,9 +596,7 @@ XDG_STATE_HOME="$tmp/inbox-state" \
 GH_REVIEW_REPO=owner/repo \
 REVIEW_MODE_GH_LOG="$tmp/inbox-gh.log" \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/inbox_fixture.lua"
+run_fixture inbox_fixture
 
 # Your edits, as suggestions: found against HEAD, checked against the PR diff,
 # posted or queued, then undone.
@@ -609,9 +608,7 @@ GH_REVIEW_PR=123 \
 GH_REVIEW_BASE=main \
 GH_REVIEW_HEAD=abc123 \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/edit_suggestion_fixture.lua"
+run_fixture edit_suggestion_fixture
 
 # Time to first comment sign on a warm cache, with every gh call slowed by the
 # delay: the sign must come from the comment cache, not wait on the network. The
@@ -624,9 +621,7 @@ XDG_CACHE_HOME="$tmp/startup-cache" \
 XDG_STATE_HOME="$tmp/startup-state" \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 REVIEW_MODE_STARTUP_GH_DELAY=3 \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/startup_budget_fixture.lua"
+run_fixture startup_budget_fixture
 
 PATH="$tmp/bin:$PATH" \
 XDG_CACHE_HOME="$tmp/startup-env-cache" \
@@ -637,9 +632,7 @@ GH_REVIEW_BASE=main \
 GH_REVIEW_HEAD=abc123 \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 REVIEW_MODE_STARTUP_GH_DELAY=3 \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/startup_budget_fixture.lua"
+run_fixture startup_budget_fixture
 
 # Optimistic posting: comments and replies show at once, marked sending, and
 # settle to GitHub's answer or roll back. The fixture drives the mock's delay
@@ -652,9 +645,7 @@ GH_REVIEW_PR=123 \
 GH_REVIEW_BASE=main \
 GH_REVIEW_HEAD=abc123 \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/optimistic_comments_fixture.lua"
+run_fixture optimistic_comments_fixture
 
 # Hide whitespace: its own repo with a reindent-only file.
 PATH="$tmp/bin:$PATH" \
@@ -665,9 +656,7 @@ GH_REVIEW_PR=123 \
 GH_REVIEW_BASE=main \
 GH_REVIEW_HEAD=abc123 \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/whitespace_fixture.lua"
+run_fixture whitespace_fixture
 
 # Hunk-level viewed, in a copy of the repo: the fixture moves origin/main and
 # commits during the review.
@@ -682,9 +671,7 @@ cp -R "$tmp/repo" "$tmp/hunk-repo"
   GH_REVIEW_BASE=main \
   GH_REVIEW_HEAD=abc123 \
   REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
-  nvim --headless -u NONE -i NONE \
-    -c "set noswapfile" \
-    -l "$repo_root/scripts/hunk_viewed_fixture.lua"
+  run_fixture hunk_viewed_fixture
 )
 
 # Author mode: the unresolved worklist, resolve-on-commit and re-request review.
@@ -701,33 +688,25 @@ cp -R "$tmp/repo" "$tmp/author-repo"
   GH_REVIEW_HEAD=abc123 \
   REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
   REVIEW_MODE_AUTHOR_LOG="$tmp/author-gh.log" \
-  nvim --headless -u NONE -i NONE \
-    -c "set noswapfile" \
-    -l "$repo_root/scripts/author_fixture.lua"
+  run_fixture author_fixture
 )
 
 # Moved code: marked as moved, and passed over by ]c / [c. Builds its own repo.
 XDG_CACHE_HOME="$tmp/moved-cache" \
 XDG_STATE_HOME="$tmp/moved-state" \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/moved_code_fixture.lua"
+run_fixture moved_code_fixture
 
 # Blast radius: callers of changed functions the PR missed, from a stubbed LSP.
 # The fixture builds its own repo of Lua files, so it needs no gh or env.
 XDG_CACHE_HOME="$tmp/blast-cache" \
 XDG_STATE_HOME="$tmp/blast-state" \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/blast_radius_fixture.lua"
+run_fixture blast_radius_fixture
 
 # Reading order: definitions before uses, tests last, "diff" for git's order.
 # The fixture builds its own repo of Lua files, so it needs no gh or env.
 XDG_CACHE_HOME="$tmp/order-cache" \
 XDG_STATE_HOME="$tmp/order-state" \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
-nvim --headless -u NONE -i NONE \
-  -c "set noswapfile" \
-  -l "$repo_root/scripts/review_order_fixture.lua"
+run_fixture review_order_fixture

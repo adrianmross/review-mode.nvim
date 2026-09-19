@@ -7,14 +7,11 @@
 --
 -- The point to prove: the commit holds the trial lines and nothing else. The
 -- user's own edits, saved and unsaved, stay out of it and stay unstaged.
-local repo_root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required")
+local harness = dofile(
+  assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
+)
 
-vim.opt.runtimepath:prepend(repo_root)
-package.path = repo_root .. "/lua/?.lua;" .. repo_root .. "/lua/?/init.lua;" .. package.path
-
-local function wait_for(predicate, message)
-  assert(vim.wait(5000, predicate, 20), message)
-end
+local wait_for = harness.wait_for
 
 local function git(args)
   return vim.trim(vim.fn.system(vim.list_extend({ "git" }, args)))
@@ -336,3 +333,4 @@ assert(api.commit_suggestions(plan), "the local commit failed")
 assert(git({ "show", "HEAD:new.txt" }):find("new three, local", 1, true), "the local suggestion should be committed")
 
 pr.stop()
+harness.done()
