@@ -134,6 +134,20 @@ assert(vim.uv.fs_stat(tree), "CheckoutClean removed a tree holding a local commi
 assert(notified("my trial commit", vim.log.levels.WARN), "CheckoutClean did not say which commit it kept")
 git({ "checkout", "-q", "--detach", feature_sha }, tree)
 
+-- 2c. a review tree renamed by hand (no pr-<n> in its name) with a commit of
+-- its own is still refused: without a PR ref to exclude, its commit counts
+local odd = vim.fs.joinpath(vim.fs.dirname(tree), "renamed-by-hand")
+git({ "worktree", "add", "-q", "--detach", odd, feature_sha })
+git({ "commit", "-q", "--allow-empty", "-m", "my odd commit" }, odd)
+vim.fn.confirm = function()
+  return 2
+end
+notifications = {}
+pr.checkout_clean()
+assert(vim.uv.fs_stat(odd), "CheckoutClean removed a renamed tree holding a local commit")
+assert(notified("my odd commit", vim.log.levels.WARN), "CheckoutClean did not keep the renamed tree's commit")
+git({ "worktree", "remove", "--force", odd })
+
 -- 3. a dirty tree is neither updated nor removed
 vim.fn.writefile({ "my local edit" }, vim.fs.joinpath(tree, "file.txt"))
 git({ "update-ref", "refs/pull/123/head", "main" })

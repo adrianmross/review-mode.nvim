@@ -198,7 +198,10 @@ function M.clean(pr)
     local name = vim.fs.basename(real)
     if vim.startswith(real, base) and (not pr or name == "pr-" .. pr) then
       local number = name:match("^pr%-(%d+)$")
-      local status = dirty_status(real, { number and M.ref(number) or "HEAD" })
+      -- a tree whose name does not say which PR it holds excludes no PR ref, so
+      -- any commit on nothing but its HEAD still counts (excluding "HEAD" here
+      -- would exclude the very commits at risk)
+      local status = dirty_status(real, number and { M.ref(number) } or {})
       if real == session_root then
         refused[#refused + 1] = real .. ": the current review is using it (:ReviewModeStop first)"
       elseif status ~= "" then
