@@ -79,9 +79,17 @@ case "$1 $2" in
   "api repos/owner/repo/pulls/123/comments?per_page=100"|"api repos/owner/repo/pulls/123/comments?per_page=100&page=1")
     printf '%s\n' '[{"id":1,"path":"file.txt","line":2,"body":"Needs review","user":{"login":"reviewer"},"created_at":"2024-01-02T03:04:05Z","html_url":"https://github.com/owner/repo/pull/123#discussion_r1","author_association":"OWNER","reactions":{"+1":2,"laugh":0,"hooray":1,"heart":0,"rocket":0,"eyes":0,"total_count":3}},{"id":2,"path":"file.txt","line":4,"body":"Check final line","user":{"login":"reviewer"},"created_at":"2024-01-02T03:04:05Z","author_association":"NONE","reactions":{"+1":0,"total_count":0}}]'
     ;;
-  "api repos/owner/repo/pulls/123/comments/1/replies")
+  "api repos/owner/repo/pulls/123/comments/1/replies"|"api repos/owner/repo/pulls/123/comments/2/replies")
     args="$*"
     if [[ "$args" == *"--method POST"* ]]; then
+      # optimistic posting: slow the answer down, or fail it
+      if [[ -n "${REVIEW_MODE_POST_DELAY:-}" ]]; then
+        sleep "$REVIEW_MODE_POST_DELAY"
+      fi
+      if [[ "${REVIEW_MODE_FAIL_POST:-}" == "1" ]]; then
+        echo "forced post failure" >&2
+        exit 1
+      fi
       printf '{"id":100,"path":"file.txt","line":2,"body":"replied"}\n'
     else
       echo "unexpected gh replies args: $*" >&2
@@ -104,6 +112,14 @@ case "$1 $2" in
   "api repos/owner/repo/pulls/123/comments")
     args="$*"
     if [[ "$args" == *"--method POST"* ]]; then
+      # optimistic posting: slow the answer down, or fail it
+      if [[ -n "${REVIEW_MODE_POST_DELAY:-}" ]]; then
+        sleep "$REVIEW_MODE_POST_DELAY"
+      fi
+      if [[ "${REVIEW_MODE_FAIL_POST:-}" == "1" ]]; then
+        echo "forced post failure" >&2
+        exit 1
+      fi
       printf '{"id":99,"path":"file.txt","line":2,"body":"created"}\n'
     else
       echo "unexpected gh comments args: $*" >&2
@@ -507,3 +523,18 @@ REVIEW_MODE_STARTUP_GH_DELAY=3 \
 nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/startup_budget_fixture.lua"
+
+# Optimistic posting: comments and replies show at once, marked sending, and
+# settle to GitHub's answer or roll back. The fixture drives the mock's delay
+# and failure through its own env.
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/optimistic-cache" \
+XDG_STATE_HOME="$tmp/optimistic-state" \
+GH_REVIEW_REPO=owner/repo \
+GH_REVIEW_PR=123 \
+GH_REVIEW_BASE=main \
+GH_REVIEW_HEAD=abc123 \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+nvim --headless -u NONE -i NONE \
+  -c "set noswapfile" \
+  -l "$repo_root/scripts/optimistic_comments_fixture.lua"

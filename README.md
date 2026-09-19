@@ -223,6 +223,12 @@ be edited before it goes out. Nothing is sent until you confirm:
 anchored to: select the lines in the code window, come back to the draft, and
 press it.
 
+A posted comment or reply shows in the panel and as a sign right away, marked
+`sending…`, and becomes the real comment when GitHub answers. If the post fails
+it disappears again and its text is left in the unnamed register, so `p` puts
+it back into a new draft (GitHub only; GitLab and local reviews show the comment
+once it is saved).
+
 `e`, `dd`, `:ReviewModeEditComment` and `:ReviewModeDeleteComment` only act on
 comments you wrote. GitHub says who that is only through the GraphQL query, so
 comments loaded through the REST fallback are refused rather than guessed at.

@@ -520,6 +520,10 @@ vim.fn.confirm = original_confirm
 wait_for(function()
   return last_notification():find("Submitted PR comment on file.txt:2", 1, true) ~= nil
 end, "suggest command did not create a PR comment")
+-- the posted comment is shown until the reload replaces the list; count after it
+wait_for(function()
+  return not api.unstable_state().comments_loading
+end, "reload after the suggest comment did not finish")
 
 pr.summary()
 assert(last_notification():find("Files: 1 viewed, 3 unviewed, 4 total", 1, true), "summary file counts were wrong")

@@ -99,10 +99,38 @@ function M.discard()
   return save({})
 end
 
+-- Comments posted but not yet answered by GitHub. Session-only: each one is
+-- removed again when its request settles, success or failure.
+local sending = {}
+
+--- Show `comment` (the flat stored shape, with path) at once, marked sending,
+--- until M.settle_sending(comment) removes it.
+function M.add_sending(comment)
+  comment.is_sending = true
+  sending[#sending + 1] = comment
+  return comment
+end
+
+function M.settle_sending(comment)
+  for index, entry in ipairs(sending) do
+    if entry == comment then
+      table.remove(sending, index)
+      return
+    end
+  end
+end
+
 --- `comments` (a path's loaded comments) with that path's drafts appended in
---- the same flat shape, so the thread renderer and signs show them as pending.
+--- the same flat shape, so the thread renderer and signs show them as pending,
+--- along with any comments still on their way to GitHub.
 function M.with_pending(comments, path)
   local out = comments
+  for _, comment in ipairs(sending) do
+    if comment.path == path then
+      out = out == comments and vim.list_extend({}, comments or {}) or out
+      out[#out + 1] = comment
+    end
+  end
   for _, draft in ipairs(M.list()) do
     if draft.path == path then
       out = out == comments and vim.list_extend({}, comments or {}) or out
