@@ -302,7 +302,7 @@ api.start() / api.stop() / api.enter() / api.leave() / api.toggle() / api.refres
 api.review_pr({ pr = 123 }, function(ok, result) ... end)   -- review without checking out
 
 -- files
-api.files()          --> { { path, status, added, removed, viewed, comments, unresolved }, ... }
+api.files()          --> { { path, status, added, removed, viewed, comments, unresolved, whitespace_only }, ... }
 api.file(path)       --> one entry, or nil when the path is not in the PR
 api.is_changed_file(path) / api.is_changed_dir(path)
 api.is_viewed_file(path) / api.is_viewed_dir(path)
@@ -580,6 +580,7 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeOldToggle` toggles the base version or unified diff for the current file
 - `:ReviewModeDiffLayoutToggle` switches between side-by-side and unified layout, opening the diff if none is open
 - `:ReviewModeDiffFullToggle` opens or closes every unchanged fold in the diff (as `zR` / `zM`) and sets how the next one opens, opening the diff if none is open
+- `:ReviewModeDiffWhitespaceToggle` hides or shows whitespace-only changes (`diff.ignore_whitespace`) in the diff and in hunk navigation, re-rendering the open diff
 - `:ReviewModeThread` shows comments on the current line
 - `:ReviewModePanel` toggles the thread panel beside the current file
 - `:ReviewModeCompose` drafts a PR comment for the current line or visual range
@@ -967,6 +968,7 @@ require("review_mode").setup({
   diff = {
     fast_diffopt = "internal,filler,closeoff,indent-heuristic,linematch:0",
     full_file = false,
+    ignore_whitespace = false,
     layout = "side_by_side",
     partial_line_highlights = true,
     unified_context = 3,
@@ -1085,6 +1087,14 @@ is enabled, side-by-side diffs temporarily apply `diff.fast_diffopt`, then
 restore the previous `diffopt` when the split closes. Unified diffs highlight
 changed spans inside modified lines with `DiffText`; set
 `diff.partial_line_highlights = false` to disable those inline spans.
+
+Set `diff.ignore_whitespace = true` or run `:ReviewModeDiffWhitespaceToggle` to
+hide whitespace-only changes, like GitHub's "Hide whitespace": side-by-side
+diffs add `iwhiteall` to the applied `diffopt`, unified diffs and the hunks
+behind `]c` / `[c` use `git diff -w`. A file whose only changes are whitespace
+stays in the changed files; the changed-files picker marks it
+`(whitespace only)` and `api.file(path).whitespace_only` is true once its hunks
+have loaded.
 
 ## Notes
 

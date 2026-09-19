@@ -581,3 +581,16 @@ REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/optimistic_comments_fixture.lua"
+
+# Hide whitespace: its own repo with a reindent-only file.
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/whitespace-cache" \
+XDG_STATE_HOME="$tmp/whitespace-state" \
+GH_REVIEW_REPO=owner/repo \
+GH_REVIEW_PR=123 \
+GH_REVIEW_BASE=main \
+GH_REVIEW_HEAD=abc123 \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+nvim --headless -u NONE -i NONE \
+  -c "set noswapfile" \
+  -l "$repo_root/scripts/whitespace_fixture.lua"
