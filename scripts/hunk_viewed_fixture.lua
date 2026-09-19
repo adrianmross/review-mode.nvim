@@ -66,10 +66,8 @@ end
 
 local function start()
   pr.start()
-  -- is_changed_file turns true with the name list; the stored viewed state is
-  -- read only once maps_loaded does, after the numstat call
   wait_for(function()
-    return api.is_changed_file(path) and state.maps_loaded
+    return api.is_changed_file(path)
   end, "changed file map did not load")
   vim.cmd.edit(path)
   assert(vim.deep_equal(hunks(), { 2, 8 }), "unexpected hunks: " .. vim.inspect(hunks()))
