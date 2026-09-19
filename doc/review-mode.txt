@@ -426,6 +426,17 @@ COMMANDS                                                  *review-mode-commands*
         hooks.prepare_checkout override to create the worktree with your own
         tool and return its path instead.
 
+                                                        *:ReviewModeInbox*
+:ReviewModeInbox [requested|mine|all]
+        Pick an open PR in this repo and review it with |:ReviewModeCheckout|.
+        No review needs to be running. "requested" (the default) lists PRs
+        waiting on your review, "mine" the PRs you opened, "all" every open
+        PR. Each row shows the size (+adds −dels), CI state (✓ passed,
+        ✗ failed, … running), time since the last update and a [draft]
+        marker. One `gh pr list` call; the repo is GH_REVIEW_REPO or the
+        running review's, else the one gh sees from the cwd. GitHub only:
+        during a GitLab review it says so instead of calling gh.
+
                                                         *:ReviewModeCheckoutClean*
 :ReviewModeCheckoutClean [pr]
         Remove review worktrees created by |:ReviewModeCheckout|, after a
