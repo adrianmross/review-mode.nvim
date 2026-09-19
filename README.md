@@ -670,7 +670,7 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeDeleteComment` deletes your most recent comment on the current line, after a confirmation
 - `:ReviewModeComment` creates a PR comment on the current line or visual range
 - `:ReviewModeSuggest` suggests your edit on the current line, or drafts a suggestion over the line or visual range starting from the lines as they are
-- `:ReviewModeSuggestEdits` queues every edit in the current file as a pending suggestion, and undoes the edits
+- `:ReviewModeSuggestEdits` queues every edit in the current file as a pending suggestion, and undoes the edits; `:ReviewModeSuggestEdits!` does every PR file you edited
 - `:ReviewModeViewedToggle` toggles viewed state for the current PR file
 - `:ReviewModeHunkViewedToggle` toggles viewed state for the hunk under the cursor
 - `:ReviewModeViewedNext` marks the current PR file viewed and jumps to the next unviewed file
@@ -712,6 +712,13 @@ lives on as the suggestion, and the file matches the PR again.
 `:ReviewModeSuggestEdits` (also in the actions picker) does every edit in the
 file at once, queueing each into the pending review, where
 `:ReviewModePending` lets you add messages before submitting.
+`:ReviewModeSuggestEdits!` ("Turn all my edits into suggestions") does the same
+for every PR file you edited: files with unsaved edits in a buffer, and files
+whose saved content differs from HEAD, opened if they are not. One confirmation
+lists the count per file. A file whose edits you saved is written back once
+they are undone, so it matches the PR again on disk, but only if its buffer
+held nothing unsaved beyond what was on disk; otherwise it is left modified
+and named. Edited files the PR does not change are named and left alone.
 
 Edits are what the buffer says that HEAD, the PR head, does not. A pure
 insertion takes the line above into the suggestion, since it has no line of its

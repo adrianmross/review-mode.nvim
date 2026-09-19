@@ -391,9 +391,13 @@ COMMANDS                                                  *review-mode-commands*
         they are. See |review-mode-edit-suggestions|.
 
                                                     *:ReviewModeSuggestEdits*
-:ReviewModeSuggestEdits
+:ReviewModeSuggestEdits[!]
         Queue every edit in the current file as a pending suggestion, and undo
-        the edits. Edits outside the PR diff are left alone.
+        the edits. Edits outside the PR diff are left alone. With [!], every
+        file the PR changes that you edited, in a buffer or saved to disk; a
+        saved file is written back after its edits are undone unless its
+        buffer held other unsaved changes. Edited files outside the PR are
+        named and left alone.
 
                                                         *:ReviewModeViewedToggle*
 :ReviewModeViewedToggle
@@ -869,7 +873,8 @@ To write a suggestion, make the change in the file, with your LSP and
 formatter, then press <leader>rr on an edited line. The draft opens with the
 suggestion block filled in from your edit; write a message above it. Posting
 it, or queueing it with <C-p>, undoes your edit: the change lives on as the
-suggestion. |:ReviewModeSuggestEdits| queues every edit in the file at once.
+suggestion. |:ReviewModeSuggestEdits| queues every edit in the file at once,
+and with ! every edit across the PR's files.
 
 An edit is what the buffer says that HEAD does not. A pure insertion takes the
 line above into the suggestion; a deletion suggests no lines. GitHub only takes

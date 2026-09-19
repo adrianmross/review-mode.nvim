@@ -2559,24 +2559,45 @@ function M.suggest(command)
   panel.composer_suggest()
 end
 
---- Queue every edit in the current file as a pending suggestion, and undo the
---- edits. Messages can be added in the pending review before it is submitted.
-function M.suggest_edits()
+--- Queue your edits as pending suggestions, and undo the edits. Messages can be
+--- added in the pending review before it is submitted. opts.all takes every
+--- file the PR changes that you edited, not just the current one.
+function M.suggest_edits(opts)
+  local all = opts and opts.all
   local path = current_relpath()
-  if not path then
+  if not all and not path then
     vim.notify("Review Mode suggestion: current buffer is not under repo root", vim.log.levels.WARN)
     return
   end
 
-  local all = api.edits()
-  local ready = vim.tbl_filter(function(edit)
-    return edit.in_diff
-  end, all)
-  local outside = #all - #ready
-  if #ready == 0 then
+  local edits = require("review_mode.edits")
+  local files, outside_pr = edits.edited_files(not all and { buf = vim.api.nvim_get_current_buf() } or nil)
+  local total, ready, counts = 0, 0, {}
+  for _, file in ipairs(files) do
+    local found = api.edits({ buf = file.buf })
+    file.ready = vim.tbl_filter(function(edit)
+      return edit.in_diff
+    end, found)
+    total, ready = total + #found, ready + #file.ready
+    if #found > 0 then
+      local outside = #found - #file.ready
+      counts[#counts + 1] = string.format(
+        "  %s: %d%s",
+        file.path,
+        #file.ready,
+        outside > 0 and string.format(" (%d outside the PR diff)", outside) or ""
+      )
+    end
+  end
+  -- another file's edits cannot be suggested: say so, and leave them be
+  local not_in_pr = #outside_pr > 0 and ("\nNot in the PR, left alone: " .. table.concat(outside_pr, ", ")) or ""
+  local where = all and "the PR's files" or path
+  if ready == 0 then
     vim.notify(
-      #all == 0 and ("No edits in " .. path .. " to suggest")
-        or string.format("Your %d edit(s) in %s are all outside the PR diff", #all, path),
+      (
+        total == 0 and ("No edits in " .. where .. " to suggest")
+        or string.format("Your %d edit(s) in %s are all outside the PR diff", total, where)
+      ) .. not_in_pr,
       vim.log.levels.WARN
     )
     return
@@ -2584,33 +2605,55 @@ function M.suggest_edits()
 
   local prompt = string.format(
     "Queue %d suggestion%s from your edits in %s into the pending review, and undo those edits?%s",
-    #ready,
-    #ready == 1 and "" or "s",
-    path,
-    outside > 0 and string.format("\n(%d outside the PR diff stay as edits.)", outside) or ""
+    ready,
+    ready == 1 and "" or "s",
+    all and string.format("%d file(s)", #counts) or path,
+    total > ready and string.format("\n(%d outside the PR diff stay as edits.)", total - ready) or ""
   )
+  if all then
+    prompt = prompt .. "\n" .. table.concat(counts, "\n") .. not_in_pr
+  end
   if vim.fn.confirm(prompt, "&Queue\n&Cancel", 2) ~= 1 then
     return
   end
 
-  -- bottom-up, so undoing one edit never moves the rows of those above it
-  local queued = 0
-  for index = #ready, 1, -1 do
-    local edit = ready[index]
-    local draft, err = api.add_pending({
-      path = path,
-      start_line = edit.start_line,
-      end_line = edit.end_line,
-      body = api.edit_suggestion_body(edit),
-    })
-    if draft then
-      api.undo_edit(edit)
-      queued = queued + 1
-    else
-      vim.notify("Review Mode pending: " .. tostring(err), vim.log.levels.ERROR)
+  local queued, written, unsaved = 0, {}, {}
+  for _, file in ipairs(files) do
+    -- bottom-up, so undoing one edit never moves the rows of those above it
+    local undone = 0
+    for index = #file.ready, 1, -1 do
+      local edit = file.ready[index]
+      local draft, err = api.add_pending({
+        path = file.path,
+        start_line = edit.start_line,
+        end_line = edit.end_line,
+        body = api.edit_suggestion_body(edit),
+      })
+      if draft then
+        undone = undone + (api.undo_edit(edit) and 1 or 0)
+        queued = queued + 1
+      else
+        vim.notify("Review Mode pending: " .. tostring(err), vim.log.levels.ERROR)
+      end
+    end
+    -- a saved edit is on disk too: now that it is a suggestion, the file goes
+    -- back to HEAD there as well, unless the buffer holds other unsaved work
+    -- that a write would take with it
+    if undone > 0 and file.saved then
+      local ok = file.clean
+        and pcall(vim.api.nvim_buf_call, file.buf, function()
+          -- write!: clean already checked the disk holds what the buffer held
+          vim.cmd("silent write!")
+        end)
+      table.insert(ok and written or unsaved, file.path)
     end
   end
-  vim.notify(string.format("Queued %d suggestion(s) from your edits; :ReviewModePending to add messages", queued))
+  vim.notify(
+    string.format("Queued %d suggestion(s) from your edits; :ReviewModePending to add messages", queued)
+      .. (#written > 0 and ("\nWrote back: " .. table.concat(written, ", ")) or "")
+      .. (#unsaved > 0 and ("\nLeft unsaved, the buffer has other unsaved changes: " .. table.concat(unsaved, ", ")) or "")
+      .. not_in_pr
+  )
 end
 
 -- The panel and its draft buffer own a lot of small helpers, and this file is
@@ -2709,6 +2752,13 @@ function M.action_items()
     { category = "Comment", label = "New thread on line/range", run = M.comment },
     { category = "Comment", label = "Suggest change for line/range", run = M.suggest },
     { category = "Comment", label = "Turn my edits in this file into suggestions", run = M.suggest_edits },
+    {
+      category = "Comment",
+      label = "Turn all my edits into suggestions",
+      run = function()
+        M.suggest_edits({ all = true })
+      end,
+    },
     { category = "Comment", label = "Edit my comment on line", run = panel.edit_comment },
     { category = "Comment", label = "Delete my comment on line", run = panel.delete_comment },
     {
@@ -3056,9 +3106,12 @@ function M.setup(opts)
       M.comment,
       { range = true, desc = "Create PR comment for current line or visual range" }
     )
-    vim.api.nvim_create_user_command("ReviewModeSuggestEdits", function()
-      M.suggest_edits()
-    end, { desc = "Queue your edits in this file as pending suggestions, and undo them" })
+    vim.api.nvim_create_user_command("ReviewModeSuggestEdits", function(command)
+      M.suggest_edits({ all = command.bang })
+    end, {
+      bang = true,
+      desc = "Queue your edits in this file (! for every PR file) as pending suggestions, and undo them",
+    })
     vim.api.nvim_create_user_command(
       "ReviewModeSuggest",
       M.suggest,
