@@ -170,7 +170,9 @@ function M.prepare(opts, callback)
     local view = { "gh", "pr", "view", pr, "--json", "number,headRefOid,baseRefName,url" }
     if repo then
       -- gh reads HOST/OWNER/REPO, so an Enterprise URL asks its own host
-      vim.list_extend(view, { "--repo", host and (host .. "/" .. repo) or repo })
+      -- (a repo given as host/owner/repo already names its host)
+      local qualified = repo:match("^[^/]+/[^/]+/[^/]+$") and repo or (host and (host .. "/" .. repo) or repo)
+      vim.list_extend(view, { "--repo", qualified })
     end
     local out, err = await(view, root)
     local ok, meta = pcall(vim.json.decode, out or "")

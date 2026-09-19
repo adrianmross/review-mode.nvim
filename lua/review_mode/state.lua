@@ -431,9 +431,13 @@ local origin = {}
 local function origin_host()
   if origin.root ~= state.root or origin.generation ~= state.generation then
     local out = vim.system({ "git", "remote", "get-url", "origin" }, { cwd = state.root, text = true }):wait()
-    local host = out.code == 0 and require("review_mode.providers").remote_host(vim.trim(out.stdout))
-    -- a path remote ("." or /srv/repo.git) names no host
-    origin = { root = state.root, generation = state.generation, host = host and host:match("%w%.%w") and host or "" }
+    local url = out.code == 0 and vim.trim(out.stdout) or ""
+    -- only a URL (scheme://host/...) or scp form (host:path) names a host; a
+    -- path remote (".", ../repo, /srv/repo.git, other-clone) does not. A host
+    -- needs no dot: "localhost" or an intranet name is a host all the same.
+    local is_url = url:find("://", 1, true) or url:match("^[^/]+:[^/]")
+    local host = is_url and require("review_mode.providers").remote_host(url) or nil
+    origin = { root = state.root, generation = state.generation, host = host or "" }
   end
   return origin.host
 end

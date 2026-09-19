@@ -137,6 +137,40 @@ pr.stop()
 ok, result = review("123", clone_b)
 assert(ok and result.repo == "owner/repo", "a bare number did not take gh's repo: " .. vim.inspect(result))
 pr.stop()
+-- a repo already given as host/owner/repo is not qualified twice
+vim.fn.writefile({}, pr_view_log)
+local qualified_done
+api.review_pr(
+  { pr = "https://ghe.example.com/owner/repo/pull/123", repo = "ghe.example.com/owner/repo", root = clone_b },
+  function()
+    qualified_done = true
+  end
+)
+wait_for(function()
+  return qualified_done
+end, "review_pr with a qualified repo did not finish")
+view_args = table.concat(vim.fn.readfile(pr_view_log), "\n")
+assert(not view_args:find("ghe.example.com/ghe.example.com", 1, true), "gh --repo named the host twice: " .. view_args)
+pr.stop()
+
+-- cache keys: a host without a dot still scopes the key; a path remote names none
+local function key_for(remote)
+  local dir = vim.fn.tempname()
+  vim.fn.mkdir(dir, "p")
+  vim.fn.system({ "git", "-C", dir, "init", "-q" })
+  vim.fn.system({ "git", "-C", dir, "remote", "add", "origin", remote })
+  local s = core.state
+  local saved = { s.root, s.provider, s.repo, s.pr }
+  s.root, s.provider, s.repo, s.pr = dir, "github", "owner/repo", "7"
+  local key = core.cache_key()
+  s.root, s.provider, s.repo, s.pr = saved[1], saved[2], saved[3], saved[4]
+  return key
+end
+local localhost_key, intranet_key = key_for("http://localhost/owner/repo"), key_for("git@intranet:owner/repo")
+assert(localhost_key ~= intranet_key, "dotless hosts share a cache key: " .. localhost_key .. " / " .. intranet_key)
+assert(localhost_key:find("localhost", 1, true), "a dotless host was dropped from the key: " .. localhost_key)
+assert(key_for("../other-clone") == "owner/repo#7", "a path remote was read as a host: " .. key_for("../other-clone"))
+assert(key_for("https://github.com/owner/repo") == "owner/repo#7", "github.com keys changed")
 
 -- 4. two clones of one repo get their own trees, and never reuse another's
 local path_a, path_b = checkout.default_path(clone_a, "owner/repo", "123"), result.path
