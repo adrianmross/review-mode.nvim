@@ -109,8 +109,10 @@ head_moved event ({ from, to }) fires whenever follow-HEAD sees HEAD move.
 
 On a branch with no PR, :ReviewMode reviews it locally instead (see
 |:ReviewModeLocal|) and says so; the statusline shows "local repo@ref". It falls
-back only when gh answers that there is no PR, never on an auth, network or
-rate-limit failure, and never for a PR named with GH_REVIEW_PR. Set
+back only when gh (or glab) answers that there is no PR, or gh finds no GitHub
+host among the remotes (Codeberg, Gitea: no forge to ask), never on an auth,
+network or rate-limit failure, and never for a PR named with GH_REVIEW_PR or
+an MR named with GL_REVIEW_MR. Set
 no_pr = "error" to report the missing PR instead.
 
 With mode.workspace = "tab" the review keeps its own tabpage: entering focuses
@@ -509,11 +511,16 @@ COMMANDS                                                  *review-mode-commands*
                                                         *:ReviewModeCheckout*
 :ReviewModeCheckout {number|url}
         Review a PR without checking it out. Fetches the PR head into
-        refs/review-mode/pr/{number} (pull/{number}/head, so fork PRs work),
-        puts a detached worktree for it under
-        stdpath("cache")/review-mode/worktrees/{owner}_{repo}/pr-{number}, and
-        opens the review in its own tabpage with a tab-local cwd. The current
-        checkout, branch and working tree are untouched. Set the
+        refs/review-mode/pr/{number} (pull/{number}/head, so fork PRs work)
+        and its base into refs/review-mode/base/{number}, both from the repo
+        the PR lives in (a remote pointing at it, else its https URL), and
+        refuses a head other than the one GitHub reports. A URL may be on
+        any host (GitHub Enterprise); a bare number takes its repo from gh.
+        Puts a detached worktree for it under
+        stdpath("cache")/review-mode/worktrees/{owner}_{repo}-{clone}/pr-{number}
+        ({clone} is a short hash of the local clone, so clones never share a
+        tree), and opens the review in its own tabpage with a tab-local cwd.
+        The current checkout, branch and working tree are untouched. Set the
         hooks.prepare_checkout override to create the worktree with your own
         tool and return its path instead.
 
@@ -524,14 +531,16 @@ COMMANDS                                                  *review-mode-commands*
         waiting on your review, "mine" the PRs you opened, "all" every open
         PR. Each row shows the size (+adds −dels), CI state (✓ passed,
         ✗ failed, … running), time since the last update and a [draft]
-        marker. One `gh pr list` call; the repo is GH_REVIEW_REPO or the
-        running review's, else the one gh sees from the cwd. GitHub only:
-        during a GitLab review it says so instead of calling gh.
+        marker. One `gh pr list` call (up to 100 PRs); the repo is
+        GH_REVIEW_REPO or the running review's, else the one gh sees from the
+        cwd. GitHub only: in a repo whose origin is GitLab it says so instead
+        of calling gh.
 
                                                         *:ReviewModeCheckoutClean*
 :ReviewModeCheckoutClean [pr]
         Remove review worktrees created by |:ReviewModeCheckout|, after a
-        confirmation. Worktrees with uncommitted changes or with commits on
+        confirmation. [pr] is a number, #number or PR URL. A worktree whose
+        directory was deleted by hand is reported as prunable. Worktrees with uncommitted changes or with commits on
         no branch, tag or remote and not in the PR (a committed trial
         suggestion, say), and the one the current session is using, are
         refused and listed. A dirty worktree is
@@ -864,7 +873,9 @@ GITLAB                                                      *review-mode-gitlab*
 GitLab merge requests are reviewed the same way pull requests are. The provider
 comes from the origin remote: any host containing "gitlab", or listed in
 gitlab_hosts, uses `glab` instead of `gh`. Set provider = "github" or "gitlab"
-to decide it yourself, and authenticate glab for the project.
+to decide it yourself, and authenticate glab for the project. glab is
+pointed at the remote's host (--repo https://{host}/{project}, glab api
+--hostname {host}), so self-hosted instances work.
 
 A launcher can hand the session over with GL_REVIEW_MR, optionally with
 GL_REVIEW_REPO, GL_REVIEW_BASE and GL_REVIEW_HEAD, mirroring GH_REVIEW_*.
@@ -873,7 +884,10 @@ Setting GL_REVIEW_MR also selects the GitLab provider.
 Supported: MR metadata, diff discussions loaded as threads, starting a thread on
 a line or range, replying, and resolving. A thread id is a GitLab discussion id,
 so |review_mode.api| reply and resolve take that instead of a review thread id.
-A range comment anchors to its last line.
+A range comment anchors to its last line. A note on a removed line sits on the
+base side, like a GitHub LEFT thread. New positions are placed on the MR's own
+diff (start_sha...head_sha) when those commits are local. Tested against glab
+mocks built from GitLab's REST documentation, not a live server.
 
 GitHub-only for now, and reported as "not supported on GitLab yet" instead of
 calling gh: viewed-state sync (local viewed state still works), reactions,
