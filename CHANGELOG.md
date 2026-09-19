@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.10](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.9...v0.13.10) (2026-09-19)
+
+
+### Features
+
+* **picker:** compact file rows, a colored preview, qualifiers and sort ([#118](https://github.com/adrianmross/review-mode.nvim/issues/118)) ([240f709](https://github.com/adrianmross/review-mode.nvim/commit/240f70976c403ca200030b4639c9277437bf7128))
+
 ## [0.13.9](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.8...v0.13.9) (2026-09-19)
 
 
