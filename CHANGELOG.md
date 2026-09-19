@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.8](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.7...v0.13.8) (2026-09-19)
+
+
+### Features
+
+* **picker:** color the changed-files rows and shorten the title ([#112](https://github.com/adrianmross/review-mode.nvim/issues/112)) ([e7b16aa](https://github.com/adrianmross/review-mode.nvim/commit/e7b16aa230751f67283d7ec575b2aff364ce8fb1))
+
 ## [0.13.7](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.6...v0.13.7) (2026-09-19)
 
 
