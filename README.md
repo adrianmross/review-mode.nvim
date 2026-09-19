@@ -344,6 +344,10 @@ local unsubscribe = api.on("comments_loaded", function(ctx) ... end)
 api.quickfix_items({ filter = "all" })   --> the items, without setting the list
 api.set_quickfix({ filter = "unresolved", open = false })
 
+-- CI annotations on the PR head (see Diagnostics and Quickfix)
+api.ci_annotations("init.lua")   --> { { check, start_line, end_line, severity, message }, ... }
+api.reload_ci()                  -- refetch; fires ci_loaded
+
 -- API call accounting (see Fewer GitHub API calls)
 api.request_stats()   --> { calls = <gh processes spawned>, not_modified = <304 answers> }
 
@@ -410,6 +414,7 @@ prefer.
 | `on_review_submitted` | `ReviewModeReviewSubmitted` | a review is submitted (`{ event, count }`) |
 | `on_suggestion_accepted` | `ReviewModeSuggestionAccepted` | a suggestion is applied as a trial (`{ id, path, line, thread_id, added, removed }`) |
 | `on_suggestion_reverted` | `ReviewModeSuggestionReverted` | a trial suggestion is reverted |
+| `on_ci_loaded` | `ReviewModeCiLoaded` | CI annotations for the PR head are fetched (or cleared) |
 
 **Overrides** are asked *how* something should be done, and what they return
 replaces the built-in behavior. Return `nil` to fall back to the default, so an
@@ -603,6 +608,7 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeCheckoutClean [pr]` removes clean review worktrees, after a confirmation.
 - `:ReviewModeQuickfix [unresolved|all]` fills the quickfix list with review threads and opens it
 - `:ReviewModeDiagnosticsToggle` toggles review threads as diagnostics
+- `:ReviewModeCIToggle` toggles CI check-run annotations as diagnostics
 - `:ReviewModeLocal [<base>] [<head>]` reviews two local refs, with no PR and no network
 - `:ReviewModeLocalComments` opens the local comments buffer
 - `:ReviewModeSuggestionPreview [inline|split]` toggles a preview of the suggestion on the current line, in the code or side by side
@@ -717,6 +723,24 @@ entries in `display` on and leave `comments.virtual_text` off.
 `unresolved` (the default, unless `comments.show_resolved` is set) or `all`,
 which appends `[resolved]` to resolved threads. `api.quickfix_items()` returns
 the same items without touching the list.
+
+### CI failures
+
+GitHub check runs carry annotations with a file and line — lint errors, failing
+assertions, type errors. On a GitHub review they land as diagnostics too, in a
+namespace of their own (`review_mode_ci`, source `review-mode CI`), so `]d`
+walks CI failures inside the diff and they toggle apart from the threads.
+`failure` is an ERROR, `warning` a WARN, `notice` an INFO, and the message reads
+`[check name] title: message`. Unlike the thread namespace this one keeps
+`vim.diagnostic`'s own display: nothing else draws CI failures.
+
+They are fetched in the background when the review starts, on
+`:ReviewModeRefresh`: one request for the head's
+check runs, then one per run that reports annotations, so a green PR costs a
+single call. They are not refetched when HEAD moves mid-review; refresh for
+that. `:ReviewModeCIToggle` (or "Toggle CI diagnostics" in the actions
+picker) turns them off and on; `ci = { diagnostics = false }` stops the fetch
+altogether. Local and GitLab reviews skip it.
 
 ## gh-dash / Worktree Handoff
 
@@ -947,6 +971,9 @@ require("review_mode").setup({
     partial_line_highlights = true,
     unified_context = 3,
     use_fast_diffopt = true,
+  },
+  ci = {
+    diagnostics = true, -- CI check-run annotations as diagnostics (GitHub)
   },
   gitsigns = {
     enabled = true,

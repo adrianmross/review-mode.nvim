@@ -53,6 +53,8 @@ M.events = {
   -- suggestions
   "suggestion_accepted",
   "suggestion_reverted",
+  -- CI annotations
+  "ci_loaded",
 }
 
 -- Session ---------------------------------------------------------------------
@@ -545,6 +547,19 @@ end
 --- to only set it).
 function M.set_quickfix(opts)
   return require("review_mode.diagnostics").set_quickfix(opts)
+end
+
+-- CI annotations --------------------------------------------------------------
+
+--- Check-run annotations on the PR head for one file: a list of
+--- { check, start_line, end_line, severity, message }.
+function M.ci_annotations(path)
+  return require("review_mode.ci").annotations(path)
+end
+
+--- Refetch CI annotations for the PR head ("ci_loaded" fires when done).
+function M.reload_ci()
+  return require("review_mode.ci").load_async()
 end
 
 -- Local reviews ---------------------------------------------------------------

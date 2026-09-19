@@ -433,6 +433,11 @@ COMMANDS                                                  *review-mode-commands*
 :ReviewModeDiagnosticsToggle
         Toggle review threads as vim.diagnostic entries.
 
+                                                        *:ReviewModeCIToggle*
+:ReviewModeCIToggle
+        Toggle CI check-run annotations as vim.diagnostic entries. Turning
+        them on refetches them.
+
                                                         *:ReviewModeSuggestionPreview*
 :ReviewModeSuggestionPreview [inline|split]
         Toggle a preview of the suggestion on the current line without
@@ -524,6 +529,9 @@ SETUP                                                        *review-mode-setup*
       partial_line_highlights = true,
       unified_context = 3,
       use_fast_diffopt = true,
+    },
+    ci = {
+      diagnostics = true, -- CI annotations as diagnostics (GitHub)
     },
     gitsigns = {
       enabled = true,
@@ -652,6 +660,19 @@ comment signs and end-of-line virtual text and the two displays would double up.
 :ReviewModeQuickfix fills the quickfix list with the same threads across every
 changed file, and review_mode.api.quickfix_items() returns those items without
 setting the list.
+
+                                                    *review-mode-ci*
+On GitHub, check-run annotations on the PR head (lint errors, failing
+assertions, type errors) are published too, in their own review_mode_ci
+namespace with source "review-mode CI", so ]d walks CI failures and they toggle
+apart from the threads. failure is ERROR, warning WARN, notice INFO; the message
+is "[check name] title: message". This namespace keeps vim.diagnostic's normal
+display. They are fetched in the background on start and on :ReviewModeRefresh
+(not when HEAD moves mid-review): one request for the check runs, then one per
+run that has annotations. Toggle with :ReviewModeCIToggle, or set
+ci = { diagnostics = false } to never fetch them. Local and GitLab reviews
+skip it. review_mode.api.ci_annotations(path) returns the annotations for a
+file, and the ci_loaded event fires when they arrive.
 
 ==============================================================================
 GITLAB                                                      *review-mode-gitlab*

@@ -1522,6 +1522,7 @@ function M.start(opts)
     schedule_comments_ui_refresh()
     viewed_state.sync_viewed_from_github_async(generation)
     github.load_comments_async()
+    require("review_mode.ci").load_async()
     if not review_loading_started then
       set_gitsigns_base()
       load_review_async(generation, { open_initial = true })
@@ -1710,6 +1711,7 @@ function M.refresh()
   state.comments_loading = false
   diff.close_old_view()
   github.load_comments_async()
+  require("review_mode.ci").load_async()
   load_review_async(generation, { open_initial = false })
 end
 
@@ -2643,6 +2645,13 @@ function M.action_items()
     { category = "PR", label = "Show PR checks", run = M.checks },
     {
       category = "PR",
+      label = "Toggle CI diagnostics",
+      run = function()
+        require("review_mode.diagnostics").toggle_ci()
+      end,
+    },
+    {
+      category = "PR",
       label = "Review a PR without checking it out",
       run = function()
         vim.ui.input({ prompt = "PR number or URL: " }, function(target)
@@ -2943,6 +2952,9 @@ function M.setup(opts)
     vim.api.nvim_create_user_command("ReviewModeDiagnosticsToggle", function()
       require("review_mode.diagnostics").toggle()
     end, { desc = "Toggle PR review threads as diagnostics" })
+    vim.api.nvim_create_user_command("ReviewModeCIToggle", function()
+      require("review_mode.diagnostics").toggle_ci()
+    end, { desc = "Toggle CI check-run annotations as diagnostics" })
     -- Reactions --
     vim.api.nvim_create_user_command("ReviewModeReact", function(command)
       panel.react(command.args)

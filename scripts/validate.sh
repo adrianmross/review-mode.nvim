@@ -175,6 +175,34 @@ case "$1 $2" in
       exit 1
     fi
     ;;
+  # CI annotations: check runs on the PR head, then each annotated run's
+  # annotations. Real gh applies the --jq filter (one @json row per line); the
+  # mock prints the rows that filter would. Only the ci fixture has any.
+  "api --paginate")
+    if [[ "${REVIEW_MODE_FIXTURE:-}" != "ci" ]]; then
+      exit 0
+    fi
+    printf 'paginate %s\n' "$3" >> "${REVIEW_MODE_GH_LOG:-/dev/null}"
+    case "$3" in
+      "repos/owner/repo/commits/abc123/check-runs?per_page=100")
+        if [[ "${REVIEW_MODE_FAIL_CI:-}" == "1" ]]; then
+          echo "forced check-runs failure" >&2
+          exit 1
+        fi
+        printf '%s\n' '["7","lint"]' '["8","test"]'
+        ;;
+      "repos/owner/repo/check-runs/7/annotations?per_page=100")
+        printf '%s\n' '["file.txt",2,2,"failure","Unused variable","x is never used"]' '["file.txt",4,5,"warning",null,"line too long"]'
+        ;;
+      "repos/owner/repo/check-runs/8/annotations?per_page=100")
+        printf '%s\n' '["nested/other.txt",2,2,"notice","","flaky"]'
+        ;;
+      *)
+        echo "unexpected gh paginate args: $*" >&2
+        exit 1
+        ;;
+    esac
+    ;;
   "api repos/owner/repo/pulls/comments/1/reactions")
     printf '%s\n' "$*" >> "${REVIEW_MODE_GH_LOG:-/dev/null}"
     printf '{"id":7,"content":"+1"}\n'
@@ -376,6 +404,21 @@ REVIEW_MODE_REVIEW_CAPTURE="$tmp/review-capture.json" \
 nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/review_submit_fixture.lua"
+
+# CI check-run annotations as diagnostics, in their own namespace.
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/ci-cache" \
+XDG_STATE_HOME="$tmp/ci-state" \
+GH_REVIEW_REPO=owner/repo \
+GH_REVIEW_PR=123 \
+GH_REVIEW_BASE=main \
+GH_REVIEW_HEAD=abc123 \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+REVIEW_MODE_FIXTURE=ci \
+REVIEW_MODE_GH_LOG="$tmp/ci-gh.log" \
+nvim --headless -u NONE -i NONE \
+  -c "set noswapfile" \
+  -l "$repo_root/scripts/ci_fixture.lua"
 
 # GitLab: a fake glab answers for the merge request, and the fixture points the
 # repo's origin at gitlab.com so the provider is auto-detected.
