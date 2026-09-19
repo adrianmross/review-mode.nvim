@@ -1,3 +1,4 @@
+-- fixture: gh pr REVIEW_MODE_THREADS_FILE={tmp}/threads.json REVIEW_MODE_GH_LOG={tmp}/gh.log REVIEW_MODE_AUTHOR_LOG={tmp}/gh.log
 -- Where review threads anchor, and which thread a line action lands on:
 -- replies to the thread's first comment, forced reloads that arrive mid-load,
 -- threads past the end of the buffer, outdated and base-side (LEFT) threads,

@@ -1,3 +1,4 @@
+-- fixture: gh pr
 -- Hide whitespace: diff.ignore_whitespace and :ReviewModeDiffWhitespaceToggle.
 --
 -- Builds its own repo so the shared fixture repo keeps its files: ws.txt is a

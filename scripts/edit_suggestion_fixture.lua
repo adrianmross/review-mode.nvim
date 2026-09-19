@@ -1,3 +1,4 @@
+-- fixture: gh pr
 -- Your edits, as suggestions.
 --
 -- file.txt at the PR head (HEAD) is

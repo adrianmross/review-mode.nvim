@@ -1,3 +1,4 @@
+-- fixture: gh GLAB_LOG={tmp}/glab.log
 local harness = dofile(
   assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
 )

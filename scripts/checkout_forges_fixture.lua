@@ -1,7 +1,8 @@
+-- fixture: gh REVIEW_MODE_PR_VIEW_LOG={tmp}/gh.log
 -- Checkouts across forges and clones: a PR in another repo (or from a fork) is
 -- fetched from that repo and checked against the head GitHub reports; GitHub
 -- Enterprise URLs parse; two clones never share a tree; clean survives a tree
--- deleted by hand. Builds its own repos; gh is the validate.sh mock.
+-- deleted by hand. Builds its own repos; gh is scripts/mock/gh.
 local harness = dofile(
   assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"), "REVIEW_MODE_PLUGIN_ROOT is required") .. "/scripts/lib/prelude.lua"
 )

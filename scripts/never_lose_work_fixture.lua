@@ -1,3 +1,4 @@
+-- fixture: gh pr
 -- Nothing the user typed or made is lost: drafts are never dropped unasked, a
 -- failed post leaves its text in the " register, and a store that cannot be
 -- read is set aside rather than written over. The gh mock reads

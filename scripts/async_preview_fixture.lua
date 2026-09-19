@@ -1,3 +1,4 @@
+-- fixture: gh pr
 -- The viewed-file picker preview must not block on git diff (issue #58).
 --
 -- Driven through the snacks provider, because that is the shortest real path to

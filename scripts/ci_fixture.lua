@@ -1,3 +1,4 @@
+-- fixture: gh pr REVIEW_MODE_FIXTURE=ci REVIEW_MODE_GH_LOG={tmp}/gh.log
 -- CI check-run annotations as diagnostics: fetched for the PR head, in their own
 -- namespace, toggled apart from the review threads.
 local harness = dofile(

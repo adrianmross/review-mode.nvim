@@ -1,3 +1,5 @@
+-- fixture: gh REVIEW_MODE_STARTUP_GH_DELAY=3
+-- fixture: gh pr REVIEW_MODE_STARTUP_GH_DELAY=3
 -- Time to first comment sign on a warm cache.
 --
 -- The first start fills the on-disk comment cache. The second one runs against

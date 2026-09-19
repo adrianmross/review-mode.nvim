@@ -1,3 +1,4 @@
+-- fixture: gh pr
 -- Git plumbing: every review diff goes through review_mode.git, so file names
 -- and the user's git config cannot break the parsers.
 --

@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# a fixture that doesn't expect glab sets no log; still answer, so the mock's
+# own "unexpected glab" diagnostics are what it sees
+printf 'ARGS %s\n' "$*" >> "${GLAB_LOG:-/dev/null}"
+args="$*"
+case "$args" in
+  "mr view --output json"|"mr view 7 --repo https://gitlab.com/group/project --output json")
+    # local-fallback fixture: glab's answer for a branch with no MR
+    if [[ "${REVIEW_MODE_FIXTURE:-}" == "no_mr" ]]; then
+      echo 'no open merge request available for "feature"' >&2
+      exit 1
+    fi
+    printf '%s\n' '{"iid":7,"project_id":42,"target_branch":"main","source_branch":"feature","sha":"headsha","web_url":"https://gitlab.com/group/project/-/merge_requests/7","references":{"full":"group/project!7"},"diff_refs":{"base_sha":"basesha","start_sha":"startsha","head_sha":"headsha"}}'
+    ;;
+  # two short pages, with checkbox-like "[x] [y]" bodies that a textual merge
+  # of back-to-back arrays would corrupt
+  "api --hostname gitlab.com projects/group%2Fproject/merge_requests/7/discussions?per_page=2&page=1")
+    printf '%s\n' '[{"id":"p1","notes":[{"id":41,"body":"- [x] [y] done","author":{"username":"a"},"system":false,"position":{"old_path":"file.txt","new_path":"file.txt","old_line":null,"new_line":2}}]},{"id":"p2","notes":[{"id":42,"body":"[a] [b]","author":{"username":"a"},"system":false,"position":{"old_path":"file.txt","new_path":"file.txt","old_line":null,"new_line":2,"line_range":{"start":{"line_code":"x_1_1","type":"new","old_line":null,"new_line":1},"end":{"line_code":"x_2_2","type":"new","old_line":null,"new_line":2}}}}]}]'
+    ;;
+  # p3 sits on a removed line: GitLab sends new_line null
+  "api --hostname gitlab.com projects/group%2Fproject/merge_requests/7/discussions?per_page=2&page=2")
+    printf '%s\n' '[{"id":"p3","notes":[{"id":43,"body":"last] [page","author":{"username":"a"},"system":false,"position":{"old_path":"file.txt","new_path":"file.txt","old_line":3,"new_line":null}}]}]'
+    ;;
+  # what older glab printed for --paginate: one array per page, back to back
+  "api --paginate projects/group%2Fproject/merge_requests/7/discussions?per_page=2")
+    "$0" api --hostname gitlab.com "projects/group%2Fproject/merge_requests/7/discussions?per_page=2&page=1"
+    "$0" api --hostname gitlab.com "projects/group%2Fproject/merge_requests/7/discussions?per_page=2&page=2"
+    ;;
+  "api --hostname gitlab.com projects/group%2Fproject/merge_requests/7/discussions?per_page=100&page=1")
+    printf '%s\n' '[{"id":"disc1","individual_note":false,"notes":[{"id":11,"type":"DiffNote","body":"Needs review","author":{"username":"reviewer"},"created_at":"2024-01-02T03:04:05Z","system":false,"resolvable":true,"resolved":false,"position":{"base_sha":"basesha","start_sha":"startsha","head_sha":"headsha","old_path":"file.txt","new_path":"file.txt","position_type":"text","old_line":null,"new_line":2}},{"id":12,"type":"DiffNote","body":"Agreed","author":{"username":"maintainer"},"created_at":"2024-01-03T03:04:05Z","system":false,"resolvable":true,"resolved":false,"position":{"old_path":"file.txt","new_path":"file.txt","position_type":"text","old_line":null,"new_line":2}}]},{"id":"disc2","individual_note":false,"notes":[{"id":21,"type":"DiffNote","body":"Check final line","author":{"username":"reviewer"},"created_at":"2024-01-02T03:04:05Z","system":false,"resolvable":true,"resolved":true,"position":{"old_path":"file.txt","new_path":"file.txt","position_type":"text","old_line":3,"new_line":4}}]},{"id":"disc3","individual_note":true,"notes":[{"id":31,"type":null,"body":"Overall looks good","author":{"username":"reviewer"},"created_at":"2024-01-02T03:04:05Z","system":false,"resolvable":false}]}]'
+    ;;
+  "api --hostname gitlab.com --method POST projects/group%2Fproject/merge_requests/7/discussions --input "*)
+    printf 'INPUT %s\n' "$(cat "${!#}")" >> "$GLAB_LOG"
+    printf '{"id":"disc_new"}\n'
+    ;;
+  "api --hostname gitlab.com --method POST projects/group%2Fproject/merge_requests/7/discussions/disc1/notes --raw-field body="*)
+    printf '{"id":13}\n'
+    ;;
+  "api --hostname gitlab.com --method PUT projects/group%2Fproject/merge_requests/7/discussions/disc1 --field resolved="*)
+    printf '{"id":"disc1"}\n'
+    ;;
+  *)
+    echo "unexpected glab args: $*" >&2
+    exit 1
+    ;;
+esac
