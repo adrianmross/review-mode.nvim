@@ -141,7 +141,9 @@ context stays visible. It takes { label = "PR", separator = "." }.
 With lualine: sections = { lualine_a = { { require("review_mode").mode_text } } }
 
 The plugin fires these |User| autocommands: ReviewModeStart, ReviewModeEnter,
-ReviewModeLeave, ReviewModeStop.
+ReviewModeLeave, ReviewModeStop. Every ReviewModeStart is matched by a
+ReviewModeStop: a start that fails, and a restart while a session is running,
+end the session the way |:ReviewModeStop| does.
 
 ==============================================================================
 THREAD PANEL                                                 *review-mode-panel*
@@ -315,7 +317,8 @@ COMMANDS                                                  *review-mode-commands*
 
                                                         *:ReviewModeStop*
 :ReviewModeStop
-        Stop Review Mode and clear plugin state.
+        Stop Review Mode and clear plugin state. With no session running it
+        does nothing.
 
                                                         *:ReviewModeRefresh*
 :ReviewModeRefresh
@@ -475,7 +478,8 @@ COMMANDS                                                  *review-mode-commands*
 
                                                         *:ReviewModeViewedClear*
 :ReviewModeViewedClear
-        Clear local viewed state for the current PR.
+        Clear viewed state for the current PR. With GitHub viewed sync on, the
+        files are unmarked on GitHub too.
 
                                                         *:ReviewModeViewedSync*
 :ReviewModeViewedSync
@@ -483,7 +487,8 @@ COMMANDS                                                  *review-mode-commands*
 
                                                         *:ReviewModeViewedSyncToggle*
 :ReviewModeViewedSyncToggle
-        Toggle GitHub viewed-state sync.
+        Toggle GitHub viewed-state sync. Turning it on pushes the marks made
+        while it was off instead of replacing them with GitHub's.
 
                                                         *:ReviewModePending*
 :ReviewModePending

@@ -46,42 +46,48 @@ local function apply_old_diffopt()
   state.old_diffopt = nil
 end
 
+-- :diffoff, not 'diff' = false: only :diffoff puts back what :diffthis changed
+-- (scrollbind, cursorbind, wrap, the fold options)
 local function disable_diff_for_window(win)
-  if win and vim.api.nvim_win_is_valid(win) then
-    pcall(function()
-      vim.wo[win].diff = false
+  if win and vim.api.nvim_win_is_valid(win) and vim.wo[win].diff then
+    pcall(vim.api.nvim_win_call, win, function()
+      vim.cmd("diffoff")
     end)
   end
 end
 
-local function capture_fold_options(win)
+-- Taken before :diffthis or the unified buffer touch the window, so what comes
+-- back on close is the user's own setting, not a diff-mode one.
+local window_options = { "wrap", "scrollbind", "cursorbind", "foldmethod", "foldcolumn", "foldlevel", "foldenable" }
+
+local function capture_window_options(win)
   if not win or not vim.api.nvim_win_is_valid(win) then
     return
   end
 
-  state.old_fold_options = state.old_fold_options or {}
-  if state.old_fold_options[win] then
+  state.old_window_options = state.old_window_options or {}
+  if state.old_window_options[win] then
     return
   end
 
-  state.old_fold_options[win] = {
-    foldenable = vim.wo[win].foldenable,
-    foldlevel = vim.wo[win].foldlevel,
-    foldmethod = vim.wo[win].foldmethod,
-  }
+  local saved = {}
+  for _, name in ipairs(window_options) do
+    saved[name] = vim.wo[win][name]
+  end
+  state.old_window_options[win] = saved
 end
 
-local function restore_fold_options()
-  for win, options in pairs(state.old_fold_options or {}) do
+local function restore_window_options()
+  for win, options in pairs(state.old_window_options or {}) do
     if vim.api.nvim_win_is_valid(win) then
-      pcall(function()
-        vim.wo[win].foldmethod = options.foldmethod
-        vim.wo[win].foldlevel = options.foldlevel
-        vim.wo[win].foldenable = options.foldenable
-      end)
+      for name, value in pairs(options) do
+        pcall(function()
+          vim.wo[win][name] = value
+        end)
+      end
     end
   end
-  state.old_fold_options = nil
+  state.old_window_options = nil
 end
 
 local function clear_old_diff_highlights()
@@ -100,7 +106,7 @@ local function apply_diff_context()
   local previous_win = vim.api.nvim_get_current_win()
   for _, win in ipairs({ state.old_target_win, state.old_win }) do
     if win and vim.api.nvim_win_is_valid(win) then
-      capture_fold_options(win)
+      capture_window_options(win)
       pcall(function()
         if state.old_layout == "side_by_side" then
           vim.wo[win].foldmethod = "diff"
@@ -125,20 +131,26 @@ function M.close_old_view()
   state.old_closing = true
   disable_diff_for_window(state.old_target_win)
   disable_diff_for_window(state.old_win)
-  restore_fold_options()
   clear_old_diff_highlights()
 
-  if
-    state.old_layout == "unified"
-    and state.old_target_win
-    and vim.api.nvim_win_is_valid(state.old_target_win)
-    and state.old_target_buf
-    and vim.api.nvim_buf_is_valid(state.old_target_buf)
-  then
-    pcall(vim.api.nvim_win_set_buf, state.old_target_win, state.old_target_buf)
+  if state.old_layout == "unified" then
+    -- only while the window still shows the diff: once something else was
+    -- opened there, putting the reviewed file back would replace that
+    if
+      state.old_target_win
+      and vim.api.nvim_win_is_valid(state.old_target_win)
+      and vim.api.nvim_win_get_buf(state.old_target_win) == state.old_buf
+      and state.old_target_buf
+      and vim.api.nvim_buf_is_valid(state.old_target_buf)
+    then
+      pcall(vim.api.nvim_win_set_buf, state.old_target_win, state.old_target_buf)
+    end
   elseif state.old_win and vim.api.nvim_win_is_valid(state.old_win) then
-    vim.api.nvim_win_close(state.old_win, true)
+    -- can fail (E1312 while a window is closing, E444 for the last window);
+    -- the view is torn down either way
+    pcall(vim.api.nvim_win_close, state.old_win, true)
   end
+  restore_window_options()
 
   if state.old_buf and vim.api.nvim_buf_is_valid(state.old_buf) then
     pcall(vim.api.nvim_buf_delete, state.old_buf, { force = true })
@@ -195,14 +207,16 @@ end
 
 M._unified_fold_ranges = unified_fold_ranges
 
-local function write_temp_diff_file(tmpdir, side, path, lines)
+-- eol: whether the file ends in a newline. Written without one, every file
+-- would diff as "\ No newline at end of file".
+local function write_temp_diff_file(tmpdir, side, path, lines, eol)
   local rel = vim.fs.joinpath(side, path)
   local file = vim.fs.joinpath(tmpdir, rel)
   local dir = vim.fs.dirname(file)
   if dir then
     vim.fn.mkdir(dir, "p")
   end
-  vim.fn.writefile(lines, file, "b")
+  vim.fn.writefile(lines, file, eol and "" or "b")
   return rel
 end
 
@@ -377,9 +391,14 @@ function M.open_scratch_side_by_side(opts)
   M.close_old_view()
 
   local current_win, current_buf = opts.win, opts.buf
+  capture_window_options(current_win)
   vim.api.nvim_set_current_win(current_win)
   vim.cmd("vsplit")
   state.old_win = vim.api.nvim_get_current_win()
+  -- the split starts with the file window's options: save them now, before
+  -- :diffthis changes them, so a close that falls back to restoring this
+  -- window never puts diff-mode options back
+  capture_window_options(state.old_win)
   state.old_target_win = current_win
   state.old_target_buf = current_buf
   state.old_buf = vim.api.nvim_create_buf(false, true)
@@ -427,9 +446,12 @@ end
 
 local function open_old_unified(path, current_win, current_buf, base_content, generation, base_missing)
   local tmpdir = vim.fn.tempname()
-  local head_rel = write_temp_diff_file(tmpdir, "head", path, vim.api.nvim_buf_get_lines(current_buf, 0, -1, false))
+  -- as :write would save it
+  local head_eol = vim.bo[current_buf].eol or (vim.bo[current_buf].fixeol and not vim.bo[current_buf].binary)
+  local head_rel =
+    write_temp_diff_file(tmpdir, "head", path, vim.api.nvim_buf_get_lines(current_buf, 0, -1, false), head_eol)
   local base_rel = base_missing and "/dev/null"
-    or write_temp_diff_file(tmpdir, "base", path, util.split_blob_lines(base_content))
+    or write_temp_diff_file(tmpdir, "base", path, util.split_blob_lines(base_content), base_content:sub(-1) == "\n")
   -- the whole file, always: condensing is folding, so zR shows it all
   local args = { "--no-index", "--unified=1000000" }
   if state.config.diff.ignore_whitespace then
@@ -477,7 +499,7 @@ local function open_old_unified(path, current_win, current_buf, base_content, ge
       vim.bo[state.old_buf].filetype = "diff"
       vim.api.nvim_set_current_win(current_win)
 
-      capture_fold_options(current_win)
+      capture_window_options(current_win)
       vim.wo[current_win].foldmethod = "manual"
       vim.cmd("silent! normal! zE")
       for _, range in ipairs(unified_fold_ranges(lines, state.config.diff.unified_context)) do
@@ -532,12 +554,7 @@ local function open_old_view(path, current_win, current_buf)
 end
 
 function M.refresh_old_view()
-  if state.old_layout == "side_by_side" and not (state.old_win and vim.api.nvim_win_is_valid(state.old_win)) then
-    return false
-  end
-  if
-    state.old_layout == "unified" and not (state.old_target_win and vim.api.nvim_win_is_valid(state.old_target_win))
-  then
+  if not M.old_view_is_open() then
     return false
   end
 
@@ -561,7 +578,10 @@ function M.old_view_is_open()
     return state.old_win and vim.api.nvim_win_is_valid(state.old_win)
   end
   if state.old_layout == "unified" then
-    return state.old_target_win and vim.api.nvim_win_is_valid(state.old_target_win)
+    -- the window alone is not enough: ]f or :edit put another buffer in it
+    return state.old_target_win
+      and vim.api.nvim_win_is_valid(state.old_target_win)
+      and vim.api.nvim_win_get_buf(state.old_target_win) == state.old_buf
   end
   return false
 end
@@ -602,30 +622,28 @@ function M.close_side_by_side_pair_for_window(winid)
   end)
 end
 
+-- On BufEnter: the view is stale once its window shows another buffer, or is
+-- gone. Always closed on the next tick -- closing a window from inside the
+-- BufEnter of a :q or :close fails (E1312).
+local function view_is_stale()
+  if state.old_closing or not state.old_layout then
+    return false
+  end
+  local win = state.old_target_win
+  if not win or not vim.api.nvim_win_is_valid(win) then
+    return true
+  end
+  local expected = state.old_layout == "unified" and state.old_buf or state.old_target_buf
+  return vim.api.nvim_win_get_buf(win) ~= expected
+end
+
 function M.close_stale_side_by_side_pair()
-  if state.old_closing or state.old_layout ~= "side_by_side" then
-    return
-  end
-
-  if not state.old_target_win or not vim.api.nvim_win_is_valid(state.old_target_win) then
-    M.close_old_view()
-    return
-  end
-
-  local target_buf = vim.api.nvim_win_get_buf(state.old_target_win)
-  if target_buf == state.old_target_buf then
+  if not view_is_stale() then
     return
   end
 
   vim.schedule(function()
-    if state.old_closing or state.old_layout ~= "side_by_side" then
-      return
-    end
-    if
-      state.old_target_win
-      and vim.api.nvim_win_is_valid(state.old_target_win)
-      and vim.api.nvim_win_get_buf(state.old_target_win) ~= state.old_target_buf
-    then
+    if view_is_stale() then
       M.close_old_view()
     end
   end)

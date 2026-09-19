@@ -100,14 +100,15 @@ assert(draft() == nil, "an edit outside the diff should not open a suggestion dr
 assert(noted("outside the PR diff"), "an edit outside the diff should say why nothing happened")
 reset()
 
--- no merge-base (a missing base ref): fail closed, nothing is "in the diff"
+-- no merge-base (a missing base ref, so the load resolved none): fail closed,
+-- nothing is "in the diff"
 local core = require("review_mode.state")
-local real_base = core.state.base
-core.state.base = "refs/heads/no-such-base"
+local real_base, real_merge_base = core.state.base, core.state.merge_base
+core.state.base, core.state.merge_base = "refs/heads/no-such-base", nil
 set(4, "base changed twice")
 edits = api.edits()
 assert(#edits == 1 and not edits[1].in_diff, "with no merge-base an edit must not count as in the diff")
-core.state.base = real_base
+core.state.base, core.state.merge_base = real_base, real_merge_base
 reset()
 
 -- trial suggestions are the reviewer's lines, not your edits

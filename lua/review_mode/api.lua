@@ -208,9 +208,11 @@ end
 function M.review_percent()
   local weight, done = 0, 0
   for _, path in ipairs(state.file_order) do
-    local entry = M.file(path) or {}
+    -- file_stats, not M.file(): that counts the file's comments, and this runs
+    -- on every statusline redraw
+    local stats = state.file_stats[path] or {}
     -- a rename or mode change has no lines; let it weigh like one
-    local lines = math.max((entry.added or 0) + (entry.removed or 0), 1)
+    local lines = math.max((stats.additions or 0) + (stats.deletions or 0), 1)
     weight = weight + lines
     done = done + lines * M.review_fraction(path)
   end

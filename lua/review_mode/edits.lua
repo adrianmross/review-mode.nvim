@@ -39,14 +39,16 @@ end
 -- The ranges of PR-head lines a comment can land on: each hunk of the PR diff
 -- widened by its context, overlapping windows merged, as GitHub draws them.
 local function diff_windows(path, head)
-  local merge_base = git_lines({ "merge-base", core.base_ref(), "HEAD" })
-  if not merge_base or not merge_base[1] then
+  -- the merge base the load resolved (see core.base_rev); a blocking git call
+  -- of its own only while that is still in flight. Only PR reviews get here.
+  local base_rev = state.merge_base or (git_lines({ "merge-base", core.base_ref(), "HEAD" }) or {})[1]
+  if not base_rev then
     -- fail closed: with no base to diff against, no line is known to be in
     -- the PR diff, and guessing would post suggestions GitHub rejects
     return {}
   end
   -- a path missing at the base is an added file: every line is in the diff
-  local base = git_lines({ "show", merge_base[1] .. ":" .. core.base_path(path) }) or {}
+  local base = git_lines({ "show", base_rev .. ":" .. core.base_path(path) }) or {}
   local windows = {}
   for _, hunk in ipairs(vim.diff(joined(base), joined(head), { result_type = "indices" })) do
     local first = math.max(1, hunk[3] - DIFF_CONTEXT + (hunk[4] == 0 and 1 or 0))

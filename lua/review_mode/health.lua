@@ -13,12 +13,13 @@ local function command_exists(name)
   return vim.fn.exists(":" .. name) == 2
 end
 
-local function executable(name)
+-- level: how bad a missing one is -- "error" when the review needs it
+local function executable(name, level, why)
   if vim.fn.executable(name) == 1 then
     call("ok", name .. " executable found")
     return true
   end
-  call("error", name .. " executable not found")
+  call(level or "error", name .. " executable not found" .. (why and (" (" .. why .. ")") or ""))
   return false
 end
 
@@ -41,17 +42,35 @@ end
 function M.check()
   call("start", "review-mode.nvim")
 
-  if vim.fn.has("nvim-0.10") == 1 then
-    call("ok", "Neovim 0.10+ detected")
+  -- vim.fs.relpath, which path handling throughout relies on, is 0.11
+  if vim.fn.has("nvim-0.11") == 1 then
+    call("ok", "Neovim 0.11+ detected")
   else
-    call("error", "Neovim 0.10+ is required")
+    call("error", "Neovim 0.11+ is required")
   end
 
   local has_git = executable("git")
-  local has_gh = executable("gh")
 
-  if has_gh then
-    system_ok({ "gh", "auth", "status" }, "gh authentication available", "gh authentication check failed")
+  -- Only the forge this checkout reviews against needs its CLI: a missing gh
+  -- is not an error for a GitLab or local review, nor glab for a GitHub one.
+  -- Outside a checkout there is nothing to go by, so gh stays the one expected.
+  -- pcall: vim.system throws on a missing cwd, and a health check must not
+  local ok, probe = pcall(function()
+    return vim.system({ "git", "rev-parse", "--show-toplevel" }, { text = true }):wait()
+  end)
+  local root = (has_git and ok and probe) or {}
+  local provider = root.code == 0 and require("review_mode.providers").select(vim.trim(root.stdout)) or "github"
+  for _, forge in ipairs({ { cli = "gh", provider = "github" }, { cli = "glab", provider = "gitlab" } }) do
+    local needed = provider == forge.provider
+    local why = needed and ("the " .. provider .. " provider uses it")
+      or ("only the " .. forge.provider .. " provider uses it")
+    if executable(forge.cli, needed and "error" or "warn", why) and needed then
+      system_ok(
+        { forge.cli, "auth", "status" },
+        forge.cli .. " authentication available",
+        forge.cli .. " authentication check failed"
+      )
+    end
   end
 
   if has_git then

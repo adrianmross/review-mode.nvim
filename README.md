@@ -24,7 +24,7 @@ The goal is to keep review inside normal files instead of a dedicated diff UI:
 
 ## Requirements
 
-- Neovim 0.10+
+- Neovim 0.11+
 - `git`
 - GitHub CLI `gh`, authenticated for the target repository
 - for GitLab merge requests: GitLab CLI `glab`, authenticated for the target
@@ -60,6 +60,10 @@ With `lazy.nvim`:
 
 Once a review is running you get `<leader>r…` keys for its actions and `]c`
 `]r` `]f` to move through it — no `keys` block needed. See "Keys" under "The Mode".
+
+Without a plugin manager, a `pack/*/start` install sets itself up with the
+defaults; calling `require("review_mode").setup({ ... })` from your `init.lua`
+works too, and the plugin file then leaves your options alone.
 
 ## nvim-tree Integration
 
@@ -476,7 +480,7 @@ prefer.
 | `on_start` | `ReviewModeStart` | a review session loads |
 | `on_enter` | `ReviewModeEnter` | you step into the mode |
 | `on_leave` | `ReviewModeLeave` | you step out, session intact |
-| `on_stop` | `ReviewModeStop` | the session ends |
+| `on_stop` | `ReviewModeStop` | the session ends: stopped, restarted, or a start that failed |
 | `on_comments_loaded` | `ReviewModeCommentsLoaded` | review comments finish loading |
 | `on_viewed_changed` | `ReviewModeViewedChanged` | viewed state changes |
 | `on_panel_open` / `on_panel_close` | `ReviewModePanelOpen` / `Close` | the thread panel opens or closes |
@@ -701,7 +705,7 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeCopyUrl` copies the current PR URL to registers
 - `:ReviewModeChecks` shows `gh pr checks` output in a floating preview
 - `:ReviewModeStatus` shows current PR status in a floating preview
-- `:ReviewModeStop` stops review mode and clears plugin state
+- `:ReviewModeStop` stops review mode and clears plugin state (a no-op with no session running)
 - `:ReviewModeRefresh` reloads changed files and comments
 - `:ReviewModeNextHunk` jumps to the next PR hunk
 - `:ReviewModePrevHunk` jumps to the previous PR hunk
@@ -734,9 +738,9 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeViewedFeatureToggle` toggles viewed-state tracking on or off
 - `:ReviewModeCommentsToggle` toggles PR comments on or off
 - `:ReviewModeViewedList [all|viewed|unviewed]` opens a PR file list with diff stats; snacks.nvim and Telescope add a diff preview and toggle viewed state with `<Tab>`/`<C-t>`
-- `:ReviewModeViewedClear` clears local viewed state for the current PR
+- `:ReviewModeViewedClear` clears viewed state for the current PR, on GitHub too when viewed sync is on
 - `:ReviewModeViewedSync` pulls viewed state from GitHub
-- `:ReviewModeViewedSyncToggle` toggles GitHub viewed-state sync
+- `:ReviewModeViewedSyncToggle` toggles GitHub viewed-state sync; turning it on pushes marks made while it was off
 - `:ReviewModePending` opens the pending review buffer
 - `:ReviewModeSubmit [comment|approve|request_changes]` submits the pending review, confirmed first
 - `:ReviewModeSummary` shows how much of the review is done (by changed lines) and how many files are left, total `+/-`, comments, threads with how many are resolved, and viewed-sync counts.

@@ -756,3 +756,46 @@ GH_REVIEW_BASE=main \
 GH_REVIEW_HEAD=abc123 \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 run_fixture git_plumbing_fixture
+
+# Session lifecycle: setup against the plugin file, key layers handing back the
+# user's global mappings, one teardown for stop / restart / failed start, a
+# missing gh, signs_when_out, the statusline and :checkhealth.
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/lifecycle-cache" \
+XDG_STATE_HOME="$tmp/lifecycle-state" \
+GH_REVIEW_REPO=owner/repo \
+GH_REVIEW_PR=123 \
+GH_REVIEW_BASE=main \
+GH_REVIEW_HEAD=abc123 \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+run_fixture session_lifecycle_fixture
+
+# Follow-HEAD in a local review: no forge call, no stale hunks. Builds its own
+# repo, since it commits.
+XDG_CACHE_HOME="$tmp/follow-local-cache" \
+XDG_STATE_HOME="$tmp/follow-local-state" \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+run_fixture follow_head_local_fixture
+
+# The base diff gives the user's window back as it found it.
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/base-diff-cache" \
+XDG_STATE_HOME="$tmp/base-diff-state" \
+GH_REVIEW_REPO=owner/repo \
+GH_REVIEW_PR=123 \
+GH_REVIEW_BASE=main \
+GH_REVIEW_HEAD=abc123 \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+run_fixture base_diff_windows_fixture
+
+# GitHub viewed sync around refreshes and in-flight writes; gh is stubbed in
+# the fixture itself.
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/viewed-race-cache" \
+XDG_STATE_HOME="$tmp/viewed-race-state" \
+GH_REVIEW_REPO=owner/repo \
+GH_REVIEW_PR=123 \
+GH_REVIEW_BASE=main \
+GH_REVIEW_HEAD=abc123 \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+run_fixture viewed_sync_race_fixture

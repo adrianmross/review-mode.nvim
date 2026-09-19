@@ -121,8 +121,21 @@ local function pr_meta_async(generation, callback)
   end)
 end
 
+-- The PR file the cursor is on, for navigation and viewed marks. The base pane
+-- (pr-base://) and the unified diff (pr-diff://) are views of a changed file
+-- with no path of their own, so they answer for the file they show; without
+-- that ]f and <leader>rv there act as if no file were open. Their lines are not
+-- the file's, so anything anchored to a line keeps current_relpath().
+local function review_relpath()
+  local bufnr = vim.api.nvim_get_current_buf()
+  if state.old_buf and bufnr == state.old_buf and state.old_path then
+    return state.old_path
+  end
+  return current_relpath()
+end
+
 local function current_file_index(path)
-  path = path or current_relpath()
+  path = path or review_relpath()
   if not path then
     return nil
   end
@@ -139,6 +152,10 @@ local function jump_to_path(path, line)
     if target_win and vim.api.nvim_win_is_valid(target_win) then
       vim.api.nvim_set_current_win(target_win)
     end
+    diff.close_old_view()
+  elseif state.old_layout == "unified" and vim.api.nvim_get_current_win() == state.old_target_win then
+    -- the jump replaces the diff in its window: close it first, so its fold
+    -- options go with it
     diff.close_old_view()
   end
 
@@ -193,6 +210,12 @@ end
 
 local function annotate_buffer(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
+  -- stepped out with mode.signs_when_out = false: leave() cleared the signs,
+  -- and a buffer entered or refreshed since must not draw them back
+  if state.active and not state.in_mode and not state.config.mode.signs_when_out then
+    clear_buffer_marks(bufnr)
+    return
+  end
   clear_buffer_marks(bufnr)
   moved.annotate(bufnr)
 
@@ -446,10 +469,6 @@ local function parse_changed_files(output)
       dir = vim.fs.dirname(dir)
     end
   end
-
-  -- every consumer (]f, ]r across files, pickers, api.files) walks file_order, so
-  -- reordering it once here keeps them all in the same reading order
-  require("review_mode.order").apply(state)
 end
 
 local function parse_numstat_count(value)
@@ -524,12 +543,13 @@ end
 local function build_changed_maps_async(generation, callback)
   core.reset_changed_data()
   state.maps_loading = true
+  local token = core.maps_token()
   resolve_merge_base(generation)
   system_async(git.diff({ "--name-status", "-z", "--find-renames", core.diff_range() }), {
     cwd = state.root,
     raw = true,
   }, function(output, err)
-    if not core.is_current(generation) then
+    if not core.maps_current(token) then
       return
     end
 
@@ -541,11 +561,21 @@ local function build_changed_maps_async(generation, callback)
     end
 
     parse_changed_files(output)
+    -- every consumer (]f, ]r across files, pickers, api.files) walks file_order,
+    -- so it is reordered once, before maps_loaded lets any of them in. The
+    -- reading order reads the changed files, so it runs on the next tick, while
+    -- numstat is in flight, rather than inside this callback ahead of it; queued
+    -- before numstat is even spawned, so it always lands before its callback.
+    vim.schedule(function()
+      if core.maps_current(token) then
+        require("review_mode.order").apply(state)
+      end
+    end)
     system_async(
       git.diff({ "--numstat", "-z", "--find-renames", core.diff_range() }),
       { cwd = state.root, raw = true },
       function(numstat)
-        if not core.is_current(generation) then
+        if not core.maps_current(token) then
           return
         end
 
@@ -680,7 +710,7 @@ local function load_hunks_for_paths(paths, on_done)
     return
   end
 
-  local generation = state.generation
+  local token = core.maps_token()
   local args = { "--unified=0", "--diff-filter=ACMRT" }
   args[#args + 1] = needs_rename_detection and "--find-renames" or "--no-renames"
   if state.config.diff.ignore_whitespace then
@@ -691,7 +721,7 @@ local function load_hunks_for_paths(paths, on_done)
   args = git.diff(vim.list_extend(args, git.pathspec(pending_paths, state.renames)))
 
   system_async(args, { cwd = state.root }, function(patch)
-    if not core.is_current(generation) then
+    if not core.maps_current(token) then
       return
     end
 
@@ -827,10 +857,10 @@ local function prefetch_focused_path(path, bufnr)
   end
 
   if should_delay_for_gitsigns(bufnr or 0) then
-    local generation = state.generation
+    local token = core.maps_token()
     local delay = tonumber(state.config.performance.hunk_prefetch.gitsigns_delay_ms or 0) or 0
     vim.defer_fn(function()
-      if not core.is_current(generation) then
+      if not core.maps_current(token) then
         return
       end
 
@@ -885,9 +915,22 @@ local function start_background_hunk_scan()
   end
 
   state.background_hunk_scan_loading = true
-  local generation = state.generation
+  local token = core.maps_token()
+  -- a scan the maps outlived must not clear the flag of the scan that replaced it
+  local function stale()
+    if core.maps_current(token) then
+      return false
+    end
+    if state.maps_generation == token.maps then
+      state.background_hunk_scan_loading = false
+    end
+    return true
+  end
   vim.defer_fn(function()
-    if not core.is_current(generation) or not state.maps_loaded then
+    if stale() then
+      return
+    end
+    if not state.maps_loaded then
       state.background_hunk_scan_loading = false
       return
     end
@@ -897,8 +940,7 @@ local function start_background_hunk_scan()
       table.insert(args, #args, "-w")
     end
     system_async(args, { cwd = state.root }, function(patch)
-      if not core.is_current(generation) then
-        state.background_hunk_scan_loading = false
+      if stale() then
         return
       end
 
@@ -984,7 +1026,10 @@ function head_watch.reload()
   end)
 
   -- new comments must anchor to a commit GitHub knows about, not the SHA we
-  -- captured when the review started
+  -- captured when the review started. A local review has no forge to ask.
+  if state.provider == "local" then
+    return
+  end
   pr_meta_async(generation, function(meta)
     if not core.is_current(generation) or not meta then
       return
@@ -1072,6 +1117,24 @@ local function mode_action(action)
   end
 end
 
+-- The user's global mapping of lhs, to hand back when a layer comes off.
+-- maparg() answers the current buffer's own mapping when there is one (gitsigns
+-- maps ]c per buffer), and mapset() of that on the way out would put it into
+-- whatever buffer is current while the real global mapping was lost. A layer
+-- only ever replaces the global mapping, so that is the one to keep.
+local function global_mapping(lhs, mode)
+  local found = vim.fn.maparg(lhs, mode, false, true)
+  if vim.tbl_isempty(found) or found.buffer == 0 then
+    return found
+  end
+  for _, map in ipairs(vim.api.nvim_get_keymap(mode)) do
+    if map.lhsraw == found.lhsraw then
+      return map
+    end
+  end
+  return {}
+end
+
 local function apply_mode_keys()
   state.saved_keys = {}
   for lhs, action in pairs(state.config.mode.keys or {}) do
@@ -1079,7 +1142,7 @@ local function apply_mode_keys()
       goto continue
     end
     -- keep whatever the user had, so leaving the mode is invisible to them
-    state.saved_keys[lhs] = vim.fn.maparg(lhs, "n", false, true)
+    state.saved_keys[lhs] = global_mapping(lhs, "n")
     vim.keymap.set("n", lhs, mode_action(action), {
       desc = "review-mode " .. lhs,
       silent = true,
@@ -1123,7 +1186,7 @@ local function apply_session_keys()
     modes = type(modes) == "table" and modes or { modes }
     for _, mode in ipairs(modes) do
       -- keep whatever the user had, so ending the review hands it back
-      table.insert(state.saved_session_keys, { mode = mode, lhs = lhs, saved = vim.fn.maparg(lhs, mode, false, true) })
+      table.insert(state.saved_session_keys, { mode = mode, lhs = lhs, saved = global_mapping(lhs, mode) })
     end
     vim.keymap.set(modes, lhs, mode_action(action), {
       desc = type(action) == "string" and session_key_desc[action] or ("review-mode " .. lhs),
@@ -1236,7 +1299,7 @@ local function jump_hunk(delta)
     return
   end
 
-  local path = current_relpath()
+  local path = review_relpath()
   local hunks = path and state.hunks[path] or nil
   if path and not state.hunks_loaded[path] then
     prefetch_focused_path(path)
@@ -1305,7 +1368,7 @@ local function jump_comment(delta, unresolved_only)
     return
   end
 
-  local path = current_relpath()
+  local path = review_relpath()
   local current_line = vim.api.nvim_win_get_cursor(0)[1]
   local current_index = current_file_index(path) or (delta > 0 and 0 or math.huge)
   local target = nil
@@ -1446,6 +1509,41 @@ local function load_metadata_async(generation, callback)
   end)
 end
 
+-- The one way a session ends: :ReviewModeStop, a restart while a session is
+-- active, and a start that failed all come through here, so none of them
+-- leaves a piece behind (keys, the workspace tab, the gitsigns base, the base
+-- diff, the panel, vim.g.review_mode) or skips the "stop" subscribers (CI and
+-- diagnostics clear, trial suggestions are forgotten).
+local function teardown()
+  M.leave()
+  clear_mode_keys()
+  clear_session_keys()
+  close_workspace()
+  state.workspace = nil
+  core.next_generation()
+  reset_gitsigns_base()
+  state.active = false
+  state.in_mode = false
+  state.metadata_loaded = false
+  state.repo = nil
+  state.pr = nil
+  state.base = nil
+  state.head = nil
+  state.head_ref = nil
+  state.local_store = nil
+  state.head_log_path = nil
+  state.head_log_stamp = nil
+  core.reset_review_data()
+  diff.close_old_view()
+  panel.close_panel({ confirm = false })
+  annotate_open_buffers()
+  refresh_tree()
+  announce("stop")
+  -- after the event, which still reports where the session was
+  state.root = nil
+  state.provider = nil
+end
+
 --- opts (all optional; no opts keeps the env/`gh` discovery):
 ---   root, repo, pr, base, head  the session's context, instead of env/`gh`
 ---   workspace                   "tab" | "inplace", overriding mode.workspace
@@ -1476,11 +1574,14 @@ function M.start(opts)
   end
   -- End local reviews -----------------------------------------------------------
 
+  -- a restart ends the running session first, exactly as :ReviewModeStop does,
+  -- so its keys are not captured as the user's and nothing of it carries over
+  if state.active then
+    teardown()
+  end
+
   state.root = root
   state.active = true
-  -- restarting while already in the mode must not capture our own mappings
-  clear_mode_keys()
-  clear_session_keys()
   state.in_mode = state.config.mode.enabled
   state.metadata_loaded = false
   state.repo = opts.repo or util.env_value("GH_REVIEW_REPO")
@@ -1543,17 +1644,10 @@ function M.start(opts)
         )
         return
       end
-      state.active = false
-      if seeded_key then
-        -- the cached comments drawn ahead of gh belong to no session now
-        core.reset_review_data()
-        annotate_open_buffers()
-      end
-      -- start installed both layers before it knew it would fail; a session
-      -- that never started must not leave its keys behind
-      clear_mode_keys()
-      clear_session_keys()
-      state.in_mode = false
+      -- start installed its keys, workspace and cached comments before it knew
+      -- it would fail; a session that never started must leave none of it
+      local failed_root, failed_provider = state.root, state.provider
+      teardown()
 
       -- No PR for this branch is an answer, not a failure, so review it
       -- locally. Only that answer: anything else (auth, network, a named PR
@@ -1562,11 +1656,11 @@ function M.start(opts)
       local providers = require("review_mode.providers")
       if
         state.config.no_pr == "local"
-        and state.provider ~= "gitlab"
+        and failed_provider ~= "gitlab"
         and not util.env_value("GH_REVIEW_PR")
         and providers.is_no_pr(err)
       then
-        local branch = util.system({ "git", "branch", "--show-current" }, { cwd = state.root }) or "this branch"
+        local branch = util.system({ "git", "branch", "--show-current" }, { cwd = failed_root }) or "this branch"
         vim.notify(string.format('Review Mode: no PR for "%s", reviewing it locally', branch))
         -- deferred: restarting from inside start's own callback re-enters it
         vim.schedule(function()
@@ -1749,28 +1843,11 @@ function M.mode_text(opts)
 end
 
 function M.stop()
-  M.leave()
-  clear_session_keys()
-  close_workspace()
-  state.workspace = nil
-  core.next_generation()
-  reset_gitsigns_base()
-  state.active = false
-  state.metadata_loaded = false
-  state.repo = nil
-  state.pr = nil
-  state.base = nil
-  state.head = nil
-  state.head_ref = nil
-  state.local_store = nil
-  state.head_log_path = nil
-  state.head_log_stamp = nil
-  core.reset_review_data()
-  diff.close_old_view()
-  panel.close_panel({ confirm = false })
-  annotate_open_buffers()
-  refresh_tree()
-  announce("stop")
+  -- nothing to stop: no event, no "stopped"
+  if not state.active then
+    return
+  end
+  teardown()
   vim.notify("Review Mode stopped")
 end
 
@@ -1806,10 +1883,34 @@ function M.toggle_skip_moved()
   vim.notify("Review Mode: ]c " .. (state.config.diff.skip_moved and "skips" or "stops at") .. " moved code")
 end
 
+-- In the unified diff buffer a hunk is a run of +/- lines; its rows are not
+-- the file's, so the file's hunk lines cannot be used there.
+local function jump_unified_change(delta)
+  local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  local body = 1
+  while body <= #lines and not lines[body]:find("^@@") do
+    body = body + 1
+  end
+  local function starts_change(row)
+    return row > body and lines[row]:find("^[-+]") and not lines[row - 1]:find("^[-+]")
+  end
+  local row = vim.api.nvim_win_get_cursor(0)[1] + delta
+  while row >= 1 and row <= #lines do
+    if starts_change(row) then
+      vim.api.nvim_win_set_cursor(0, { row, 0 })
+      return
+    end
+    row = row + delta
+  end
+end
+
 -- In a diff window ]c already means "next change"; leave that to Vim.
 function M.next_hunk()
   if vim.wo.diff then
     return vim.cmd("normal! " .. vim.v.count1 .. "]c")
+  end
+  if state.old_layout == "unified" and vim.api.nvim_get_current_buf() == state.old_buf then
+    return jump_unified_change(1)
   end
   jump_hunk(1)
 end
@@ -1817,6 +1918,9 @@ end
 function M.prev_hunk()
   if vim.wo.diff then
     return vim.cmd("normal! " .. vim.v.count1 .. "[c")
+  end
+  if state.old_layout == "unified" and vim.api.nvim_get_current_buf() == state.old_buf then
+    return jump_unified_change(-1)
   end
   jump_hunk(-1)
 end
@@ -1858,7 +1962,7 @@ function M.set_viewed(path, viewed)
     return false
   end
 
-  path = path or current_relpath()
+  path = path or review_relpath()
   if not path or not state.files[path] then
     return false
   end
@@ -1881,7 +1985,7 @@ function M.toggle_viewed(path)
     return
   end
 
-  path = path or current_relpath()
+  path = path or review_relpath()
   if not path or not state.files[path] then
     vim.notify("Review Mode viewed state: current buffer is not a changed PR file", vim.log.levels.WARN)
     return
@@ -1906,7 +2010,7 @@ function M.mark_viewed(path, opts)
     return false
   end
 
-  path = path or current_relpath()
+  path = path or review_relpath()
   if not path or not state.files[path] then
     vim.notify("Review Mode viewed state: current buffer is not a changed PR file", vim.log.levels.WARN)
     return false
@@ -2012,13 +2116,22 @@ function M.clear_viewed()
     return
   end
 
+  -- with sync on, GitHub has to hear about it too, or the next pull brings
+  -- every mark back: queue an unmark for each file marked or queued as marked
+  local unmark = {}
+  if state.config.viewed.sync then
+    for path in pairs(vim.tbl_extend("force", {}, state.viewed, state.viewed_sync_queue)) do
+      unmark[path] = false
+    end
+  end
   state.hunk_viewed = {}
   state.viewed = {}
   state.viewed_order = {}
-  state.viewed_sync_queue = {}
+  state.viewed_sync_queue = unmark
   viewed_state.persist_viewed_state()
   schedule_comments_ui_refresh()
-  vim.notify("Cleared PR viewed state")
+  viewed_state.flush_viewed_sync()
+  vim.notify("Cleared PR viewed state" .. (next(unmark) and ", unmarking it on GitHub" or ""))
 end
 
 function M.sync_viewed()
@@ -2031,7 +2144,7 @@ function M.sync_viewed()
     return
   end
 
-  viewed_state.sync_viewed_from_github_async(state.generation, true)
+  viewed_state.sync_viewed_from_github_async(state.generation, true, true)
   viewed_state.flush_viewed_sync()
 end
 
@@ -2039,7 +2152,8 @@ function M.toggle_viewed_sync()
   state.config.viewed.sync = not state.config.viewed.sync
   vim.notify("Review Mode GitHub viewed sync " .. (state.config.viewed.sync and "enabled" or "disabled"))
   if state.config.viewed.sync and state.active then
-    viewed_state.sync_viewed_from_github_async(state.generation)
+    -- marks made while sync was off are pushed, not replaced by GitHub's
+    viewed_state.sync_viewed_from_github_async(state.generation, false, true)
   end
 end
 
@@ -3015,6 +3129,8 @@ function M.config()
 end
 
 function M.setup(opts)
+  -- plugin/review-mode.lua skips its own argument-less setup() once this is set
+  vim.g.loaded_review_mode = 1
   state.config = core.normalize_config(opts)
 
   if state.config.commands then
