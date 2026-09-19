@@ -263,10 +263,13 @@ function M.is_viewed_file(path)
   return state.config.viewed.enabled and state.viewed[path] == true
 end
 
-local function unresolved_file_comment_count(path)
-  local count = 0
+-- Threads, not comments: a thread with three replies is one thing to resolve.
+local function unresolved_file_thread_count(path)
+  local count, seen = 0, {}
   for _, comment in ipairs(state.comments[path] or {}) do
-    if comment.is_resolved ~= true then
+    local thread = comment.thread_id or ("comment:" .. tostring(comment.id))
+    if comment.is_resolved ~= true and not seen[thread] then
+      seen[thread] = true
       count = count + 1
     end
   end
@@ -289,7 +292,7 @@ local function dir_totals()
   local totals = { changed = {}, unviewed = {}, unresolved = {} }
   for _, file in ipairs(state.file_order) do
     local unviewed = state.viewed[file] and 0 or 1
-    local unresolved = unresolved_file_comment_count(file)
+    local unresolved = unresolved_file_thread_count(file)
     local dir = vim.fs.dirname(file)
     while dir and dir ~= "." and dir ~= "" do
       totals.changed[dir] = (totals.changed[dir] or 0) + 1
@@ -341,7 +344,7 @@ function M.unresolved_count(path)
   end
 
   if state.files[path] then
-    return unresolved_file_comment_count(path)
+    return unresolved_file_thread_count(path)
   end
 
   if not state.dirs[path] then
@@ -402,6 +405,15 @@ function M.threads(opts)
   end
 
   return out
+end
+
+--- The threads a line-based action (reply, resolve, react, edit, delete) means
+--- by "the thread on this line": the unresolved ones when there are any, else
+--- the resolved ones, since a resolved thread still shows its sign there.
+function M.threads_at(path, line)
+  local all = M.threads({ path = path, line = line, include_resolved = true })
+  local open = comments_ui.visible(all, false)
+  return #open > 0 and open or all
 end
 
 --- Start a new thread on a line or range. callback(ok, err).
@@ -502,6 +514,13 @@ end
 --- Write rendered lines and marks into a scratch buffer.
 function M.apply_render(bufnr, namespace, lines, marks)
   return comments_ui.apply(bufnr, namespace, lines, marks)
+end
+
+--- The first closed ```suggestion block in a list of draft lines, as the 0-based
+--- rows of its opening and closing fences, or nil. Fences follow Markdown: ```
+--- or ~~~, three or more, closed by at least as many of the same character.
+function M.suggestion_block(lines)
+  return comments_ui.suggestion_block(lines)
 end
 
 --- The suggestion block in a comment, as a list of lines, or nil.

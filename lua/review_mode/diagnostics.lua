@@ -42,12 +42,12 @@ local function summary(thread)
   return text
 end
 
--- Strict filter: api.threads falls back to resolved threads when a file has
--- nothing else, which suits a panel but would inflate diagnostic counts.
+-- Threads with a line in the file as the PR leaves it: a base-side (LEFT)
+-- thread numbers the old file, so it has no line here.
 local function threads(path, include_resolved)
   local out = {}
-  for _, thread in ipairs(api.threads({ path = path, include_resolved = true })) do
-    if thread.line and (include_resolved or not thread.is_resolved) then
+  for _, thread in ipairs(api.threads({ path = path, include_resolved = include_resolved })) do
+    if thread.line and thread.side ~= "LEFT" then
       out[#out + 1] = thread
     end
   end

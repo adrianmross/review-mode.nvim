@@ -170,8 +170,29 @@ local function wrap(text, width)
   return out
 end
 
+-- A fence line's marker (three or more backticks or tildes) and info string,
+-- or nil. A backtick fence cannot carry a backtick in its info string.
+function M.fence(line)
+  local marker, info = line:match("^%s*(```+)(.*)$")
+  if not marker then
+    marker, info = line:match("^%s*(~~~+)(.*)$")
+  end
+  if not marker or (marker:sub(1, 1) == "`" and info:find("`", 1, true)) then
+    return nil
+  end
+  return marker, vim.trim(info)
+end
+
+-- A block closes on a fence of its own character, at least as long as the one
+-- that opened it, with nothing after it: ```` code can then hold ``` lines.
+local function closes(line, open)
+  local marker, info = M.fence(line)
+  return marker ~= nil and info == "" and marker:sub(1, 1) == open:sub(1, 1) and #marker >= #open
+end
+
 -- Split a comment body into prose runs and fenced code runs, so code can be
--- drawn as code instead of as more prose.
+-- drawn as code instead of as more prose. A code segment carries the 1-based
+-- rows of its fences (close is nil when the body ends inside the block).
 function M.split_body(body)
   local segments = {}
   local text = {}
@@ -184,18 +205,31 @@ function M.split_body(body)
     end
   end
 
-  for _, line in ipairs(vim.split(body or "", "\n", { plain = true })) do
-    local lang = line:match("^%s*```(%S*)%s*$")
-    if code and line:match("^%s*```%s*$") then
+  -- a CRLF body would otherwise carry "\r" into every line, and from there
+  -- into an accepted suggestion
+  local normalized = (body or ""):gsub("\r\n?", "\n")
+  for row, line in ipairs(vim.split(normalized, "\n", { plain = true })) do
+    if code and closes(line, code.fence) then
+      code.close = row
       segments[#segments + 1] = code
       code = nil
-    elseif lang and not code then
-      flush_text()
-      code = { kind = lang == "suggestion" and "suggestion" or "code", lang = lang, lines = {} }
     elseif code then
       code.lines[#code.lines + 1] = line
     else
-      text[#text + 1] = line
+      local marker, info = M.fence(line)
+      if marker then
+        flush_text()
+        local lang = info:match("^%S*")
+        code = {
+          kind = lang == "suggestion" and "suggestion" or "code",
+          lang = lang,
+          lines = {},
+          fence = marker,
+          open = row,
+        }
+      else
+        text[#text + 1] = line
+      end
     end
   end
 
@@ -204,6 +238,18 @@ function M.split_body(body)
   end
   flush_text()
   return segments
+end
+
+--- The first closed suggestion block in a list of lines, as the 0-based rows of
+--- its opening and closing fences, or nil. The draft composer finds its block
+--- with the same parser the renderer draws it with.
+function M.suggestion_block(lines)
+  for _, segment in ipairs(M.split_body(table.concat(lines or {}, "\n"))) do
+    if segment.kind == "suggestion" and segment.close then
+      return segment.open - 1, segment.close - 1
+    end
+  end
+  return nil
 end
 
 function M.suggestion_body(comment)
@@ -391,6 +437,10 @@ function M.render(threads, opts)
     if thread.line then
       location = string.format("%s:%s", location, thread.line)
     end
+    if thread.side == "LEFT" then
+      -- the line numbers the file before the PR, not the one in the buffer
+      location = location .. " (base)"
+    end
     local badge = "● " .. label
     local replies = #(thread.comments or {})
     if replies > 1 then
@@ -507,13 +557,18 @@ function M.normalize_rest(comment)
   return {
     id = comment.id,
     node_id = comment.node_id,
-    -- REST has no thread id; a reply names the comment it answers, which is the
-    -- closest stand-in and keeps replies grouped with their parent.
-    thread_id = comment.in_reply_to_id and ("rest:" .. tostring(comment.in_reply_to_id)) or nil,
+    -- REST has no thread id. A reply names the thread's first comment (GitHub
+    -- takes no replies to replies), so that comment's id stands in for the
+    -- thread on both the parent and its replies, keeping them together.
+    thread_id = "rest:" .. tostring(comment.in_reply_to_id or comment.id),
     path = comment.path,
     line = comment.line,
     original_line = comment.original_line,
     start_line = comment.start_line,
+    original_start_line = comment.original_start_line,
+    side = comment.side,
+    -- REST has no outdated flag; GitHub drops the live line for the same reason
+    is_outdated = tonumber(comment.line) == nil and tonumber(comment.original_line) ~= nil,
     body = comment.body,
     user = comment.user and { login = comment.user.login } or nil,
     created_at = comment.created_at,
@@ -535,12 +590,23 @@ function M.threads(list, path)
     local id = comment.thread_id or ("comment:" .. tostring(comment.id))
     local thread = by_id[id]
     if not thread then
+      -- line/start_line are where the thread sits now. GitHub drops them once
+      -- the code moves on (an outdated thread), leaving only the lines it had
+      -- in the commit it was written on; those are kept apart as original_*,
+      -- and stand in for line/start_line only as a place to show the thread.
+      local live = tonumber(comment.line)
+      local original_line = tonumber(comment.original_line)
+      local original_start = tonumber(comment.original_start_line)
       thread = {
         id = id,
         seq = index,
         path = path,
-        line = tonumber(comment.line) or tonumber(comment.original_line) or tonumber(comment.start_line),
-        start_line = tonumber(comment.start_line),
+        line = live or original_line or tonumber(comment.start_line),
+        start_line = live and tonumber(comment.start_line) or original_start or nil,
+        original_line = original_line,
+        original_start_line = original_start,
+        -- "LEFT" is a comment on the base side: its lines number the old file
+        side = comment.side,
         is_resolved = comment.is_resolved == true,
         is_outdated = comment.is_outdated == true,
         comments = {},
@@ -578,9 +644,11 @@ function M.threads(list, path)
   return order
 end
 
+--- Whether a thread sits on `line` of the file as the PR leaves it. A thread on
+--- the base side (LEFT) numbers the old file, so it covers no line here.
 function M.covers_line(thread, line)
   local last = thread.line
-  if not last then
+  if not last or thread.side == "LEFT" then
     return false
   end
   return line >= (thread.start_line or last) and line <= last
@@ -607,9 +675,7 @@ function M.visible(threads, show_resolved)
       visible[#visible + 1] = thread
     end
   end
-  -- An all-resolved file still has something to say; falling back to the full
-  -- list beats showing "no comments" over a line that visibly has a sign.
-  return #visible > 0 and visible or threads
+  return visible
 end
 
 -- Reactions ------------------------------------------------------------------

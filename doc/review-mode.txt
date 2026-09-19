@@ -148,7 +148,9 @@ THREAD PANEL                                                 *review-mode-panel*
 
 |:ReviewModePanel| opens a vertical split beside the file. It follows the
 cursor: threads anchored to the current line, or every thread in the file when
-the cursor is not on one. A thread shows its author, their association with the
+the cursor is not on one (resolved ones too, when every thread in the file is
+resolved). A comment on a deleted line is listed as "path:N (base)": its line
+numbers the file before the PR, so it gets no sign in the buffer. A thread shows its author, their association with the
 repository, how long ago it was written, the reply chain, emoji reactions, and
 whether it is open, resolved, or outdated. Fenced code inside a comment is
 drawn as code instead of as more prose, and a `suggestion` block is drawn as
@@ -431,7 +433,8 @@ COMMANDS                                                  *review-mode-commands*
 :ReviewModeSuggest
         On a line you edited, draft a suggestion from your edit. Otherwise draft
         one over the current line or visual range, starting from the lines as
-        they are. See |review-mode-edit-suggestions|.
+        they are. Always in the panel's draft buffer, even with
+        comments.compose = "prompt". See |review-mode-edit-suggestions|.
 
                                                     *:ReviewModeSuggestEdits*
 :ReviewModeSuggestEdits[!]
@@ -744,7 +747,7 @@ performance.background_hunk_scan.max_files.
 The nvim-tree integration marks unviewed changed files and closed parent
 folders with `☐ N`, where `N` is the number of unviewed changed files under
 that node. Viewed files and closed folders use `✓`, and files and closed
-folders with unresolved comments also use ` N`. An open folder hides these
+folders with unresolved threads also use ` N`, counting threads. An open folder hides these
 folder markers because its children show the same state inline. A folder
 switches to viewed after every changed file under it is viewed.
 
@@ -973,8 +976,12 @@ Reverting does not rely on `u`. The applied range is tracked with an extmark,
 so it restores exactly the lines the suggestion replaced, wherever they have
 moved to since, and leaves edits elsewhere in the file alone.
 
+A suggestion on an outdated thread, on a deleted line (the base side of the
+diff), or anchored past the end of the buffer is refused with a message rather
+than previewed or applied over whatever code sits at that line now.
+
 Accept all: the panel's `A` key and |:ReviewModeSuggestionAcceptAll| apply every
-suggestion in the file after a confirmation. Bottom-up, because a suggestion can
+suggestion on an unresolved, current thread in the file after a confirmation. Bottom-up, because a suggestion can
 replace one line with three, and applying the top one first would move every
 line number below it.
 

@@ -97,8 +97,11 @@ function M.list(path)
   local out = {}
   for _, target in ipairs(paths) do
     local found = {}
+    -- unresolved only (api.threads' default), and only threads still anchored
+    -- to the file as it is: accept-all must never take a settled suggestion,
+    -- or one written against lines that have since moved
     for _, thread in ipairs(api.threads({ path = target })) do
-      local entry = M.entry(thread)
+      local entry = not M.unanchored(thread) and M.entry(thread) or nil
       if entry then
         found[#found + 1] = entry
       end
@@ -130,14 +133,31 @@ local function buffer_for(path, bufnr)
   return nil
 end
 
--- The lines the suggestion stands in for, clamped to the buffer as it is now.
+-- The lines the suggestion stands in for. A range running past the end of the
+-- buffer is not the range the reviewer saw, so it is refused, not clamped.
 local function anchored_range(entry, bufnr)
   local count = vim.api.nvim_buf_line_count(bufnr)
-  local last = math.min(entry.end_line or 0, count)
-  if last < 1 then
-    return nil
+  local last = entry.end_line or 0
+  if last < 1 or last > count then
+    return nil,
+      nil,
+      string.format("the suggestion is anchored to line %d, but %s has %d lines", last, tostring(entry.path), count)
   end
   return math.max(1, math.min(entry.start_line or last, last)), last
+end
+
+--- Why a thread's suggestion cannot be placed in the file as it is now, or nil
+--- when it can. An outdated thread's lines number an older commit, and a base
+--- side (LEFT) thread's number the file before the PR: neither says which
+--- lines of this buffer the suggestion replaces.
+function M.unanchored(thread)
+  if thread and thread.is_outdated then
+    return "this suggestion is on an outdated thread: the code it was written against has changed since"
+  end
+  if thread and thread.side == "LEFT" then
+    return "this suggestion is on the base side of the diff, not on the file as the PR leaves it"
+  end
+  return nil
 end
 
 -- Resolve "which suggestion, in which buffer" once for every entry point.
@@ -145,6 +165,10 @@ local function resolve(entry, bufnr)
   entry = M.entry(entry)
   if not entry then
     return nil, nil, "no suggestion in this thread"
+  end
+  local unanchored = M.unanchored(entry.thread)
+  if unanchored then
+    return nil, nil, unanchored
   end
 
   bufnr = buffer_for(entry.path, bufnr)
@@ -194,9 +218,9 @@ function M.preview(entry, bufnr)
     return true
   end
 
-  local first, last = anchored_range(entry, bufnr)
+  local first, last, range_err = anchored_range(entry, bufnr)
   if not first then
-    return nil, "suggestion is not anchored to a line here"
+    return nil, range_err
   end
 
   local virt_lines = {}
@@ -259,9 +283,10 @@ function M.preview_split(entry, bufnr)
     local start_row, finish = trial_range(trial)
     first, last, replacement, name = start_row + 1, finish, trial.original, "pr-suggestion-original://"
   else
-    first, last = anchored_range(entry, bufnr)
+    local range_err
+    first, last, range_err = anchored_range(entry, bufnr)
     if not first then
-      return nil, "suggestion is not anchored to a line here"
+      return nil, range_err
     end
     replacement, name = entry.lines, "pr-suggestion://"
   end
@@ -419,9 +444,9 @@ function M.accept(entry, bufnr)
     split_thread = nil
   end
 
-  local first, last = anchored_range(entry, bufnr)
+  local first, last, range_err = anchored_range(entry, bufnr)
   if not first then
-    return nil, "suggestion is not anchored to a line here"
+    return nil, range_err
   end
 
   local original = vim.api.nvim_buf_get_lines(bufnr, first - 1, last, false)

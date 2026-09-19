@@ -154,18 +154,6 @@ local function jump_to_path(path, line)
   return true
 end
 
-local function comments_for_line(path, line)
-  local results = {}
-  for _, comment in ipairs(state.comments[path] or {}) do
-    local comment_line = tonumber(comment.line) or tonumber(comment.original_line)
-    local start_line = tonumber(comment.start_line) or comment_line
-    if comment_line and line >= start_line and line <= comment_line then
-      table.insert(results, comment)
-    end
-  end
-  return results
-end
-
 local function comment_line(comment)
   return tonumber(comment.line) or tonumber(comment.original_line) or tonumber(comment.start_line)
 end
@@ -175,7 +163,8 @@ local function comment_positions(unresolved_only)
   for _, path in ipairs(state.file_order) do
     for _, comment in ipairs(state.comments[path] or {}) do
       local line = comment_line(comment)
-      if line and not (unresolved_only and comment.is_resolved) then
+      -- a base-side (LEFT) comment's line numbers the old file, not this one
+      if line and comment.side ~= "LEFT" and not (unresolved_only and comment.is_resolved) then
         positions[#positions + 1] = {
           path = path,
           line = line,
@@ -239,7 +228,10 @@ local function annotate_buffer(bufnr)
   local grouped = {}
   for _, thread in ipairs(comments_ui.threads(comments, path)) do
     local line = thread.line
-    if line then
+    -- A thread past the end of the buffer (the file shrank, or the line is an
+    -- older commit's) has no row to sign, and a base-side (LEFT) thread numbers
+    -- the old file: a sign on that number here would point at unrelated code.
+    if line and line >= 1 and line <= line_count and thread.side ~= "LEFT" then
       grouped[line] = grouped[line] or {}
       table.insert(grouped[line], thread)
     end
@@ -2137,7 +2129,10 @@ function M.summary()
   vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO)
 end
 
-local function thread_comment_on_current_line()
+-- The thread x acts on: the one on the current line, found the way every other
+-- line action finds it (api.threads_at), so a resolved thread that still shows
+-- its sign can be unresolved from there.
+local function thread_on_current_line()
   local path = current_relpath()
   if not path then
     return nil, "current buffer is not under repo root"
@@ -2147,17 +2142,11 @@ local function thread_comment_on_current_line()
     github.hydrate_comments()
   end
 
-  local line = vim.api.nvim_win_get_cursor(0)[1]
-  local comments = comments_for_line(path, line)
-  if #comments == 0 then
+  local threads = api.threads_at(path, vim.api.nvim_win_get_cursor(0)[1])
+  if #threads == 0 then
     return nil, "no PR comment thread on current line"
   end
-
-  local target = comments[#comments]
-  if not target.thread_id then
-    return nil, "current comment was loaded without a review thread id"
-  end
-  return target, nil
+  return threads[#threads], nil
 end
 
 local function set_thread_resolved(resolved, thread_id, callback)
@@ -2167,12 +2156,24 @@ local function set_thread_resolved(resolved, thread_id, callback)
   end
 
   if not thread_id then
-    local target, err = thread_comment_on_current_line()
+    local target, err = thread_on_current_line()
     if not target then
       vim.notify("Review Mode thread: " .. tostring(err), vim.log.levels.WARN)
       return
     end
-    thread_id = target.thread_id
+    thread_id = target.id
+  end
+
+  -- REST-loaded, cache-derived, pending and sending threads have a synthetic id
+  -- ("comment:", "rest:", "pending:", "sending:"); no forge issued it, so there
+  -- is nothing to resolve. Real ids never hold a colon.
+  if tostring(thread_id):find(":", 1, true) then
+    local err = "this thread has no review thread id yet (not loaded from GitHub, or not posted)"
+    vim.notify("Review Mode thread: " .. err, vim.log.levels.WARN)
+    if callback then
+      callback(false, err)
+    end
+    return
   end
 
   if state.provider == "gitlab" then
@@ -2180,13 +2181,6 @@ local function set_thread_resolved(resolved, thread_id, callback)
   end
   if state.provider == "local" then
     return require("review_mode.providers.local").set_resolved(thread_id, resolved, callback)
-  end
-
-  -- REST-loaded and cache-derived threads have a synthetic id; GitHub only
-  -- resolves threads it issued an id for.
-  if thread_id:match("^comment:") or thread_id:match("^rest:") then
-    vim.notify("Review Mode thread: this comment was loaded without a review thread id", vim.log.levels.WARN)
-    return
   end
 
   local field = resolved and "resolveReviewThread" or "unresolveReviewThread"
@@ -2238,12 +2232,12 @@ end
 
 --- Resolve the thread on the current line, or unresolve it if it is resolved.
 function M.toggle_resolve()
-  local target, err = thread_comment_on_current_line()
+  local target, err = thread_on_current_line()
   if not target then
     vim.notify("Review Mode thread: " .. tostring(err), vim.log.levels.WARN)
     return
   end
-  set_thread_resolved(not target.is_resolved, target.thread_id)
+  set_thread_resolved(not target.is_resolved, target.id)
 end
 
 function M.open_pending()
@@ -2402,9 +2396,10 @@ function M.submit_reply(opts, callback)
   end
   opts = opts or {}
   local body = util.trim(opts.body or "")
-  -- A reply needs the id of the comment it answers. Callers may pass it
-  -- directly, or a thread id: search the file they named, and every changed
-  -- file when they did not, so opts.path stays optional.
+  -- A reply goes to the thread's first comment: GitHub's replies endpoint
+  -- takes no replies to replies. Callers may pass any comment of the thread,
+  -- or a thread id: search the file they named, and every changed file when
+  -- they did not, so opts.path stays optional.
   -- The thread is also where the reply shows while it is sending.
   local comment_id, target = opts.comment_id, nil
   if opts.thread_id or comment_id then
@@ -2416,7 +2411,7 @@ function M.submit_reply(opts, callback)
           holds = holds or (comment_id ~= nil and comment.id == comment_id)
         end
         if holds or (opts.thread_id and thread.id == opts.thread_id) then
-          comment_id, target = comment_id or thread.comments[#thread.comments].id, thread
+          comment_id, target = thread.comments[1].id, thread
           break
         end
       end
@@ -2475,6 +2470,17 @@ function M.with_hunks(path, callback)
   return maybe_with_hunks(path, callback)
 end
 
+-- Draft in the thread panel, so the comment is written beside the threads it
+-- joins; open_panel hands focus back to this window.
+local function compose_in_panel(start_line, end_line)
+  if not panel.panel_is_open() then
+    panel.open_panel()
+  end
+  -- range is Vim's count of addresses given (0, 1 or 2), not a line count:
+  -- line1..line2 is two addresses, so this reads as ":2,4ReviewModeCompose"
+  panel.compose_comment({ range = 2, line1 = start_line, line2 = end_line })
+end
+
 function M.comment(command)
   local path = current_relpath()
   if not path then
@@ -2486,15 +2492,7 @@ function M.comment(command)
   local start_line, end_line = util.visual_range(command)
 
   if state.config.comments.compose == "panel" then
-    -- draft in the thread panel, so the comment is written beside the threads
-    -- it joins; open_panel hands focus back to this window
-    if not panel.panel_is_open() then
-      panel.open_panel()
-    end
-    -- range is Vim's count of addresses given (0, 1 or 2), not a line count:
-    -- line1..line2 is two addresses, so this reads as ":2,4ReviewModeCompose"
-    panel.compose_comment({ range = 2, line1 = start_line, line2 = end_line })
-    return
+    return compose_in_panel(start_line, end_line)
   end
 
   vim.ui.input({ prompt = string.format("PR comment %s:%d-%d: ", path, start_line, end_line) }, function(input)
@@ -2526,7 +2524,7 @@ function M.comment_or_reply(command)
     return panel.suggest_edit(edit)
   end
   api.ensure_comments()
-  local threads = api.threads({ path = path, line = vim.api.nvim_win_get_cursor(0)[1] })
+  local threads = api.threads_at(path, vim.api.nvim_win_get_cursor(0)[1])
   if #threads == 0 then
     return M.comment(command)
   end
@@ -2569,7 +2567,9 @@ function M.suggest(command)
   if edit then
     return panel.suggest_edit(edit)
   end
-  M.comment({ range = 2, line1 = start_line, line2 = end_line })
+  -- always the panel composer, whatever comments.compose says: a suggestion is
+  -- code, and a one-line prompt would post it as a plain comment
+  compose_in_panel(start_line, end_line)
   panel.composer_suggest()
 end
 
