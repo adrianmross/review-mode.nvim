@@ -44,8 +44,8 @@ ends the session.
 
 Keys installed while in the mode (see mode.keys to change them):
 
-        ]c / [c         next / previous PR hunk (in a diff window, Vim's own
-                        change jump)
+        ]c / [c         next / previous PR hunk, passing over hunks that only
+                        move code (in a diff window, Vim's own change jump)
         ]r / [r         next / previous PR comment thread
         ]f / [f         next / previous changed file
 
@@ -541,6 +541,8 @@ SETUP                                                        *review-mode-setup*
       partial_line_highlights = true,
       unified_context = 3,
       use_fast_diffopt = true,
+      detect_moved = true,
+      skip_moved = true,
     },
     ci = {
       diagnostics = true, -- CI annotations as diagnostics (GitHub)
@@ -674,6 +676,17 @@ iwhiteall to the applied diffopt, unified diffs and the hunks behind ]c / [c use
 git diff -w. A file whose only changes are whitespace stays in the changed
 files; the changed-files picker marks it "(whitespace only)" and
 api.file(path).whitespace_only is true once its hunks have loaded.
+
+                                                        *review-mode-moved*
+Moved code is found once per load from one git diff of the whole review: a run
+of added lines matching a run of deleted lines anywhere in the review, ignoring
+indentation, of at least 3 lines and 20 letters or digits. Moved-in lines get a
+"»" sign, and a block's first line says "moved from a.lua:120", in
+ReviewModeMoved (linked to Comment). A block edited on the way is not a match.
+With diff.skip_moved = true (the default), ]c / [c pass over hunks that are
+nothing but moved code, deleted side included; blank lines around the block do
+not count against it. Toggle it from the actions picker; diff.detect_moved =
+false turns detection off.
 
                                                     *review-mode-diagnostics*
 Set comments.diagnostics.enabled = true (or run :ReviewModeDiagnosticsToggle)

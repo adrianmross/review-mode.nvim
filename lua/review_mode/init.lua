@@ -30,6 +30,7 @@ M.composer_suggest = panel.composer_suggest
 local viewed_state = require("review_mode.viewed")
 local github = require("review_mode.github")
 local checkout = require("review_mode.checkout")
+local moved = require("review_mode.moved")
 
 M.flush_viewed_sync = viewed_state.flush_viewed_sync
 
@@ -203,6 +204,7 @@ end
 local function annotate_buffer(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   clear_buffer_marks(bufnr)
+  moved.annotate(bufnr)
 
   if not state.active or not state.root then
     return
@@ -926,8 +928,13 @@ local function start_background_hunk_scan()
 end
 
 local function first_hunk_line(path)
-  local hunks = state.hunks[path]
-  return hunks and hunks[1] or 1
+  local hunks = state.hunks[path] or {}
+  for _, line in ipairs(hunks) do
+    if not moved.skip_hunk(path, line) then
+      return line
+    end
+  end
+  return hunks[1] or 1
 end
 
 -- the reflog is appended on every commit, amend, rebase and checkout, so its
@@ -986,6 +993,7 @@ function head_watch.reload()
     refresh_tree()
     prefetch_current_buffer()
     start_background_hunk_scan()
+    moved.load()
     vim.notify(string.format("Review Mode: HEAD moved, %d changed files", #state.file_order))
   end)
 
@@ -1203,9 +1211,9 @@ local function jump_changed_file(delta)
   local path = state.file_order[next_index]
   jump_to_path(path, first_hunk_line(path))
   prefetch_focused_path(path)
-  maybe_with_hunks(path, function(hunks)
+  maybe_with_hunks(path, function()
     if current_relpath() == path then
-      jump_to_path(path, hunks[1] or 1)
+      jump_to_path(path, first_hunk_line(path))
     end
   end)
 end
@@ -1239,8 +1247,10 @@ local function jump_hunk(delta)
 
   local current_line = vim.api.nvim_win_get_cursor(0)[1]
   local keys = state.hunk_hashes[path] or {}
+  -- a viewed hunk (when asked) or one that only moves code has nothing new
   local function skipped(index)
-    return state.config.viewed.skip_viewed_hunks and viewed_state.is_hunk_viewed(path, keys[index])
+    return (state.config.viewed.skip_viewed_hunks and viewed_state.is_hunk_viewed(path, keys[index]))
+      or moved.skip_hunk(path, hunks[index])
   end
   if delta > 0 then
     for index, hunk_line in ipairs(hunks) do
@@ -1370,6 +1380,7 @@ local function load_review_async(generation, opts)
     prefetch_current_buffer()
     prefetch_near_path(state.file_order[1])
     start_background_hunk_scan()
+    moved.load()
     if opts.open_initial and state.config.auto_open_first_change then
       open_initial_change()
     end
@@ -1774,6 +1785,12 @@ M.old_toggle = diff.old_toggle
 M.toggle_diff_layout = diff.toggle_diff_layout
 M.toggle_diff_full_file = diff.toggle_diff_full_file
 M.toggle_diff_whitespace = diff.toggle_diff_whitespace
+
+--- Whether ]c / [c pass over hunks that only move code (diff.skip_moved).
+function M.toggle_skip_moved()
+  state.config.diff.skip_moved = not state.config.diff.skip_moved
+  vim.notify("Review Mode: ]c " .. (state.config.diff.skip_moved and "skips" or "stops at") .. " moved code")
+end
 
 -- In a diff window ]c already means "next change"; leave that to Vim.
 function M.next_hunk()
@@ -2740,6 +2757,7 @@ function M.action_items()
     { category = "Diff", label = "Toggle diff layout", run = M.toggle_diff_layout },
     { category = "Diff", label = "Expand / collapse unchanged lines (zR / zM)", run = M.toggle_diff_full_file },
     { category = "Diff", label = "Hide / show whitespace changes", run = M.toggle_diff_whitespace },
+    { category = "Diff", label = "Toggle skipping moved code on ]c / [c", run = M.toggle_skip_moved },
     -- Review --
     { category = "Review", label = "Pending review", run = M.open_pending },
     {
