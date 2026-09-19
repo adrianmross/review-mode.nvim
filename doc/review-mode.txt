@@ -78,7 +78,7 @@ Session keys are installed by :ReviewMode and removed by :ReviewModeStop. They
 stay while you step out of the mode, since <leader> keys shadow nothing in
 stock Vim (see session.keys to change them):
 
-        <leader>rt      toggle the thread panel|review-mode-panel|
+        <leader>rt      toggle the thread panel |review-mode-panel|
         <leader>rr      comment: on a line you edited, suggest the edit;
                         else reply to the thread on this line, or start
                         one where there is none; a visual range always
@@ -199,9 +199,9 @@ Keys inside the panel:
         +       react to the comment under the cursor
         e       edit your comment under the cursor in a draft buffer
         dd      delete your comment under the cursor, after a confirmation
-        s       open the pending review buffer|review-mode-pending|
+        s       open the pending review buffer |review-mode-pending|
         q       close the panel
-        p       preview the suggestion in the code|review-mode-suggestions|
+        p       preview the suggestion in the code |review-mode-suggestions|
         A       apply every suggestion in the file, after a confirmation
 
 Resolved threads are hidden in the panel and in |:ReviewModeThread| unless a
@@ -1137,7 +1137,7 @@ Session and lifecycle ~
   api.enter() / api.leave()   step into or out of the mode
   api.toggle() / api.refresh() as |:ReviewMode| / |:ReviewModeRefresh|
   api.review_pr(opts, cb)     review a PR in its own worktree
-  api.review_local(args)      start a local review|review-mode-local|
+  api.review_local(args)      start a local review |review-mode-local|
 
 Files and progress ~
   api.files()                 every changed file, in review order
@@ -1219,7 +1219,7 @@ Diagnostics, CI and accounting ~
   api.request_stats()         { calls, not_modified } for gh / glab
 
 Events ~
-  api.events                  the event names, see|review-mode-events|
+  api.events                  the event names, see |review-mode-events|
   api.on(event, fn)           subscribe; returns an unsubscribe function
   api.unstable_state()        the raw session table (escape hatch)
 
