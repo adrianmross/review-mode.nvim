@@ -277,20 +277,27 @@ function M.apply_queued_viewed_changes()
   end
 end
 
-function M.sync_viewed_from_github_async(generation, force)
+--- Pull GitHub's viewed marks. merge_local (turning sync on, a forced sync):
+--- marks made here that GitHub does not have are queued for it rather than
+--- replaced by GitHub's set, so they are pushed instead of lost.
+function M.sync_viewed_from_github_async(generation, force, merge_local)
   if
     not state.config.viewed.enabled
     or (not force and not state.config.viewed.sync)
-    or state.viewed_loading
+    -- stamped like viewed_sync_loading: a query outlived by :ReviewModeRefresh
+    -- never calls back, so a bare flag would stay set and block every sync
+    or state.viewed_loading == generation
     or not state.repo
     or not state.pr
   then
     return
   end
 
-  state.viewed_loading = true
+  state.viewed_loading = generation
   M.github_viewed_files_async(generation, nil, {}, function(viewed, err)
-    state.viewed_loading = false
+    if state.viewed_loading == generation then
+      state.viewed_loading = false
+    end
     if not core.is_current(generation) then
       return
     end
@@ -300,6 +307,13 @@ function M.sync_viewed_from_github_async(generation, force)
       return
     end
 
+    if merge_local then
+      for path in pairs(state.viewed) do
+        if not viewed[path] and state.viewed_sync_queue[path] == nil then
+          state.viewed_sync_queue[path] = true
+        end
+      end
+    end
     state.viewed = viewed
     M.apply_queued_viewed_changes()
     M.refresh_viewed_order()
@@ -379,8 +393,11 @@ function M.queue_viewed_sync(path, viewed)
   M.persist_viewed_state()
 end
 
-function M.clear_queued_viewed_sync(path)
-  if not path or state.viewed_sync_queue[path] == nil then
+--- Drop path from the queue once `viewed` reached GitHub -- only if that is
+--- still what is queued: a toggle made while the mutation was in flight queued
+--- the opposite, and that one has not been sent.
+function M.clear_queued_viewed_sync(path, viewed)
+  if not path or state.viewed_sync_queue[path] == nil or state.viewed_sync_queue[path] ~= (viewed == true) then
     return
   end
 
@@ -443,7 +460,7 @@ mutation($pullRequestId: ID!, $path: String!) {
         return
       end
 
-      M.clear_queued_viewed_sync(path)
+      M.clear_queued_viewed_sync(path, viewed)
       done(true)
     end)
   end)

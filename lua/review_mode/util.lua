@@ -18,10 +18,16 @@ function M.trim(value)
   return vim.trim(value or "")
 end
 
+-- vim.system throws, rather than failing the call, when the executable is
+-- missing (ENOENT) or the cwd is gone; answer those like any other failure.
 function M.system(args, opts)
   opts = opts or {}
   M.count_call(args)
-  local result = vim.system(args, { text = true, cwd = opts.cwd or state.root or vim.uv.cwd() }):wait()
+  local ok, process = pcall(vim.system, args, { text = true, cwd = opts.cwd or state.root or vim.uv.cwd() })
+  if not ok then
+    return nil, tostring(process)
+  end
+  local result = process:wait()
   if result.code ~= 0 then
     return nil, M.trim(result.stderr ~= "" and result.stderr or result.stdout)
   end
@@ -34,20 +40,31 @@ end
 function M.system_async(args, opts, callback)
   opts = opts or {}
   M.count_call(args)
-  vim.system(args, { text = true, cwd = opts.cwd or state.root or vim.uv.cwd() }, function(result)
+  local ok, err = pcall(
+    vim.system,
+    args,
+    { text = true, cwd = opts.cwd or state.root or vim.uv.cwd() },
+    function(result)
+      vim.schedule(function()
+        local failed = result.code ~= 0
+        if failed and not opts.any_exit then
+          callback(nil, M.trim(result.stderr ~= "" and result.stderr or result.stdout))
+          return
+        end
+        if opts.raw or opts.any_exit then
+          callback(result.stdout, failed and M.trim(result.stderr) or nil)
+          return
+        end
+        callback(M.trim(result.stdout), nil)
+      end)
+    end
+  )
+  if not ok then
+    -- still asynchronous: callers may not expect their callback before return
     vim.schedule(function()
-      local failed = result.code ~= 0
-      if failed and not opts.any_exit then
-        callback(nil, M.trim(result.stderr ~= "" and result.stderr or result.stdout))
-        return
-      end
-      if opts.raw or opts.any_exit then
-        callback(result.stdout, failed and M.trim(result.stderr) or nil)
-        return
-      end
-      callback(M.trim(result.stdout), nil)
+      callback(nil, tostring(err))
     end)
-  end)
+  end
 end
 
 function M.gh_json_async(args, callback)

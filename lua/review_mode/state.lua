@@ -239,6 +239,10 @@ local state = {
   generation = 0,
   maps_loaded = false,
   maps_loading = false,
+  -- bumped whenever the changed-file maps are dropped: a follow-HEAD reload
+  -- keeps the session's generation, so hunk loads started against the old HEAD
+  -- check this one before they write
+  maps_generation = 0,
   metadata_loaded = false,
   ui_refresh_pending = false,
   old_win = nil,
@@ -247,7 +251,7 @@ local state = {
   old_target_buf = nil,
   old_loading = false,
   old_diffopt = nil,
-  old_fold_options = nil,
+  old_window_options = nil,
   old_layout = nil,
   old_path = nil,
   old_closing = false,
@@ -432,7 +436,18 @@ function M.is_current(generation)
   return state.active and state.generation == generation
 end
 
+--- A token for work against the changed-file maps as they are now, and whether
+--- that work is still current: same session, and the maps not rebuilt since.
+function M.maps_token()
+  return { generation = state.generation, maps = state.maps_generation }
+end
+
+function M.maps_current(token)
+  return M.is_current(token.generation) and state.maps_generation == token.maps
+end
+
 function M.reset_changed_data()
+  state.maps_generation = state.maps_generation + 1
   state.files = {}
   state.renames = {}
   state.file_stats = {}
