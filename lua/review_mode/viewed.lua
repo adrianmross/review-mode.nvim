@@ -69,6 +69,7 @@ function M.persist_viewed_state()
   entry.viewed = state.viewed
   entry.order = state.viewed_order
   entry.sync_queue = state.viewed_sync_queue
+  entry.hunks = state.hunk_viewed
   local ok, err = pcall(util.write_json_file, M.viewed_state_path(), M.load_viewed_store())
   if not ok then
     vim.notify("Review Mode viewed state: " .. tostring(err), vim.log.levels.WARN)
@@ -78,6 +79,7 @@ end
 function M.load_viewed_state()
   state.viewed = {}
   state.viewed_order = {}
+  state.hunk_viewed = {}
 
   if not state.config.viewed.enabled then
     return
@@ -88,6 +90,7 @@ function M.load_viewed_state()
     return
   end
 
+  state.hunk_viewed = vim.deepcopy(entry.hunks or {})
   state.viewed = vim.deepcopy(entry.viewed or {})
   state.viewed_order = vim.deepcopy(entry.order or {})
   state.viewed_sync_queue = vim.deepcopy(entry.sync_queue or {})
@@ -110,6 +113,62 @@ function M.set_viewed_path(path, viewed)
   M.remove_viewed_order(path)
   return false
 end
+
+-- Hunk-level viewed ------------------------------------------------------------
+-- GitHub only knows whole files. A hunk is remembered by a hash of its +/- lines
+-- rather than its line number, so it stays viewed when an unrelated push shifts
+-- it, and comes back unviewed exactly when its own content changes.
+
+--- One key per hunk, from each hunk's +/- lines only, so context or "\ No
+--- newline" lines (gitsigns may include them, git -U0 does not) never change it.
+--- Identical hunks in one file get an occurrence suffix, so marking one does
+--- not mark its twin.
+function M.hunk_keys(bodies)
+  local keys, seen = {}, {}
+  for index, body in ipairs(bodies or {}) do
+    local changed = vim.tbl_filter(function(line)
+      return line:match("^[-+]") ~= nil
+    end, body)
+    local hash = vim.fn.sha256(table.concat(changed, "\n"))
+    seen[hash] = (seen[hash] or 0) + 1
+    keys[index] = seen[hash] > 1 and (hash .. "#" .. seen[hash]) or hash
+  end
+  return keys
+end
+
+function M.is_hunk_viewed(path, key)
+  return key ~= nil and state.config.viewed.enabled and (state.hunk_viewed[path] or {})[key] == true
+end
+
+function M.set_hunk_viewed(path, key, viewed)
+  if not path or not key or not state.config.viewed.enabled then
+    return
+  end
+  state.hunk_viewed[path] = state.hunk_viewed[path] or {}
+  state.hunk_viewed[path][key] = viewed and true or nil
+  if vim.tbl_isempty(state.hunk_viewed[path]) then
+    state.hunk_viewed[path] = nil
+  end
+  M.persist_viewed_state()
+  hooks.emit("viewed_changed", { path = path, source = "hunk" })
+end
+
+--- viewed, total for a file's hunks; nil when its hunks are not loaded, viewed
+--- tracking is off, or there is no path.
+function M.hunk_progress(path)
+  local keys = state.config.viewed.enabled and path and state.hunk_hashes[path]
+  if not keys then
+    return nil
+  end
+  local viewed = 0
+  for _, key in ipairs(keys) do
+    if M.is_hunk_viewed(path, key) then
+      viewed = viewed + 1
+    end
+  end
+  return viewed, #keys
+end
+-- End hunk-level viewed --------------------------------------------------------
 
 function M.github_viewed_files_async(generation, after, viewed, callback)
   if state.provider == "gitlab" then

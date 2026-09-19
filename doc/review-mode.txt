@@ -66,6 +66,7 @@ Vim (see session.keys to change them):
         <leader>rx      resolve / unresolve the thread on this line
         <leader>rf      changed files with viewed state and comment counts
         <leader>rv      toggle this file viewed
+        <leader>rh      toggle the hunk under the cursor viewed
         <leader>rd      base diff (rD layout; zR / zM show / fold unchanged lines)
         <leader>ra      actions picker (every action, with its key)
         <leader>rs      pending review and submit
@@ -365,6 +366,11 @@ COMMANDS                                                  *review-mode-commands*
 :ReviewModeViewedToggle
         Toggle viewed state for the current PR file.
 
+                                                        *:ReviewModeHunkViewedToggle*
+:ReviewModeHunkViewedToggle
+        Toggle viewed state for the hunk under the cursor (the last hunk that
+        starts at or above it). See |review-mode-hunk-viewed|.
+
                                                         *:ReviewModeViewedNext*
 :ReviewModeViewedNext
         Mark the current PR file viewed and jump to the next unviewed file.
@@ -564,6 +570,7 @@ SETUP                                                        *review-mode-setup*
       enabled = true,
       sync = false,
       state_path = nil,
+      skip_viewed_hunks = false,
     },
     performance = {
       ui_refresh_debounce_ms = 50,
@@ -635,6 +642,19 @@ gone.
 Viewed state is persisted in stdpath("state")/review-mode-state.json by default.
 Set viewed.sync = true or run :ReviewModeViewedSyncToggle to pull GitHub's PR file
 viewed state at startup and push local viewed/unviewed toggles back to GitHub.
+
+                                                        *review-mode-hunk-viewed*
+<leader>rh (|:ReviewModeHunkViewedToggle|) marks the hunk under the cursor
+viewed, or unviewed again. GitHub has no such mark, so it is kept locally next
+to the file viewed state, keyed by a hash of the hunk's +/- lines rather than
+its position. When the author pushes and the review follows HEAD, a hunk that
+only moved stays viewed and a hunk whose content changed comes back unviewed.
+Viewed hunks get a quiet sign, the changed-files picker shows "(3/7 hunks
+viewed)" for a file you are partway through, and viewed.skip_viewed_hunks = true
+makes ]c / [c pass over them. Viewing the last unviewed hunk of a file marks the
+file viewed, and un-viewing a hunk of a viewed file un-views it, both exactly as
+<leader>rv would (so they sync to GitHub when viewed.sync is on). A file you
+un-view by hand stays unviewed until a hunk toggle completes it again.
 
 ReviewModeOldToggle uses the built-in Neovim side-by-side diff backend by
 default. Set diff.layout = "unified" or run :ReviewModeDiffLayoutToggle to use an
