@@ -47,15 +47,24 @@ function M.ci_symbol(rollup)
   return pending and "…" or "✓"
 end
 
---- "5m", "3h" or "2d" since an ISO-8601 UTC timestamp.
+-- Seconds since the epoch of a UTC calendar date, with no time zone involved
+-- (os.time reads its table as local time, DST flag and all).
+local function utc_epoch(y, mo, d, h, mi, s)
+  y = mo <= 2 and y - 1 or y
+  local era = math.floor(y / 400)
+  local yoe = y - era * 400
+  local doy = math.floor((153 * ((mo + 9) % 12) + 2) / 5) + d - 1
+  local days = era * 146097 + yoe * 365 + math.floor(yoe / 4) - math.floor(yoe / 100) + doy - 719468
+  return ((days * 24 + h) * 60 + mi) * 60 + s
+end
+
+--- "5m", "3h" or "2d" since an ISO-8601 UTC timestamp. `now` is epoch seconds.
 function M.age(iso, now)
-  local y, mo, d, h, mi, s = tostring(iso or ""):match("^(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)")
-  if not y then
+  local fields = { tostring(iso or ""):match("^(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)") }
+  if #fields == 0 then
     return ""
   end
-  -- both sides read as local time, so the zone offset cancels
-  local seconds = (now or os.time(os.date("!*t")))
-    - os.time({ year = y, month = mo, day = d, hour = h, min = mi, sec = s })
+  local seconds = (now or os.time()) - utc_epoch(unpack(vim.tbl_map(tonumber, fields)))
   if seconds < 3600 then
     return math.max(0, math.floor(seconds / 60)) .. "m"
   elseif seconds < 86400 then
@@ -89,7 +98,8 @@ end
 
 --- The gh arguments for a scope ("requested", "mine" or "all").
 function M.args(scope)
-  local args = { "pr", "list", "--state", "open", "--json", FIELDS }
+  -- gh stops at 30 unless told otherwise
+  local args = { "pr", "list", "--state", "open", "--limit", "100", "--json", FIELDS }
   local search = M.scopes[scope]
   if search then
     vim.list_extend(args, { "--search", search })
@@ -109,9 +119,10 @@ function M.open(scope)
     vim.notify("Review Mode inbox: unknown scope " .. tostring(scope), vim.log.levels.ERROR)
     return
   end
-  local session = api.session()
-  if session and session.provider == "gitlab" then
-    vim.notify("Review Mode: the review inbox is GitHub-only; this review is on GitLab", vim.log.levels.WARN)
+  -- the repo's own forge, not whichever the last session happened to be on
+  local root = util.repo_root()
+  if root and require("review_mode.providers").select(root) == "gitlab" then
+    vim.notify("Review Mode: the review inbox is GitHub-only; this repo is on GitLab", vim.log.levels.WARN)
     return
   end
   util.gh_json_async(M.args(scope), function(prs, err)

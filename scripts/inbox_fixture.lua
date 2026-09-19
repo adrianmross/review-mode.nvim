@@ -90,7 +90,16 @@ assert(inbox.ci_symbol({}) == "", "no checks should show nothing")
 assert(inbox.ci_symbol({ { status = "COMPLETED", conclusion = "SUCCESS" }, { state = "SUCCESS" } }) == "✓")
 assert(inbox.ci_symbol({ { status = "QUEUED", conclusion = "" }, { state = "SUCCESS" } }) == "…")
 assert(inbox.ci_symbol({ { status = "IN_PROGRESS" }, { state = "ERROR" } }) == "✗", "a failure outranks pending")
-assert(inbox.age("2024-01-01T00:00:00Z", os.time({ year = 2024, month = 1, day = 1, hour = 3 })) == "3h")
+-- `now` is epoch seconds: 2024-01-01T03:00:00Z
+assert(inbox.age("2024-01-01T00:00:00Z", 1704067200 + 3 * 3600) == "3h")
+-- and without one, the real clock. validate.sh runs this under
+-- America/New_York: reading the UTC stamp as local time is an hour off in DST.
+local two_hours_ago = os.date("!%Y-%m-%dT%H:%M:%SZ", os.time() - 2 * 3600 - 60)
+assert(inbox.age(two_hours_ago) == "2h", "age of a stamp two hours old: " .. inbox.age(two_hours_ago))
+assert(
+  table.concat(inbox.args("requested"), " "):find("--limit 100", 1, true),
+  "gh pr list stops at 30 without a --limit"
+)
 
 -- 3. scopes: "mine" asks for authored PRs, "all" for every open PR
 local mine = table.concat(inbox.args("mine"), " ")
@@ -104,18 +113,17 @@ vim.env.GH_REVIEW_REPO = saved_repo
 inbox.open("nope")
 assert(notifications[#notifications].msg:find("unknown scope", 1, true), "a bad scope was not reported")
 
--- a GitLab review gets a clear answer, not gh's error, and no gh call
-local real_session = api.session
-api.session = function()
-  return { provider = "gitlab", repo = "group/project" }
-end
+-- a GitLab repo gets a clear answer, not gh's error, and no gh call. Decided
+-- by this repo's remote, not by whatever the last session was on.
+local origin_url = git({ "remote", "get-url", "origin" })
+git({ "remote", "set-url", "origin", "https://gitlab.com/group/project.git" })
 inbox.open()
-api.session = real_session
+git({ "remote", "set-url", "origin", origin_url })
 assert(
   notifications[#notifications].msg:find("inbox is GitHub-only", 1, true),
-  "a GitLab review was not told the inbox is GitHub-only: " .. notifications[#notifications].msg
+  "a GitLab repo was not told the inbox is GitHub-only: " .. notifications[#notifications].msg
 )
-assert(#gh_calls() == 1, "the inbox called gh during a GitLab review")
+assert(#gh_calls() == 1, "the inbox called gh in a GitLab repo")
 
 -- 4. the inbox is in the action picker, and Summary still ends it
 local actions = pr.action_items()

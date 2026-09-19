@@ -660,6 +660,7 @@ XDG_STATE_HOME="$tmp/inbox-state" \
 GH_REVIEW_REPO=owner/repo \
 REVIEW_MODE_GH_LOG="$tmp/inbox-gh.log" \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+TZ=America/New_York \
 run_fixture inbox_fixture
 
 # Your edits, as suggestions: found against HEAD, checked against the PR diff,
