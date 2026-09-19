@@ -95,46 +95,109 @@ local function stat_text(value, prefix)
   return prefix .. tostring(value)
 end
 
--- Pad to a display width: the glyphs here are several bytes but one cell, so
--- string.format's byte padding would push the path column around.
-local function pad(text, width)
-  return text .. string.rep(" ", math.max(0, width - vim.fn.strdisplaywidth(text)))
+-- Colors for the file rows, linked to standard groups so any colorscheme
+-- carries them; override any ReviewModePicker* group to restyle.
+local picker_highlights = {
+  ReviewModePickerAdded = "Added",
+  ReviewModePickerRemoved = "Removed",
+  ReviewModePickerProgress = "DiagnosticInfo",
+  ReviewModePickerProgressNone = "Comment",
+  ReviewModePickerViewed = "DiagnosticOk",
+  ReviewModePickerThreads = "DiagnosticWarn",
+  ReviewModePickerResolved = "DiagnosticOk",
+  ReviewModePickerDir = "Comment",
+}
+
+local function ensure_picker_highlights()
+  for name, link in pairs(picker_highlights) do
+    vim.api.nvim_set_hl(0, name, { link = link, default = true })
+  end
 end
 
--- ✓ once viewed, else how much of it is: the share of its hunks viewed
-local function viewed_picker_status(path, viewed)
-  if viewed then
-    return "✓"
-  end
-  return string.format("%d%%", math.floor(api.review_fraction(path) * 100))
-end
-
--- every thread on the file, and how many of them are resolved
-local function comment_column(total, resolved)
-  if total == 0 then
-    return ""
-  end
-  local text = api.comment_count_label(total)
-  if resolved > 0 then
-    text = text .. " ✓" .. resolved
-  end
+-- 5449 -> "5,449"
+local function thousands(value)
+  local text, count = tostring(value), 0
+  repeat
+    text, count = text:gsub("^(-?%d+)(%d%d%d)", "%1,%2")
+  until count == 0
   return text
 end
+M._thousands = thousands
 
--- The whole review in one line, for the file picker's title.
+-- A row as { text, highlight } segments, so snacks and Telescope can color it
+-- and the plain label is just the texts joined. Columns: how much is reviewed,
+-- lines added and removed, comment threads (and how many are resolved), path.
+local function row_segments(path, viewed, stats, threads, resolved, unresolved)
+  local segments = {}
+  local function cell(text, hl, width, right)
+    local gap = string.rep(" ", math.max(0, (width or 0) - vim.fn.strdisplaywidth(text)))
+    if right then
+      segments[#segments + 1] = { gap }
+    end
+    segments[#segments + 1] = { text, hl }
+    if not right then
+      segments[#segments + 1] = { gap }
+    end
+    segments[#segments + 1] = { " " }
+  end
+
+  if viewed then
+    cell("✓", "ReviewModePickerViewed", 4)
+  else
+    local percent = math.floor(api.review_fraction(path) * 100)
+    cell(percent .. "%", percent > 0 and "ReviewModePickerProgress" or "ReviewModePickerProgressNone", 4, true)
+  end
+  cell("+" .. thousands(stats.additions or 0), "ReviewModePickerAdded", 7, true)
+  cell("-" .. thousands(stats.deletions or 0), "ReviewModePickerRemoved", 7, true)
+
+  local width = 8
+  if threads > 0 then
+    local count = api.comment_count_label(threads)
+    segments[#segments + 1] = { count, unresolved > 0 and "ReviewModePickerThreads" or "ReviewModePickerResolved" }
+    width = width - vim.fn.strdisplaywidth(count)
+    if resolved > 0 then
+      local done = " ✓" .. resolved
+      segments[#segments + 1] = { done, "ReviewModePickerResolved" }
+      width = width - vim.fn.strdisplaywidth(done)
+    end
+  end
+  segments[#segments + 1] = { string.rep(" ", math.max(0, width)) .. " " }
+
+  local dir, name = path:match("^(.*/)([^/]+)$")
+  if dir then
+    segments[#segments + 1] = { dir, "ReviewModePickerDir" }
+    segments[#segments + 1] = { name }
+  else
+    segments[#segments + 1] = { path }
+  end
+  return segments
+end
+
+local function segments_text(segments)
+  local parts = {}
+  for _, segment in ipairs(segments) do
+    parts[#parts + 1] = segment[1]
+  end
+  return table.concat(parts)
+end
+
+-- Telescope wants the text plus byte ranges for each highlight.
+local function segments_highlights(segments)
+  local out, col = {}, 0
+  for _, segment in ipairs(segments) do
+    if segment[2] then
+      out[#out + 1] = { { col, col + #segment[1] }, segment[2] }
+    end
+    col = col + #segment[1]
+  end
+  return out
+end
+
+-- Short enough for a picker's border: the rest is in the statusline and
+-- :ReviewModeSummary.
 local function files_title(filter)
   local progress = api.review_progress()
-  return string.format(
-    "Review Mode files [%s] · %d%% reviewed · %d left · %d thread%s, %d resolved · +%d -%d",
-    filter,
-    progress.percent,
-    progress.files_left,
-    progress.threads,
-    progress.threads == 1 and "" or "s",
-    progress.resolved,
-    progress.added,
-    progress.removed
-  )
+  return string.format("Files [%s] · %d%% · %d left", filter, progress.percent, progress.files_left)
 end
 
 local function viewed_picker_item(path)
@@ -143,23 +206,13 @@ local function viewed_picker_item(path)
   local comments = api.unresolved_count(path)
   local threads, resolved = api.thread_counts(path)
   local stats = file_stats(path)
-  local review_icon = viewed_picker_status(path, viewed)
-  local comment_icon = comment_column(threads, resolved)
-  local additions = stat_text(stats.additions, "+")
-  local deletions = stat_text(stats.deletions, "-")
-  local label = vim.trim(
-    pad(review_icon, 4)
-      .. " "
-      .. string.format("%5s %5s", additions, deletions)
-      .. " "
-      .. pad(comment_icon, 7)
-      .. " "
-      .. path
-  )
+  local segments = row_segments(path, viewed, stats, threads, resolved, comments)
   local entry = api.file(path)
   if entry and entry.whitespace_only then
-    label = label .. "  (whitespace only)"
+    segments[#segments + 1] = { "  (whitespace only)", "ReviewModePickerProgressNone" }
   end
+  -- trailing space only: Telescope's highlight ranges count from column 0
+  local label = (segments_text(segments):gsub("%s+$", ""))
 
   return {
     path = path,
@@ -168,8 +221,7 @@ local function viewed_picker_item(path)
     comments = comments,
     additions = stats.additions,
     deletions = stats.deletions,
-    review_icon = review_icon,
-    comment_icon = comment_icon,
+    segments = segments,
     label = label,
     search = table.concat({
       path,
@@ -327,6 +379,9 @@ local function open_snacks_viewed_picker(filter)
     source = "review_mode_files",
     title = files_title(filter),
     items = snacks_items,
+    format = function(entry)
+      return (entry.item or entry).segments
+    end,
     -- built per selection, and the diff behind it is fetched asynchronously
     preview = function(ctx)
       local item = ctx.item and (ctx.item.item or ctx.item)
@@ -438,7 +493,9 @@ local function open_telescope_viewed_picker(filter)
         entry_maker = function(item)
           return {
             value = item,
-            display = item.label,
+            display = function()
+              return item.label, segments_highlights(item.segments)
+            end,
             ordinal = item.search,
             path = item.path,
           }
@@ -526,6 +583,7 @@ function M.list_viewed(filter)
     return
   end
 
+  ensure_picker_highlights()
   open_viewed_picker(filter)
 end
 
