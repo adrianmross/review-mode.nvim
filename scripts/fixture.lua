@@ -528,7 +528,10 @@ end, "reload after the suggest comment did not finish")
 pr.summary()
 assert(last_notification():find("Files: 1 viewed, 3 unviewed, 4 total", 1, true), "summary file counts were wrong")
 assert(last_notification():find("Comments: 4", 1, true), "summary comment count was wrong")
-assert(last_notification():find("Threads: 3 total, 2 unresolved", 1, true), "summary thread counts were wrong")
+assert(
+  last_notification():find("Threads: 3 total, 1 resolved, 2 unresolved", 1, true),
+  "summary thread counts were wrong: " .. last_notification()
+)
 
 vim.cmd.edit("file.txt")
 wait_for(function()
@@ -753,18 +756,35 @@ local native_labels = vim.tbl_map(function(item)
   return native_select.opts.format_item(item)
 end, native_select.items)
 assert(
-  has_line_parts(native_labels, { "☐ 1", "+2", "-1", comment_sign .. " 1", "file.txt" }),
+  -- reviewed share, lines, every thread with how many are resolved, path
+  has_line_parts(native_labels, { "0%", "+2", "-1", comment_sign .. " 2 ✓1", "file.txt" }),
   "native picker file label was wrong"
 )
 assert(
-  has_line_parts(native_labels, { "☐ 1", "+1", "-1", comment_sign .. " 1", "nested/other.txt" }),
+  has_line_parts(native_labels, { "0%", "+1", "-1", comment_sign .. " 1", "nested/other.txt" }),
   "native picker nested file label was wrong"
 )
 assert(
-  has_line_parts(native_labels, { "☐ 1", "+1", "-1", "nested/deeper/more.txt" }),
+  has_line_parts(native_labels, { "0%", "+1", "-1", "nested/deeper/more.txt" }),
   "native picker deep file label was wrong"
 )
-assert(has_line_parts(native_labels, { "☐ 1", "+2", "-0", "new.txt" }), "native picker added file label was wrong")
+assert(has_line_parts(native_labels, { "0%", "+2", "-0", "new.txt" }), "native picker added file label was wrong")
+-- the title carries the whole review
+assert(
+  native_select.opts.prompt:find("0% reviewed · 4 left · 3 threads, 1 resolved · +6 -3", 1, true),
+  "native picker title lacks the review totals: " .. native_select.opts.prompt
+)
+-- overall progress weighs files by changed lines: new.txt is 2 of the 9, so
+-- viewing only it reads 22%, not the 25% a per-file count would give. The flag
+-- is set directly so no viewed sync is queued for the tests further down.
+local session = api.unstable_state()
+session.viewed["new.txt"] = true
+assert(api.review_percent() == 22, "overall progress is not by changed lines: " .. api.review_percent())
+assert(pr.statusline():find(" 22%% "), "statusline lacks the reviewed share: " .. pr.statusline())
+pr.summary()
+assert(last_notification():find("Reviewed: 22% of changed lines, 3 file(s) left", 1, true), last_notification())
+assert(last_notification():find("Lines: +6 -3", 1, true), "summary lacks the line totals: " .. last_notification())
+session.viewed["new.txt"] = nil
 
 local selected_native_item = native_select.items[1]
 native_select.callback(selected_native_item)

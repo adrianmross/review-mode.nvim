@@ -108,6 +108,25 @@ calls, no re-fetch — so you can drop out mid-review, stage and commit with you
 own keys and a normal gutter, and step straight back in with the review intact.
 `:ReviewModeStop` is what actually ends the session.
 
+### Progress
+
+The changed-files picker (`<leader>rf`) is also the review's progress report.
+Each row reads
+
+```
+43%     +12    -3   3 ✓1  lua/review_mode/init.lua
+```
+
+how much of the file is reviewed (`✓` once viewed, else the share of its hunks
+viewed), lines added and removed, then its comment threads and how many of
+them are resolved. The title totals the review: `62% reviewed · 4 left · 7
+threads, 3 resolved · +120 -40`. The overall share weighs each file by its
+changed lines, so a 400-line file counts for more than a 2-line one, and it
+reads 100% only once every file is viewed. The statusline carries the same
+share, and `:ReviewModeSummary` spells it all out. From Lua,
+`api.review_progress()` returns the totals, `api.review_percent()` just the
+share, and `api.review_fraction(path)` / `api.thread_counts(path)` one file.
+
 ### Keys
 
 Keys come in two layers, split by whether they shadow something:
@@ -136,7 +155,7 @@ layer goes.
 | `<leader>rr` | comment: on a line you edited, suggests your edit; else replies to the thread on this line, or starts one where there is none (a visual range always starts one) |
 | `<leader>rR` | start a new thread here, even over an existing one |
 | `<leader>rx` | resolve / unresolve the thread on this line |
-| `<leader>rf` | changed files, with viewed state and comment counts |
+| `<leader>rf` | changed files: how much of each is reviewed, `+/-`, threads and how many are resolved; the title totals the whole review |
 | `<leader>rv` | toggle this file viewed |
 | `<leader>rh` | toggle the hunk under the cursor viewed |
 | `<leader>rd` / `<leader>rD` | base diff / diff layout — in either, unchanged lines are folds: `zR` / `zM` show and hide them, `zo` opens one |
@@ -532,7 +551,8 @@ hooks = {
 ### Statusline and events
 
 `vim.g.review_mode` is `"mode"`, `"session"`, or `nil`, and
-`require("review_mode").statusline()` returns e.g. `REVIEW owner/repo#123 3/12`
+`require("review_mode").statusline()` returns e.g. `REVIEW owner/repo#123 62% 3/12`
+(the share of changed lines reviewed, then files viewed)
 (uppercase in the mode, lowercase when stepped out).
 
 Review is a key layer over normal mode, not a real Vim mode, so `mode()` never
@@ -617,7 +637,7 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeViewedSyncToggle` toggles GitHub viewed-state sync
 - `:ReviewModePending` opens the pending review buffer
 - `:ReviewModeSubmit [comment|approve|request_changes]` submits the pending review, confirmed first
-- `:ReviewModeSummary` shows file, comment, thread, and viewed-sync counts.
+- `:ReviewModeSummary` shows how much of the review is done (by changed lines) and how many files are left, total `+/-`, comments, threads with how many are resolved, and viewed-sync counts.
 - `:ReviewModeCheckout <number|url>` reviews a PR in its own worktree without checking it out
 - `:ReviewModeInbox [requested|mine|all]` picks an open PR waiting on your review (or yours, or any) and reviews it without checking it out
 - `:ReviewModeCheckoutClean [pr]` removes clean review worktrees, after a confirmation.
@@ -1117,7 +1137,7 @@ locally next to the file viewed state, keyed by a hash of the hunk's `+`/`-`
 lines rather than its position. When the author pushes and the review follows
 HEAD, a hunk that only moved stays viewed and a hunk whose content changed comes
 back unviewed. Viewed hunks get a quiet `✓` sign, the changed-files picker shows
-`(3/7 hunks viewed)` for a file you are partway through, and
+how far through a file you are (`43%` for 3 of 7 hunks), and
 `viewed.skip_viewed_hunks = true` makes `]c` / `[c` pass over them. Viewing the
 last unviewed hunk of a file marks the file viewed, and un-viewing a hunk of a
 viewed file un-views it, both exactly as `<leader>rv` would (so they sync to

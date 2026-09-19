@@ -95,30 +95,70 @@ local function stat_text(value, prefix)
   return prefix .. tostring(value)
 end
 
-local function viewed_picker_status(viewed, unviewed)
+-- Pad to a display width: the glyphs here are several bytes but one cell, so
+-- string.format's byte padding would push the path column around.
+local function pad(text, width)
+  return text .. string.rep(" ", math.max(0, width - vim.fn.strdisplaywidth(text)))
+end
+
+-- ✓ once viewed, else how much of it is: the share of its hunks viewed
+local function viewed_picker_status(path, viewed)
   if viewed then
     return "✓"
   end
-  return string.format("☐ %d", unviewed)
+  return string.format("%d%%", math.floor(api.review_fraction(path) * 100))
+end
+
+-- every thread on the file, and how many of them are resolved
+local function comment_column(total, resolved)
+  if total == 0 then
+    return ""
+  end
+  local text = api.comment_count_label(total)
+  if resolved > 0 then
+    text = text .. " ✓" .. resolved
+  end
+  return text
+end
+
+-- The whole review in one line, for the file picker's title.
+local function files_title(filter)
+  local progress = api.review_progress()
+  return string.format(
+    "Review Mode files [%s] · %d%% reviewed · %d left · %d thread%s, %d resolved · +%d -%d",
+    filter,
+    progress.percent,
+    progress.files_left,
+    progress.threads,
+    progress.threads == 1 and "" or "s",
+    progress.resolved,
+    progress.added,
+    progress.removed
+  )
 end
 
 local function viewed_picker_item(path)
   local viewed = api.is_viewed_file(path)
   local unviewed = api.unviewed_count(path)
   local comments = api.unresolved_count(path)
+  local threads, resolved = api.thread_counts(path)
   local stats = file_stats(path)
-  local review_icon = viewed_picker_status(viewed, unviewed)
-  local comment_icon = comments > 0 and api.comment_count_label(comments) or ""
+  local review_icon = viewed_picker_status(path, viewed)
+  local comment_icon = comment_column(threads, resolved)
   local additions = stat_text(stats.additions, "+")
   local deletions = stat_text(stats.deletions, "-")
-  local label = vim.trim(string.format("%-4s %5s %5s %-4s %s", review_icon, additions, deletions, comment_icon, path))
+  local label = vim.trim(
+    pad(review_icon, 4)
+      .. " "
+      .. string.format("%5s %5s", additions, deletions)
+      .. " "
+      .. pad(comment_icon, 7)
+      .. " "
+      .. path
+  )
   local entry = api.file(path)
   if entry and entry.whitespace_only then
     label = label .. "  (whitespace only)"
-  end
-  local hunks_viewed, hunks_total = api.hunk_progress(path)
-  if not viewed and hunks_viewed and hunks_viewed > 0 then
-    label = string.format("%s (%d/%d hunks viewed)", label, hunks_viewed, hunks_total)
   end
 
   return {
@@ -255,7 +295,7 @@ local function open_native_viewed_picker(filter)
   end
 
   vim.ui.select(items, {
-    prompt = string.format("Review Mode files [%s]", filter),
+    prompt = files_title(filter),
     format_item = function(item)
       return item.label
     end,
@@ -285,7 +325,7 @@ local function open_snacks_viewed_picker(filter)
 
   picker.pick({
     source = "review_mode_files",
-    title = string.format("Review Mode files [%s]", filter),
+    title = files_title(filter),
     items = snacks_items,
     -- built per selection, and the diff behind it is fetched asynchronously
     preview = function(ctx)
@@ -392,7 +432,7 @@ local function open_telescope_viewed_picker(filter)
 
   pickers
     .new({}, {
-      prompt_title = string.format("Review Mode files [%s]", filter),
+      prompt_title = files_title(filter),
       finder = finders.new_table({
         results = items,
         entry_maker = function(item)

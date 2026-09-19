@@ -107,7 +107,8 @@ end
 pr.list_viewed("all")
 vim.ui.select = original_select
 assert(
-  labels and labels[1]:find("(1/2 hunks viewed)", 1, true),
+  -- one of its two hunks viewed: the file reads half reviewed
+  labels and vim.startswith(labels[1], "50%"),
   "picker label lacks hunk progress: " .. vim.inspect(labels)
 )
 
