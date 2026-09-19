@@ -429,6 +429,22 @@ nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/ci_fixture.lua"
 
+# The readiness check in the APPROVE confirmation. Runs with the CI mock, so a
+# failure annotation is loaded to count.
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/check-cache" \
+XDG_STATE_HOME="$tmp/check-state" \
+GH_REVIEW_REPO=owner/repo \
+GH_REVIEW_PR=123 \
+GH_REVIEW_BASE=main \
+GH_REVIEW_HEAD=abc123 \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+REVIEW_MODE_FIXTURE=ci \
+REVIEW_MODE_REVIEW_CAPTURE="$tmp/check-capture.json" \
+nvim --headless -u NONE -i NONE \
+  -c "set noswapfile" \
+  -l "$repo_root/scripts/submit_check_fixture.lua"
+
 # GitLab: a fake glab answers for the merge request, and the fixture points the
 # repo's origin at gitlab.com so the provider is auto-detected.
 cat > "$tmp/bin/glab" <<'GLAB'

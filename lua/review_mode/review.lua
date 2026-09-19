@@ -14,6 +14,9 @@ local core = require("review_mode.state")
 local util = require("review_mode.util")
 local hooks = require("review_mode.hooks")
 local github = require("review_mode.github")
+local ci = require("review_mode.ci")
+local viewed = require("review_mode.viewed")
+local comments_ui = require("review_mode.comments")
 
 local state = core.state
 
@@ -197,10 +200,83 @@ local function post(event, body, drafts, commit_id, callback)
   end)
 end
 
+-- Readiness ---------------------------------------------------------------------
+-- What the review has not covered yet, from state already in memory. Nothing
+-- here may reach the network: it runs inside the submit confirmation, and a
+-- signal that is not loaded (hunks, CI) simply counts nothing.
+
+local function overlaps(first, last, other_first, other_last)
+  return first <= other_last and other_first <= last
+end
+
+-- A comment of yours covering any line of first..last: a posted one GitHub says
+-- you wrote, or one of `drafts` (passed in so the file is read once per check).
+local function commented_on(path, first, last, drafts)
+  for _, comment in ipairs(state.comments[path] or {}) do
+    local line = tonumber(comment.line)
+    if comment.viewer_did_author == true and line then
+      if overlaps(tonumber(comment.start_line) or line, line, first, last) then
+        return true
+      end
+    end
+  end
+  for _, draft in ipairs(drafts) do
+    if draft.path == path and overlaps(draft.start_line, draft.end_line, first, last) then
+      return true
+    end
+  end
+  return false
+end
+
+local function on_changed_line(path, first, last)
+  for _, range in ipairs(state.hunk_ranges[path] or {}) do
+    if overlaps(range[1], range[2], first, last) then
+      return true
+    end
+  end
+  return false
+end
+
+--- Counts of what is left: { unviewed_files, unviewed_hunks, ci_failures,
+--- unresolved_threads, pending }. unviewed_hunks counts the not-viewed hunks of
+--- the unviewed files whose hunks are loaded; ci_failures counts failure
+--- annotations on a changed line with no comment of yours over it, and is 0
+--- until CI annotations have loaded.
+function M.readiness()
+  local drafts = M.list()
+  local out = { unviewed_files = 0, unviewed_hunks = 0, ci_failures = 0, unresolved_threads = 0, pending = #drafts }
+  for _, path in ipairs(state.file_order) do
+    if state.config.viewed.enabled and not state.viewed[path] then
+      out.unviewed_files = out.unviewed_files + 1
+      local done, total = viewed.hunk_progress(path)
+      out.unviewed_hunks = out.unviewed_hunks + ((total or 0) - (done or 0))
+    end
+    for _, annotation in ipairs(ci.annotations(path)) do
+      local first, last = annotation.start_line, annotation.end_line
+      if
+        annotation.severity == vim.diagnostic.severity.ERROR
+        and on_changed_line(path, first, last)
+        and not commented_on(path, first, last, drafts)
+      then
+        out.ci_failures = out.ci_failures + 1
+      end
+    end
+  end
+  for path, list in pairs(state.comments) do
+    for _, thread in ipairs(comments_ui.threads(list, path)) do
+      if not thread.is_resolved then
+        out.unresolved_threads = out.unresolved_threads + 1
+      end
+    end
+  end
+  return out
+end
+-- End readiness -----------------------------------------------------------------
+
 --- Submit every pending draft as one review. opts.event is COMMENT, APPROVE or
 --- REQUEST_CHANGES (any case). Drafts are cleared only after GitHub accepts it.
 function M.submit(opts, callback)
-  if state.provider == "gitlab" then
+  if state.provider == "gitlab" or state.provider == "local" then
     return (callback or function() end)(false, require("review_mode.providers").unsupported("Submitting a review"))
   end
   opts = opts or {}

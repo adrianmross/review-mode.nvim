@@ -215,6 +215,20 @@ restarts, and are cleared only once GitHub accepts the review; a failed
 submission keeps them. GitHub requires a review body for REQUEST_CHANGES, and
 for a COMMENT review carrying no comments.
 
+                                                *review-mode-submit-check*
+An APPROVE confirmation also lists what the review has not covered yet, one
+line per non-zero count: files not viewed (with their unviewed hunks), CI
+failures on changed lines that no comment of yours, posted or pending, covers,
+and unresolved threads. With nothing to report the prompt is unchanged. The
+counts come from what is already loaded and never wait on the network: hunks
+not yet loaded count nothing, and CI counts nothing until its annotations load.
+COMMENT and REQUEST_CHANGES skip the list, since they are routinely sent
+mid-review. Turn it off with review = { submit_check = false }.
+review_mode.api.review_readiness() returns the counts:
+{ unviewed_files, unviewed_hunks, ci_failures, unresolved_threads, pending }.
+A local review has no GitHub review to submit to, so submitting is refused
+there without a prompt.
+
 Replies are never batched: the reviews endpoint only accepts new comments, so
 |:ReviewModeReply| still posts immediately. A pending review started in the
 GitHub web UI is not merged with these drafts.
@@ -570,6 +584,9 @@ SETUP                                                        *review-mode-setup*
     },
     ci = {
       diagnostics = true, -- CI annotations as diagnostics (GitHub)
+    },
+    review = {
+      submit_check = true, -- APPROVE lists what is not covered yet
     },
     gitsigns = {
       enabled = true,
