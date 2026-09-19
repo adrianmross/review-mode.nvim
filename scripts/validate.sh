@@ -594,3 +594,21 @@ REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/whitespace_fixture.lua"
+
+# Hunk-level viewed, in a copy of the repo: the fixture moves origin/main and
+# commits during the review.
+cp -R "$tmp/repo" "$tmp/hunk-repo"
+(
+  cd "$tmp/hunk-repo"
+  PATH="$tmp/bin:$PATH" \
+  XDG_CACHE_HOME="$tmp/hunk-cache" \
+  XDG_STATE_HOME="$tmp/hunk-state" \
+  GH_REVIEW_REPO=owner/repo \
+  GH_REVIEW_PR=123 \
+  GH_REVIEW_BASE=main \
+  GH_REVIEW_HEAD=abc123 \
+  REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+  nvim --headless -u NONE -i NONE \
+    -c "set noswapfile" \
+    -l "$repo_root/scripts/hunk_viewed_fixture.lua"
+)

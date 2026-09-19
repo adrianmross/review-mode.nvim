@@ -116,6 +116,10 @@ local function viewed_picker_item(path)
   if entry and entry.whitespace_only then
     label = label .. "  (whitespace only)"
   end
+  local hunks_viewed, hunks_total = api.hunk_progress(path)
+  if not viewed and hunks_viewed and hunks_viewed > 0 then
+    label = string.format("%s (%d/%d hunks viewed)", label, hunks_viewed, hunks_total)
+  end
 
   return {
     path = path,

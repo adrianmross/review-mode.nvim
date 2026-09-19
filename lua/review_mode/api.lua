@@ -20,6 +20,7 @@ local util = require("review_mode.util")
 local comments_ui = require("review_mode.comments")
 local github = require("review_mode.github")
 local review = require("review_mode.review")
+local viewed_state = require("review_mode.viewed")
 
 local state = core.state
 
@@ -163,6 +164,13 @@ end
 --- Hunk ranges for a file. Loading is lazy, so this takes a callback.
 function M.hunks(path, callback)
   return plugin().with_hunks(path, callback)
+end
+
+--- viewed, total hunks marked viewed in a file; nil when its hunks are not
+--- loaded, viewed tracking is off, or there is no path. A hunk is remembered by
+--- its content, so a push that changes it brings it back unviewed.
+function M.hunk_progress(path)
+  return viewed_state.hunk_progress(path)
 end
 
 function M.is_active()

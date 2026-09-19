@@ -214,6 +214,18 @@ local function annotate_buffer(bufnr)
   end
 
   local path = vim.fs.relpath(state.root, name)
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  for index, line in ipairs(path and state.hunks[path] or {}) do
+    if line <= line_count and viewed_state.is_hunk_viewed(path, (state.hunk_hashes[path] or {})[index]) then
+      -- below the comment signs (160), so a thread on the same line wins
+      vim.api.nvim_buf_set_extmark(bufnr, ns, line - 1, 0, {
+        sign_text = "✓",
+        sign_hl_group = "NonText",
+        priority = 90,
+      })
+    end
+  end
+
   local comments = path and require("review_mode.review").with_pending(state.comments[path], path) or nil
   if not comments then
     return
@@ -419,6 +431,7 @@ local function parse_changed_files(output)
   state.hunks = {}
   state.hunks_loaded = {}
   state.hunks_loading = {}
+  state.hunk_hashes = {}
   state.hunk_callbacks = {}
 
   for line in (output or ""):gmatch("[^\n]+") do
@@ -470,24 +483,40 @@ local function parse_changed_file_stats(output)
   end
 end
 
+-- Returns start lines by path, and a content key per hunk (viewed.hunk_keys) by
+-- path. Once inside a file's hunks only a new `diff` line ends them, so an
+-- added line that reads "++ b/x" is content, not a header.
 local function parse_hunks_by_path(patch)
   local by_path = {}
+  local bodies = {}
   local current_path = nil
+  local body = nil
   for line in (patch or ""):gmatch("[^\n]+") do
-    local path = line:match("^%+%+%+ b/(.+)$")
-    if path then
-      current_path = path
+    local new_start = current_path and line:match("^@@ %-%d+,?%d* %+(%d+),?%d* @@")
+    if line:match("^diff ") then
+      current_path, body = nil, nil
+    elseif new_start then
+      by_path[current_path][#by_path[current_path] + 1] = math.max(1, tonumber(new_start) or 1)
+      body = {}
+      table.insert(bodies[current_path], body)
+    elseif body then
+      if line:match("^[-+]") then
+        body[#body + 1] = line
+      end
+    elseif line:match("^%+%+%+ b/(.+)$") then
+      current_path = line:match("^%+%+%+ b/(.+)$")
       by_path[current_path] = by_path[current_path] or {}
+      bodies[current_path] = bodies[current_path] or {}
     elseif line:match("^%+%+%+ /dev/null$") then
       current_path = nil
-    elseif current_path then
-      local new_start = line:match("^@@ %-%d+,?%d* %+(%d+),?%d* @@")
-      if new_start then
-        by_path[current_path][#by_path[current_path] + 1] = math.max(1, tonumber(new_start) or 1)
-      end
     end
   end
-  return by_path
+
+  local keys = {}
+  for path, path_bodies in pairs(bodies) do
+    keys[path] = viewed_state.hunk_keys(path_bodies)
+  end
+  return by_path, keys
 end
 
 local function build_changed_maps_async(generation, callback)
@@ -528,8 +557,13 @@ local function build_changed_maps_async(generation, callback)
   )
 end
 
-local function finish_hunks_for_path(path, hunks)
+local function finish_hunks_for_path(path, hunks, keys)
   state.hunks[path] = hunks or {}
+  state.hunk_hashes[path] = keys or {}
+  if state.hunk_viewed[path] then
+    -- the viewed-hunk signs can only be drawn once the keys are known
+    schedule_comments_ui_refresh()
+  end
   state.hunks_loaded[path] = true
   state.hunks_loading[path] = false
   state.prefetch_seen[path] = nil
@@ -566,21 +600,29 @@ local function gitsigns_hunk_lines(bufnr)
     return nil
   end
 
-  local lines = {}
+  local found = {}
   for _, hunk in ipairs(hunks) do
     local added = type(hunk) == "table" and hunk.added or nil
     local line = type(added) == "table" and tonumber(added.start) or nil
     if line then
-      lines[#lines + 1] = math.max(1, line)
+      -- gitsigns' hunk.lines are the same +/- lines git prints, so the keys match
+      found[#found + 1] = { line = math.max(1, line), body = type(hunk.lines) == "table" and hunk.lines or {} }
     end
   end
 
-  if #lines == 0 then
+  if #found == 0 then
     return nil
   end
 
-  table.sort(lines)
-  return lines
+  table.sort(found, function(left, right)
+    return left.line < right.line
+  end)
+  local lines, bodies = {}, {}
+  for index, item in ipairs(found) do
+    lines[index] = item.line
+    bodies[index] = item.body
+  end
+  return lines, viewed_state.hunk_keys(bodies)
 end
 
 local function should_delay_for_gitsigns(bufnr)
@@ -601,12 +643,12 @@ local function finish_hunks_from_gitsigns(path, bufnr)
     return false
   end
 
-  local lines = gitsigns_hunk_lines(bufnr)
+  local lines, keys = gitsigns_hunk_lines(bufnr)
   if not lines then
     return false
   end
 
-  finish_hunks_for_path(path, lines)
+  finish_hunks_for_path(path, lines, keys)
   return true
 end
 
@@ -656,9 +698,9 @@ local function load_hunks_for_paths(paths, on_done)
       return
     end
 
-    local by_path = parse_hunks_by_path(patch or "")
+    local by_path, keys = parse_hunks_by_path(patch or "")
     for _, path in ipairs(pending_paths) do
-      finish_hunks_for_path(path, by_path[path] or {})
+      finish_hunks_for_path(path, by_path[path] or {}, keys[path])
     end
 
     if on_done then
@@ -872,10 +914,10 @@ local function start_background_hunk_scan()
         return
       end
 
-      local by_path = parse_hunks_by_path(patch or "")
+      local by_path, keys = parse_hunks_by_path(patch or "")
       for _, path in ipairs(state.file_order) do
         if not state.hunks_loaded[path] then
-          finish_hunks_for_path(path, by_path[path] or {})
+          finish_hunks_for_path(path, by_path[path] or {}, keys[path])
         end
       end
       state.background_hunk_scan_loading = false
@@ -1039,6 +1081,7 @@ local session_key_desc = {
   toggle_resolve = "Review: resolve/unresolve thread",
   list_viewed = "Review: changed files",
   toggle_viewed = "Review: toggle file viewed",
+  toggle_hunk_viewed = "Review: toggle hunk viewed",
   old_toggle = "Review: base diff",
   toggle_diff_layout = "Review: diff layout",
   toggle_diff_full_file = "Review: full-file diff",
@@ -1195,9 +1238,13 @@ local function jump_hunk(delta)
   end
 
   local current_line = vim.api.nvim_win_get_cursor(0)[1]
+  local keys = state.hunk_hashes[path] or {}
+  local function skipped(index)
+    return state.config.viewed.skip_viewed_hunks and viewed_state.is_hunk_viewed(path, keys[index])
+  end
   if delta > 0 then
-    for _, hunk_line in ipairs(hunks) do
-      if hunk_line > current_line then
+    for index, hunk_line in ipairs(hunks) do
+      if hunk_line > current_line and not skipped(index) then
         jump_to_path(path, hunk_line)
         return
       end
@@ -1205,7 +1252,7 @@ local function jump_hunk(delta)
   else
     for index = #hunks, 1, -1 do
       local hunk_line = hunks[index]
-      if hunk_line < current_line then
+      if hunk_line < current_line and not skipped(index) then
         jump_to_path(path, hunk_line)
         return
       end
@@ -1861,11 +1908,67 @@ function M.mark_viewed_next()
   end
 end
 
+--- Toggle the hunk under the cursor (the last one starting at or above it).
+function M.toggle_hunk_viewed()
+  if not ensure_active() then
+    return
+  end
+
+  if not state.config.viewed.enabled then
+    vim.notify("Review Mode viewed state is disabled", vim.log.levels.WARN)
+    return
+  end
+
+  local path = current_relpath()
+  if not path or not state.files[path] then
+    vim.notify("Review Mode viewed state: current buffer is not a changed PR file", vim.log.levels.WARN)
+    return
+  end
+
+  maybe_with_hunks(path, function(hunks)
+    local cursor = vim.api.nvim_win_get_cursor(0)[1]
+    local index = nil
+    for candidate, line in ipairs(hunks) do
+      if line <= cursor then
+        index = candidate
+      end
+    end
+    local key = index and (state.hunk_hashes[path] or {})[index]
+    if not key then
+      vim.notify("Review Mode: no hunk under the cursor", vim.log.levels.WARN)
+      return
+    end
+
+    local viewed = not viewed_state.is_hunk_viewed(path, key)
+    viewed_state.set_hunk_viewed(path, key, viewed)
+    local done, total = viewed_state.hunk_progress(path)
+
+    -- The file follows its hunks through the same path as <leader>rv, so GitHub
+    -- sync sees it exactly as a manual toggle. Only a hunk toggle moves it:
+    -- un-viewing a file by hand stays until a hunk toggle completes it again.
+    if viewed and done == total and not state.viewed[path] then
+      M.set_viewed(path, true)
+      vim.notify("All hunks viewed: marked " .. path .. " viewed", vim.log.levels.INFO)
+      return
+    elseif not viewed and state.viewed[path] then
+      M.set_viewed(path, false)
+      vim.notify("Hunk unviewed: marked " .. path .. " unviewed", vim.log.levels.INFO)
+      return
+    end
+
+    vim.notify(
+      string.format("Hunk %s: %d/%d hunks viewed in %s", viewed and "viewed" or "unviewed", done, total, path),
+      vim.log.levels.INFO
+    )
+  end)
+end
+
 function M.clear_viewed()
   if not ensure_active() then
     return
   end
 
+  state.hunk_viewed = {}
   state.viewed = {}
   state.viewed_order = {}
   state.viewed_sync_queue = {}
@@ -2622,6 +2725,7 @@ function M.action_items()
     -- Files --
     { category = "Files", label = "Changed files", run = M.list_viewed },
     { category = "Files", label = "Toggle file viewed", run = M.toggle_viewed },
+    { category = "Files", label = "Toggle hunk viewed", run = M.toggle_hunk_viewed },
     { category = "Files", label = "Mark viewed, go to next unviewed", run = M.mark_viewed_next },
     { category = "Files", label = "Next changed file", run = M.next_file },
     { category = "Files", label = "Previous changed file", run = M.prev_file },
@@ -2900,6 +3004,11 @@ function M.setup(opts)
     vim.api.nvim_create_user_command("ReviewModeViewedToggle", function()
       M.toggle_viewed()
     end, { desc = "Toggle viewed state for the current PR file" })
+    vim.api.nvim_create_user_command(
+      "ReviewModeHunkViewedToggle",
+      M.toggle_hunk_viewed,
+      { desc = "Toggle viewed state for the PR hunk under the cursor" }
+    )
     vim.api.nvim_create_user_command("ReviewModeViewedList", function(command)
       picker.list_viewed(command.args ~= "" and command.args or "all")
     end, {

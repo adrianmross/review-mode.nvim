@@ -138,6 +138,7 @@ layer goes.
 | `<leader>rx` | resolve / unresolve the thread on this line |
 | `<leader>rf` | changed files, with viewed state and comment counts |
 | `<leader>rv` | toggle this file viewed |
+| `<leader>rh` | toggle the hunk under the cursor viewed |
 | `<leader>rd` / `<leader>rD` | base diff / diff layout — in either, unchanged lines are folds: `zR` / `zM` show and hide them, `zo` opens one |
 | `<leader>ra` | actions picker: every action, grouped, with its key beside it |
 | `<leader>rs` | pending review and submit |
@@ -308,6 +309,7 @@ api.is_changed_file(path) / api.is_changed_dir(path)
 api.is_viewed_file(path) / api.is_viewed_dir(path)
 api.unviewed_count(path) / api.unresolved_count(path) / api.comment_count(path)
 api.set_viewed(path, true)
+api.hunk_progress(path)  --> viewed, total hunks marked viewed; nil when hunks are not loaded, viewed tracking is off, or no path
 api.hunks(path, function(hunks) ... end)   -- lazy, so it takes a callback
 api.file_diff(path, function(diff, err) ... end)  -- the diff for one file, never blocking
 
@@ -595,6 +597,7 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeSuggest` suggests your edit on the current line, or drafts a suggestion over the line or visual range starting from the lines as they are
 - `:ReviewModeSuggestEdits` queues every edit in the current file as a pending suggestion, and undoes the edits
 - `:ReviewModeViewedToggle` toggles viewed state for the current PR file
+- `:ReviewModeHunkViewedToggle` toggles viewed state for the hunk under the cursor
 - `:ReviewModeViewedNext` marks the current PR file viewed and jumps to the next unviewed file
 - `:ReviewModeViewedFeatureToggle` toggles viewed-state tracking on or off
 - `:ReviewModeCommentsToggle` toggles PR comments on or off
@@ -1003,6 +1006,7 @@ require("review_mode").setup({
     enabled = true,
     sync = false,
     state_path = nil,
+    skip_viewed_hunks = false, -- ]c / [c pass over hunks marked viewed
   },
   performance = {
     ui_refresh_debounce_ms = 50,
@@ -1074,6 +1078,19 @@ Viewed state is persisted in `stdpath("state")/review-mode-state.json` by
 default. Set `viewed.sync = true` or run `:ReviewModeViewedSyncToggle` to pull
 GitHub's PR file viewed state at startup and push local viewed/unviewed toggles
 back to GitHub.
+
+Inside a file, `<leader>rh` (`:ReviewModeHunkViewedToggle`) marks the hunk under
+the cursor viewed, or unviewed again. GitHub has no such mark, so it is kept
+locally next to the file viewed state, keyed by a hash of the hunk's `+`/`-`
+lines rather than its position. When the author pushes and the review follows
+HEAD, a hunk that only moved stays viewed and a hunk whose content changed comes
+back unviewed. Viewed hunks get a quiet `✓` sign, the changed-files picker shows
+`(3/7 hunks viewed)` for a file you are partway through, and
+`viewed.skip_viewed_hunks = true` makes `]c` / `[c` pass over them. Viewing the
+last unviewed hunk of a file marks the file viewed, and un-viewing a hunk of a
+viewed file un-views it, both exactly as `<leader>rv` would (so they sync to
+GitHub when `viewed.sync` is on). A file you un-view by hand stays unviewed
+until a hunk toggle completes it again.
 
 The built-in side-by-side old-version split remains the default diff backend.
 Set `diff.layout = "unified"` or run `:ReviewModeDiffLayoutToggle` to use an

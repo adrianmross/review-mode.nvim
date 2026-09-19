@@ -115,6 +115,7 @@ local defaults = {
       ["<leader>rx"] = "toggle_resolve",
       ["<leader>rf"] = "list_viewed",
       ["<leader>rv"] = "toggle_viewed",
+      ["<leader>rh"] = "toggle_hunk_viewed",
       ["<leader>rd"] = "old_toggle",
       ["<leader>rD"] = "toggle_diff_layout",
       ["<leader>ra"] = "actions",
@@ -132,6 +133,8 @@ local defaults = {
     enabled = true,
     sync = false,
     state_path = nil,
+    -- ]c / [c pass over hunks you marked viewed
+    skip_viewed_hunks = false,
   },
   performance = {
     ui_refresh_debounce_ms = 50,
@@ -185,6 +188,8 @@ local state = {
   hunks = {},
   hunks_loaded = {},
   hunks_loading = {},
+  -- per path, a content key for each entry of hunks (see viewed.hunk_keys)
+  hunk_hashes = {},
   hunk_callbacks = {},
   prefetch_queue = {},
   prefetch_seen = {},
@@ -195,6 +200,8 @@ local state = {
   comments_loading = false,
   viewed = {},
   viewed_order = {},
+  -- per path, the hunk keys marked viewed
+  hunk_viewed = {},
   viewed_sync_queue = {},
   viewed_store = nil,
   dir_totals = nil,
@@ -388,6 +395,7 @@ function M.reset_changed_data()
   state.hunks = {}
   state.hunks_loaded = {}
   state.hunks_loading = {}
+  state.hunk_hashes = {}
   state.hunk_callbacks = {}
   state.prefetch_queue = {}
   state.prefetch_seen = {}
@@ -404,6 +412,7 @@ function M.reset_review_data()
   state.comments_loading = false
   state.viewed = {}
   state.viewed_order = {}
+  state.hunk_viewed = {}
   state.viewed_sync_queue = {}
   state.viewed_loading = false
   state.viewed_sync_loading = false
