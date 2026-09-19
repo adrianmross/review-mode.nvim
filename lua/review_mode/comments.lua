@@ -553,6 +553,10 @@ function M.threads(list, path)
       id = comment.id,
       node_id = comment.node_id,
       author = comment.user and comment.user.login or nil,
+      -- the REST fallback has an id but no name; comments cached before
+      -- these were fetched have neither
+      author_id = comment.user and comment.user.id or nil,
+      author_name = comment.user and comment.user.name or nil,
       association = comment.association,
       created_at = comment.created_at,
       body = comment.body,

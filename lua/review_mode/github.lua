@@ -99,7 +99,12 @@ function M.normalize_thread_comment(thread, comment)
     original_line = comment.originalLine or thread.originalLine,
     start_line = comment.startLine or thread.startLine,
     body = comment.body,
-    user = comment.author and { login = comment.author.login } or nil,
+    -- id and name are for crediting a suggestion's author in a commit
+    user = comment.author and {
+      login = comment.author.login,
+      id = comment.author.databaseId,
+      name = comment.author.name,
+    } or nil,
     created_at = comment.createdAt,
     url = comment.url,
     association = comment.authorAssociation,
@@ -317,6 +322,13 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
               viewerDidAuthor
               author {
                 login
+                ... on User {
+                  databaseId
+                  name
+                }
+                ... on Bot {
+                  databaseId
+                }
               }
               reactionGroups {
                 content

@@ -2829,6 +2829,7 @@ function M.action_items()
       end,
     },
     { category = "Suggest", label = "List trial suggestions", run = panel.list_trials },
+    { category = "Suggest", label = "Commit trial suggestions, crediting reviewers", run = panel.commit_suggestions },
     -- Files --
     { category = "Files", label = "Changed files", run = M.list_viewed },
     { category = "Files", label = "Toggle file viewed", run = M.toggle_viewed },
@@ -3290,6 +3291,11 @@ function M.setup(opts)
       "ReviewModeSuggestionList",
       panel.list_trials,
       { desc = "List the trial suggestions applied but not saved" }
+    )
+    vim.api.nvim_create_user_command(
+      "ReviewModeSuggestionCommit",
+      panel.commit_suggestions,
+      { desc = "Commit the trial suggestions, crediting their authors, after a confirmation" }
     )
     -- end suggestions
   end

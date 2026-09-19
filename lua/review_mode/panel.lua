@@ -1071,6 +1071,55 @@ function M.list_trials()
   util.open_lines_preview(lines, "review-trials")
 end
 
+--- Commit every live trial, crediting the suggesters, after one confirmation
+--- that can also resolve the suggestion threads.
+function M.commit_suggestions()
+  local plan, err = api.suggestion_commit_plan()
+  if not plan then
+    vim.notify("Review Mode: " .. tostring(err), vim.log.levels.WARN)
+    return
+  end
+
+  local count = #plan.trials
+  local lines =
+    { string.format("Commit %d trial suggestion%s (local only, nothing is pushed):", count, count == 1 and "" or "s") }
+  for _, trial in ipairs(plan.trials) do
+    local login = trial.suggester and trial.suggester.login or "unknown"
+    lines[#lines + 1] = string.format("  %s:%d  from %s", trial.path, trial.line, tostring(login))
+  end
+  lines[#lines + 1] = ""
+  for _, line in ipairs(vim.split(vim.trim(plan.message), "\n", { plain = true })) do
+    lines[#lines + 1] = "  " .. line
+  end
+  local choice = vim.fn.confirm(table.concat(lines, "\n"), "&Commit\nCommit and &resolve threads\n&Cancel", 3)
+  if choice ~= 1 and choice ~= 2 then
+    return
+  end
+
+  local result, commit_err = api.commit_suggestions(plan)
+  if not result then
+    vim.notify("Review Mode: " .. tostring(commit_err), vim.log.levels.ERROR)
+    return
+  end
+  vim.notify(string.format("Committed %d suggestion%s as %s", count, count == 1 and "" or "s", result.sha:sub(1, 7)))
+  if #result.unwritten > 0 then
+    vim.notify(
+      "Review Mode: committed, but could not write " .. table.concat(result.unwritten, ", ") .. "; :write it",
+      vim.log.levels.WARN
+    )
+  end
+
+  if choice == 2 then
+    local resolved = {}
+    for _, trial in ipairs(plan.trials) do
+      if not resolved[trial.thread_id] then
+        resolved[trial.thread_id] = true
+        api.resolve(trial.thread_id, true)
+      end
+    end
+  end
+end
+
 --- Comment on the current line or visual range through the draft buffer.
 function M.compose_comment(command)
   local path = current_relpath()

@@ -783,6 +783,24 @@ function M.suggestion_trials()
   return suggestions().trials()
 end
 
+--- What committing the live trials would do, for a confirmation. The plan is
+--- opaque: pass it to M.commit_suggestions unchanged. Its stable fields are
+--- trials = { { id, path, line, thread_id, suggester }, ... } and message,
+--- suggester being { login, id, name, is_viewer }; the rest is internal. Or nil and why nothing can
+--- be committed: no trials, staged changes, or a trial the user's own edits
+--- reach into.
+function M.suggestion_commit_plan()
+  return suggestions().commit_plan()
+end
+
+--- Commit a plan from M.suggestion_commit_plan: only the trial lines, onto
+--- HEAD, with a Co-authored-by trailer per suggester (GitHub reviews only).
+--- Local only; nothing is pushed. Writes the buffers and forgets the trials.
+--- Returns { sha, unwritten }, or nil and an error.
+function M.commit_suggestions(plan)
+  return suggestions().commit(plan)
+end
+
 -- Your edits, as suggestions: each hunk of the buffer that differs from HEAD,
 -- as { path, start_line, end_line, lines, in_diff, ... }. opts.buf picks the
 -- buffer (default: the current one).

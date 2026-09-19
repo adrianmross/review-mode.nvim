@@ -52,9 +52,12 @@ function M.entry(thread)
     return thread
   end
 
-  local lines
+  local lines, suggester
   for _, comment in ipairs(thread.comments or {}) do
-    lines = comments_ui.suggestion_body(comment) or lines
+    local body = comments_ui.suggestion_body(comment)
+    if body then
+      lines, suggester = body, comment
+    end
   end
   if not lines or not thread.line then
     return nil
@@ -67,6 +70,13 @@ function M.entry(thread)
     start_line = math.max(1, thread.start_line or thread.line),
     end_line = thread.line,
     lines = lines,
+    -- whose lines these are, for the Co-authored-by trailer when committed
+    suggester = {
+      login = suggester.author,
+      id = suggester.author_id,
+      name = suggester.author_name,
+      is_viewer = suggester.viewer_did_author == true,
+    },
   }
 end
 
@@ -442,6 +452,7 @@ function M.accept(entry, bufnr)
     mark = mark,
     original = original,
     lines = entry.lines,
+    suggester = entry.suggester,
   }
   trials[#trials + 1] = trial
 
@@ -563,6 +574,249 @@ function M.at(path, line)
     end
   end
   return out
+end
+
+-- Committing trials -----------------------------------------------------------
+--
+-- GitHub's "Commit suggestion" credits the reviewer; saving a trial and
+-- committing it by hand does not. This commits the live trials, and nothing
+-- else, with a Co-authored-by trailer per suggester.
+--
+-- "Nothing else" is the hard part: the buffer may also hold the user's own
+-- edits, saved or not, and the index may hold work they staged. So the commit
+-- is never built from the working tree. For each file, the trial lines are
+-- written into HEAD's version of it, that blob goes into the index directly,
+-- and the commit is made from an index that matched HEAD everywhere else. The
+-- user's edits stay where they were: in the buffer and on disk, unstaged.
+
+local function git(args, input)
+  local result = vim
+    .system(vim.list_extend({ "git" }, args), { cwd = require("review_mode.state").state.root, text = true, stdin = input })
+    :wait()
+  if result.code ~= 0 then
+    return nil, vim.trim(result.stderr or "")
+  end
+  return result.stdout or ""
+end
+
+-- The overlap test for a hunk from vim.diff against lines first..last of its
+-- new side: -1 before them, 1 after, 0 when it touches them. A hunk adding no
+-- lines (count 0) is a gap, and its start is the new-side line *before* the gap
+-- (0 at the top): "1 2 3 4" -> "1 3 4" is { 2, 1, 1, 0 }. So a deletion right
+-- above the lines has start first - 1, right below has start last, and only a
+-- start in first..last-1 falls between two of them.
+local function hunk_side(hunk, first, last)
+  local start, count = hunk[3], hunk[4]
+  if count == 0 then
+    return start < first and -1 or (start >= last and 1 or 0)
+  end
+  return start + count - 1 < first and -1 or (start > last and 1 or 0)
+end
+
+-- HEAD's version of one file with only its trials written in, as the blob
+-- content to commit, or nil and why the trials cannot be separated out.
+local function committed_content(path, file_trials)
+  local blob = git({ "show", "HEAD:" .. path })
+  if not blob then
+    return nil, path .. " is not in HEAD"
+  end
+  local head = util.split_blob_lines(blob)
+  local current = vim.api.nvim_buf_get_lines(file_trials[1].buf, 0, -1, false)
+
+  -- the buffer with every trial taken back out, which leaves the user's own
+  -- edits alone; each trial remembers where its original lines sit in that
+  local own, placed, row = {}, {}, 0
+  for _, trial in ipairs(file_trials) do
+    local start_row, finish = trial_range(trial)
+    if start_row < row then
+      return nil, path .. " has overlapping trial suggestions"
+    end
+    -- the mark widens to take in typing inside it, and the reviewer did not
+    -- write those edits: crediting them would misattribute the user's work
+    if not vim.deep_equal(vim.list_slice(current, start_row + 1, finish), trial.lines) then
+      return nil,
+        string.format("%s:%d: the trial suggestion was edited; revert it or commit by hand", path, start_row + 1)
+    end
+    vim.list_extend(own, current, row + 1, start_row)
+    placed[#placed + 1] = { first = #own + 1, trial = trial }
+    vim.list_extend(own, trial.original)
+    row = finish
+  end
+  vim.list_extend(own, current, row + 1, #current)
+
+  -- Find each trial's original lines in HEAD through a diff of the user's
+  -- edits. An edit touching those lines makes the trial inseparable from it,
+  -- so that is refused rather than guessed at.
+  local joined_head = #head == 0 and "" or (table.concat(head, "\n") .. "\n")
+  local hunks = vim.diff(joined_head, table.concat(own, "\n") .. "\n", { result_type = "indices" })
+  for _, place in ipairs(placed) do
+    local last = place.first + #place.trial.original - 1
+    local shift = 0
+    for _, hunk in ipairs(hunks) do
+      local side = hunk_side(hunk, place.first, last)
+      if side == 0 then
+        return nil,
+          string.format("%s:%d was edited around the trial suggestion; save and commit it by hand", path, place.first)
+      elseif side < 0 then
+        shift = shift + hunk[2] - hunk[4]
+      end
+    end
+    -- no hunk touches the replaced lines, so HEAD has them, unchanged, here
+    place.head_first = place.first + shift
+  end
+
+  -- bottom-up, so each replacement leaves the rows above it where they were
+  local out = vim.deepcopy(head)
+  for index = #placed, 1, -1 do
+    local place = placed[index]
+    for _ = 1, #place.trial.original do
+      table.remove(out, place.head_first)
+    end
+    for offset, line in ipairs(place.trial.lines) do
+      table.insert(out, place.head_first + offset - 1, line)
+    end
+  end
+  -- keep HEAD's final newline, or its lack of one
+  local content = table.concat(out, "\n") .. ((blob == "" or blob:sub(-1) == "\n") and "\n" or "")
+  if #out == 0 then
+    content = ""
+  end
+  return content
+end
+
+-- GitHub credits a user as <id>+<login>@users.noreply.github.com. Without the
+-- id (the comment cache predates it, or a bot), <login>@... still links on
+-- most accounts, though not ones that keep their email private.
+--
+-- A display name is whatever the user typed. A newline in it would start a
+-- trailer of its own, and < or > would end the address early, so the name is
+-- flattened to one line without them; a login is kept to GitHub's alphabet.
+local function trailer(suggester)
+  local login = suggester.login:gsub("[^%w%-%[%]]", "")
+  local name = type(suggester.name) == "string" and vim.trim((suggester.name:gsub("[%c<>]+", " "):gsub("%s+", " ")))
+  if not name or name == "" then
+    name = login
+  end
+  local id = type(suggester.id) == "number" and (string.format("%d+", suggester.id)) or ""
+  return string.format("Co-authored-by: %s <%s%s@users.noreply.github.com>", name, id, login)
+end
+
+local function commit_message(committed)
+  local lines = { #committed == 1 and "Apply suggestion from code review" or "Apply suggestions from code review" }
+  -- Only a GitHub login maps to a GitHub noreply address. A local review's
+  -- authors are names on disk and GitLab's are usernames there, so those
+  -- commits carry no trailer; the user's own suggestions need none.
+  if require("review_mode.state").state.provider == "github" then
+    local seen = {}
+    for _, trial in ipairs(committed) do
+      local suggester = trial.suggester
+      if suggester and type(suggester.login) == "string" and not suggester.is_viewer and not seen[suggester.login] then
+        seen[suggester.login] = true
+        if #lines == 1 then
+          lines[#lines + 1] = ""
+        end
+        lines[#lines + 1] = trailer(suggester)
+      end
+    end
+  end
+  return table.concat(lines, "\n") .. "\n"
+end
+
+--- What committing the live trials would do, for a confirmation: { trials,
+--- message }, each trial { id, path, line, thread_id, suggester } -- or nil and
+--- why nothing can be committed.
+function M.commit_plan()
+  local live = prune()
+  if #live == 0 then
+    return nil, "no trial suggestions to commit"
+  end
+  -- git commit takes the whole index: anything staged would ride along
+  if not git({ "diff", "--cached", "--quiet" }) then
+    return nil, "you have staged changes; commit or unstage them first, so only the suggestions are committed"
+  end
+
+  local by_path, order = {}, {}
+  for _, trial in ipairs(live) do
+    if not by_path[trial.path] then
+      by_path[trial.path] = {}
+      order[#order + 1] = trial.path
+    end
+    table.insert(by_path[trial.path], trial)
+  end
+
+  local files, listed, internal = {}, {}, {}
+  for _, path in ipairs(order) do
+    local file_trials = by_path[path]
+    table.sort(file_trials, function(left, right)
+      return trial_range(left) < trial_range(right)
+    end)
+    local content, err = committed_content(path, file_trials)
+    if not content then
+      return nil, err
+    end
+    local entry = git({ "ls-tree", "HEAD", "--", path }) or ""
+    files[#files + 1] = { path = path, mode = entry:match("^(%d+)") or "100644", content = content }
+    for _, trial in ipairs(file_trials) do
+      listed[#listed + 1] = {
+        id = trial.id,
+        path = path,
+        line = trial_range(trial) + 1,
+        thread_id = trial.thread_id,
+        suggester = trial.suggester,
+      }
+      internal[#internal + 1] = trial
+    end
+  end
+  return { trials = listed, files = files, message = commit_message(listed), _trials = internal }
+end
+
+--- Commit a plan from commit_plan(): only the trial lines, onto HEAD, locally.
+--- Then write each buffer so the file on disk has them too (the user's other
+--- edits land on disk as well, still unstaged), and forget the trials: the
+--- lines are committed now, not on trial. Returns { sha, unwritten }, the
+--- paths whose buffer could not be written, or nil and an error, in which case
+--- the index is as it was.
+function M.commit(plan)
+  local paths = {}
+  for _, file in ipairs(plan.files) do
+    paths[#paths + 1] = file.path
+    local sha, err = git({ "hash-object", "-w", "--stdin" }, file.content)
+    if sha then
+      _, err = git({ "update-index", "--cacheinfo", string.format("%s,%s,%s", file.mode, vim.trim(sha), file.path) })
+    end
+    if err then
+      git(vim.list_extend({ "reset", "-q", "--" }, paths))
+      return nil, err
+    end
+  end
+
+  local _, err = git({ "commit", "-q", "-F", "-" }, plan.message)
+  if err then
+    -- the index matched HEAD before (commit_plan checked), so this is exact
+    git(vim.list_extend({ "reset", "-q", "--" }, paths))
+    return nil, "git commit failed: " .. err
+  end
+
+  local written, unwritten = {}, {}
+  for _, trial in ipairs(plan._trials) do
+    if vim.api.nvim_buf_is_valid(trial.buf) then
+      pcall(vim.api.nvim_buf_del_extmark, trial.buf, trial_ns, trial.mark)
+      if not written[trial.buf] then
+        written[trial.buf] = true
+        -- the commit is made; a failed write only leaves the file on disk
+        -- behind the buffer, which a later :write settles
+        local ok = pcall(vim.api.nvim_buf_call, trial.buf, function()
+          vim.cmd("silent write")
+        end)
+        if not ok then
+          unwritten[#unwritten + 1] = trial.path
+        end
+      end
+    end
+    trial.mark = -1
+  end
+  prune()
+  return { sha = vim.trim(git({ "rev-parse", "HEAD" }) or ""), unwritten = unwritten }
 end
 
 watch_buffers()

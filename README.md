@@ -405,7 +405,14 @@ api.accept_suggestion(entry)   --> the trial { id, buf, path, thread_id, line, a
 api.accept_all_suggestions("src/a.ts")   --> how many were applied, and the first error
 api.revert_suggestion(trial_id)          -- or nil for the trial under the cursor
 api.suggestion_trials()                  --> the trials applied but not saved
+api.suggestion_commit_plan()     --> a plan, or nil and why nothing can be committed
+api.commit_suggestions(plan)     --> { sha, unwritten }: commits only the trial lines, locally
 ```
+
+A commit plan is opaque: pass it back to `api.commit_suggestions` unchanged.
+Its stable fields are `trials` (`{ id, path, line, thread_id, suggester }`,
+`suggester` being `{ login, id, name, is_viewer }`) and `message`, for showing
+in a confirmation; anything else in it is internal and may change.
 
 Writes take a `callback(ok, err)`. `api.reply` needs the id of the comment it
 answers: pass `comment_id` directly, or a `thread_id` and it is looked up —
@@ -697,6 +704,7 @@ vim.api.nvim_create_autocmd("User", {
 - `:ReviewModeSuggestionAcceptAll` applies every suggestion in the current file as trials, after a confirmation
 - `:ReviewModeSuggestionRevert [id]` reverts a trial suggestion: the one under the cursor, or one from `:ReviewModeSuggestionList`
 - `:ReviewModeSuggestionList` lists the trial suggestions that are applied but not saved
+- `:ReviewModeSuggestionCommit` commits the trial suggestions, and only them, crediting each suggester with a `Co-authored-by:` trailer, after a confirmation that can also resolve their threads
 
 ## Suggestions
 
@@ -770,6 +778,30 @@ every suggestion in the current file after a confirmation saying how many and in
 which file. They go in bottom-up, because a suggestion can replace one line with
 three: applying the top one first would move every line number below it and land
 the next suggestion on the wrong lines.
+
+**Commit them, with credit.** `:ReviewModeSuggestionCommit` (or "Commit trial
+suggestions, crediting reviewers" in the actions picker) does what GitHub's
+"Commit suggestion" does, locally: one commit of every live trial, titled
+`Apply suggestions from code review` (singular for one), with a
+`Co-authored-by: Name <id+login@users.noreply.github.com>` trailer per distinct
+suggester. A comment cached before the author's id was fetched falls back to
+`<login@users.noreply.github.com>`, which GitHub links unless the account keeps
+its email private. Your own suggestions get no trailer, and neither do local or
+GitLab reviews, whose authors have no GitHub address. One confirmation lists
+each trial (file, line, suggester) and the message, and offers to resolve the
+suggestion threads as well. Nothing is pushed.
+
+The commit holds the trial lines and nothing else. It is built from HEAD, not
+from the file: the trial lines are written into HEAD's version and that goes
+into the index directly, so your own edits in the same files, saved or not, stay
+out of it and stay unstaged. The buffers are then written, so the file on disk
+has the committed lines (and your edits, still unstaged), and the trials are
+forgotten. It refuses, with a message, rather than guess:
+
+- when anything is staged, since a commit takes the whole index -- commit or
+  unstage it first;
+- when you have typed inside a trial, since those edits are not the reviewer's;
+- when your edits reach into the lines a trial replaced.
 
 Trials are buffer state, not review state, and the plugin does not track git:
 
