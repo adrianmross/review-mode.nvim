@@ -2758,6 +2758,14 @@ function M.action_items()
     { category = "Diff", label = "Expand / collapse unchanged lines (zR / zM)", run = M.toggle_diff_full_file },
     { category = "Diff", label = "Hide / show whitespace changes", run = M.toggle_diff_whitespace },
     { category = "Diff", label = "Toggle skipping moved code on ]c / [c", run = M.toggle_skip_moved },
+
+    {
+      category = "Diff",
+      label = "Blast radius: callers of changed functions this PR missed",
+      run = function()
+        require("review_mode.blast_radius").run()
+      end,
+    },
     -- Review --
     { category = "Review", label = "Pending review", run = M.open_pending },
     {
@@ -3097,6 +3105,14 @@ function M.setup(opts)
     vim.api.nvim_create_user_command("ReviewModeCIToggle", function()
       require("review_mode.diagnostics").toggle_ci()
     end, { desc = "Toggle CI check-run annotations as diagnostics" })
+
+    -- Blast radius --
+    vim.api.nvim_create_user_command("ReviewModeBlastRadius", function(command)
+      require("review_mode.blast_radius").run({ all = command.bang })
+    end, {
+      bang = true,
+      desc = "Quickfix the callers of this file's changed functions that the PR did not touch (! for body changes too)",
+    })
     -- Reactions --
     vim.api.nvim_create_user_command("ReviewModeReact", function(command)
       panel.react(command.args)

@@ -620,3 +620,12 @@ REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/moved_code_fixture.lua"
+
+# Blast radius: callers of changed functions the PR missed, from a stubbed LSP.
+# The fixture builds its own repo of Lua files, so it needs no gh or env.
+XDG_CACHE_HOME="$tmp/blast-cache" \
+XDG_STATE_HOME="$tmp/blast-state" \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+nvim --headless -u NONE -i NONE \
+  -c "set noswapfile" \
+  -l "$repo_root/scripts/blast_radius_fixture.lua"

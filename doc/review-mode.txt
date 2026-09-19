@@ -449,6 +449,11 @@ COMMANDS                                                  *review-mode-commands*
         Toggle CI check-run annotations as vim.diagnostic entries. Turning
         them on refetches them.
 
+                                                        *:ReviewModeBlastRadius*
+:ReviewModeBlastRadius[!]
+        Fill the quickfix list with callers of the current file's changed
+        functions that the PR did not touch. See |review-mode-blast-radius|.
+
                                                         *:ReviewModeSuggestionPreview*
 :ReviewModeSuggestionPreview [inline|split]
         Toggle a preview of the suggestion on the current line without
@@ -719,6 +724,18 @@ run that has annotations. Toggle with :ReviewModeCIToggle, or set
 ci = { diagnostics = false } to never fetch them. Local and GitLab reviews
 skip it. review_mode.api.ci_annotations(path) returns the annotations for a
 file, and the ci_loaded event fires when they arrive.
+
+                                                   *review-mode-blast-radius*
+:ReviewModeBlastRadius finds the function definitions in the current file whose
+signature (first line through the end of the parameter list) the PR changes,
+by treesitter node type, so any language with a parser works. It asks the
+attached LSP clients for textDocument/references at each function's name,
+drops references on lines the PR added or rewrote, and fills the quickfix list
+with the rest: callers the PR did not update. With ! it also includes
+functions changed only in their body. It runs only on demand, never starts a
+language server (with none attached it says so), and gives each request 5
+seconds. Only "+" lines count as changed, so a signature change that only
+deletes lines is not seen.
 
 ==============================================================================
 GITLAB                                                      *review-mode-gitlab*
