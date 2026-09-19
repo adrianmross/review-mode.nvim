@@ -445,14 +445,18 @@ end
 -- M.refresh() bumps the generation without resetting state, so a boolean would
 -- stay set forever and wedge every later flush. Stamping it means a new
 -- generation simply does not match, and a late callback cannot clear a guard
--- that a newer flush now owns.
+-- that a newer flush now owns. A flush asked for while one is in flight is
+-- remembered in viewed_sync_pending and run once the in-flight one settles.
 function M.flush_viewed_sync()
-  if
-    not state.config.viewed.enabled
-    or not state.config.viewed.sync
-    or state.viewed_sync_loading == state.generation
-    or vim.tbl_isempty(state.viewed_sync_queue)
-  then
+  if not state.config.viewed.enabled or not state.config.viewed.sync then
+    return
+  end
+  if state.viewed_sync_loading == state.generation then
+    state.viewed_sync_pending = true
+    return
+  end
+  state.viewed_sync_pending = false
+  if vim.tbl_isempty(state.viewed_sync_queue) then
     return
   end
 
@@ -470,8 +474,9 @@ function M.flush_viewed_sync()
       end
 
       state.viewed_sync_loading = nil
-      -- a failed entry stays queued for the next sync rather than spinning here
-      if ok and not vim.tbl_isempty(state.viewed_sync_queue) then
+      -- a failed entry stays queued for the next sync rather than spinning
+      -- here, unless another flush was asked for while this one was in flight
+      if state.viewed_sync_pending or (ok and not vim.tbl_isempty(state.viewed_sync_queue)) then
         M.flush_viewed_sync()
       end
     end,

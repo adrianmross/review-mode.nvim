@@ -211,6 +211,7 @@ local state = {
   dir_totals = nil,
   viewed_loading = false,
   viewed_sync_loading = false,
+  viewed_sync_pending = false,
   pr_node_id = nil,
   generation = 0,
   maps_loaded = false,
@@ -420,6 +421,7 @@ function M.reset_review_data()
   state.viewed_sync_queue = {}
   state.viewed_loading = false
   state.viewed_sync_loading = false
+  state.viewed_sync_pending = false
   state.pr_node_id = nil
 end
 
