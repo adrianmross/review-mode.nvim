@@ -163,6 +163,8 @@ case "$1 $2" in
     elif [[ "$args" == *"pullRequest(number"* ]]; then
       printf '{"data":{"repository":{"pullRequest":{"id":"PR_node"}}}}\n'
     elif [[ "$args" == *"markFileAsViewed"* ]]; then
+      # hold the mutation open so a test can land a second flush mid-flight
+      sleep "${REVIEW_MODE_SLOW_MUTATION:-0}"
       if [[ "${REVIEW_MODE_FAIL_MUTATION:-}" == "1" ]]; then
         echo "forced viewed mutation failure" >&2
         exit 1

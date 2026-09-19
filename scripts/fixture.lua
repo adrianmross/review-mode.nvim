@@ -834,12 +834,25 @@ wait_for(function()
   return notification_count("Review Mode viewed sync queued") > wedged_notifications
 end, "a refresh during a flush wedged the viewed sync queue")
 vim.env.REVIEW_MODE_FAIL_MUTATION = nil
--- the failing flush above may still be in flight, and a flush while one is in
--- flight is a no-op, so keep asking until one runs (the guard makes it safe)
+pr.flush_viewed_sync()
 wait_for(function()
-  pr.flush_viewed_sync()
   return viewed_sync_queue_count() == 0
 end, "queued viewed sync mutation was not flushed after a refresh")
+
+-- a flush asked for while a failing one is in flight must run once it settles
+vim.env.REVIEW_MODE_FAIL_MUTATION = "1"
+pr.toggle_viewed()
+wait_for(function()
+  return viewed_sync_queue_count() == 1
+end, "third failed viewed sync mutation was not queued")
+vim.env.REVIEW_MODE_SLOW_MUTATION = "1"
+pr.flush_viewed_sync()
+vim.env.REVIEW_MODE_FAIL_MUTATION = nil
+vim.env.REVIEW_MODE_SLOW_MUTATION = nil
+pr.flush_viewed_sync()
+wait_for(function()
+  return viewed_sync_queue_count() == 0
+end, "a flush requested mid-flight was dropped when the in-flight flush failed")
 
 vim.cmd.edit("file.txt")
 pr.mark_viewed_next()
