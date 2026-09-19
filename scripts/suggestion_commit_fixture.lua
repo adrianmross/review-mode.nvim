@@ -109,6 +109,34 @@ assert(noted("the trial suggestion was edited"), "a trial with the user's typing
 assert(git({ "rev-parse", "HEAD" }) == head_before, "a refused commit must not commit")
 vim.api.nvim_buf_set_text(buf, tail_row, 0, tail_row, 3, { "" })
 
+-- A failed commit leaves everything as it was --------------------------------------
+
+-- validate.sh points core.hooksPath at an empty directory, so .git/hooks would
+-- never run; point this copy at a hooks directory of its own for the one call.
+local hooks_path = git({ "config", "core.hooksPath" })
+local hooks_dir = git({ "rev-parse", "--absolute-git-dir" }) .. "/fixture-hooks"
+vim.fn.mkdir(hooks_dir, "p")
+vim.fn.writefile({ "#!/bin/sh", "echo 'pre-commit says no' >&2", "exit 1" }, hooks_dir .. "/pre-commit")
+vim.fn.setfperm(hooks_dir .. "/pre-commit", "rwxr-xr-x")
+git({ "config", "core.hooksPath", hooks_dir })
+answer = 1
+vim.cmd("ReviewModeSuggestionCommit")
+git({ "config", "core.hooksPath", hooks_path })
+vim.fn.delete(hooks_dir, "rf")
+
+assert(git({ "rev-parse", "HEAD" }) == head_before, "a failed commit must not commit")
+vim.fn.system({ "git", "diff", "--cached", "--quiet" })
+assert(vim.v.shell_error == 0, "a failed commit must put the index back to HEAD:\n" .. git({ "diff", "--cached" }))
+assert(noted("git commit failed: pre-commit says no"), "a failed commit should say why")
+assert(#api.suggestion_trials() == 3, "a failed commit keeps the trials")
+local kept = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+assert(kept[1] == "one mine, unsaved" and kept[8] == "same3 mine, saved", "a failed commit keeps the user's edits")
+local on_disk = table.concat(vim.fn.readfile("file.txt"), "\n")
+assert(
+  on_disk:find("same3 mine, saved", 1, true) and not on_disk:find("improved", 1, true),
+  "a failed commit leaves the file on disk alone:\n" .. on_disk
+)
+
 -- Commit, and resolve the threads -------------------------------------------------
 
 local resolved = {}
