@@ -178,6 +178,12 @@ until the draft is confirmed.
 <C-r> is what lets a reply point at lines other than the one the thread is
 anchored to: select them in the code window, return to the draft, press it.
 
+A posted comment or reply shows in the panel and as a sign at once, marked
+"sending…", and becomes the real comment when GitHub answers. If the post
+fails it is removed and its text is left in the unnamed register, so `p` puts
+it back into a new draft. GitHub only; GitLab and local reviews show the
+comment once it is saved.
+
 ==============================================================================
 PENDING REVIEW                                             *review-mode-pending*
 

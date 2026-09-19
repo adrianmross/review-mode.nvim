@@ -234,11 +234,16 @@ local function annotate_buffer(bufnr)
   for line, line_threads in pairs(grouped) do
     local thread = line_threads[#line_threads]
     local sign_hl = default_sign_hl
+    -- a draft starts its thread, but a sending reply ends one
+    local unsent = false
+    for _, comment in ipairs(thread.comments) do
+      unsent = unsent or comment.is_pending or comment.is_sending
+    end
     if thread.is_resolved then
       sign_hl = "ReviewModeResolved"
     elseif thread.is_outdated then
       sign_hl = "ReviewModeOutdated"
-    elseif thread.comments[1].is_pending then
+    elseif unsent then
       sign_hl = "ReviewModePending"
     end
 
@@ -2085,7 +2090,33 @@ function M.unresolve_thread(thread_id)
   set_thread_resolved(false, thread_id)
 end
 
-local function post_review_comment(path, start_line, end_line, body, commit_id, callback)
+-- Optimistic posting: the comment shows at once, marked sending, and the
+-- returned settle(created) swaps it for GitHub's answer -- kept in
+-- state.comments until the reload that follows overwrites the list, so it never
+-- blinks out. settle(nil) takes it back and keeps the text in the unnamed
+-- register, so nothing typed is lost.
+local function show_sending(comment)
+  local review = require("review_mode.review")
+  local generation = state.generation
+  comment.user = { login = "you" }
+  review.add_sending(comment)
+  refresh_comments_ui()
+  return function(created)
+    review.settle_sending(comment)
+    if created and core.is_current(generation) then
+      local real = comments_ui.normalize_rest(created)
+      real.thread_id = comment.reply_to
+      state.comments[comment.path] = vim.list_extend({}, state.comments[comment.path] or {})
+      table.insert(state.comments[comment.path], real)
+    elseif not created then
+      vim.fn.setreg('"', comment.body)
+      vim.notify('Review Mode: your text is in the " register (p to put it back)', vim.log.levels.WARN)
+    end
+    refresh_comments_ui()
+  end
+end
+
+local function post_review_comment(path, start_line, end_line, body, commit_id, callback, settle)
   local args = {
     "api",
     string.format("repos/%s/pulls/%s/comments", state.repo, state.pr),
@@ -2113,6 +2144,7 @@ local function post_review_comment(path, start_line, end_line, body, commit_id, 
   end
 
   gh_json_async(args, function(created, err)
+    settle(created)
     if not created then
       vim.notify("Review Mode comment failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
       if callback then
@@ -2146,8 +2178,15 @@ local function submit_review_comment(path, start_line, end_line, body, callback)
     )
   end
 
+  local settle = show_sending({
+    thread_id = "sending:" .. tostring(vim.uv.hrtime()),
+    path = path,
+    line = end_line,
+    start_line = start_line ~= end_line and start_line or nil,
+    body = body,
+  })
   if state.head then
-    post_review_comment(path, start_line, end_line, body, state.head, callback)
+    post_review_comment(path, start_line, end_line, body, state.head, callback, settle)
     return
   end
 
@@ -2156,11 +2195,12 @@ local function submit_review_comment(path, start_line, end_line, body, callback)
     {},
     function(commit_id, err)
       if not commit_id then
+        settle(nil)
         vim.notify("Review Mode comment: " .. tostring(err or "could not determine PR head SHA"), vim.log.levels.ERROR)
         return
       end
 
-      post_review_comment(path, start_line, end_line, body, commit_id, callback)
+      post_review_comment(path, start_line, end_line, body, commit_id, callback, settle)
     end
   )
 end
@@ -2196,17 +2236,22 @@ function M.submit_reply(opts, callback)
   -- A reply needs the id of the comment it answers. Callers may pass it
   -- directly, or a thread id: search the file they named, and every changed
   -- file when they did not, so opts.path stays optional.
-  local comment_id = opts.comment_id
-  if not comment_id and opts.thread_id then
+  -- The thread is also where the reply shows while it is sending.
+  local comment_id, target = opts.comment_id, nil
+  if opts.thread_id or comment_id then
     local paths = opts.path and { opts.path } or state.file_order
     for _, path in ipairs(paths) do
       for _, thread in ipairs(comments_ui.threads(state.comments[path], path)) do
-        if thread.id == opts.thread_id then
-          comment_id = thread.comments[#thread.comments].id
+        local holds = false
+        for _, comment in ipairs(thread.comments) do
+          holds = holds or (comment_id ~= nil and comment.id == comment_id)
+        end
+        if holds or (opts.thread_id and thread.id == opts.thread_id) then
+          comment_id, target = comment_id or thread.comments[#thread.comments].id, thread
           break
         end
       end
-      if comment_id then
+      if target then
         break
       end
     end
@@ -2219,6 +2264,14 @@ function M.submit_reply(opts, callback)
     return false
   end
 
+  local settle = target
+    and show_sending({
+      thread_id = target.id,
+      reply_to = target.id,
+      path = target.path,
+      line = target.line,
+      body = body,
+    })
   gh_json_async({
     "api",
     string.format("repos/%s/pulls/%s/comments/%s/replies", state.repo, state.pr, comment_id),
@@ -2227,6 +2280,9 @@ function M.submit_reply(opts, callback)
     "-f",
     "body=" .. body,
   }, function(created, err)
+    if settle then
+      settle(created)
+    end
     if not created then
       if callback then
         callback(false, err)

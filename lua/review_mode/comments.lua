@@ -306,12 +306,19 @@ local function write_comment(out, comment, index, opts)
   end
   if comment.is_pending then
     meta[#meta + 1] = "pending"
+  elseif comment.is_sending then
+    meta[#meta + 1] = "sending…"
   end
 
   local row = out:add(header .. (#meta > 0 and ("  " .. table.concat(meta, " · ")) or ""))
   out:span(row, #prefix, #prefix + #author, "ReviewModeCommentAuthor")
   if #meta > 0 then
-    out:span(row, #header, -1, comment.is_pending and "ReviewModePending" or "ReviewModeCommentMeta")
+    out:span(
+      row,
+      #header,
+      -1,
+      (comment.is_pending or comment.is_sending) and "ReviewModePending" or "ReviewModeCommentMeta"
+    )
   end
 
   for index, segment in ipairs(M.split_body(comment.body)) do
@@ -553,6 +560,7 @@ function M.threads(list, path)
       reactions = comment.reactions,
       viewer_did_author = comment.viewer_did_author,
       is_pending = comment.is_pending,
+      is_sending = comment.is_sending,
     }
   end
 
