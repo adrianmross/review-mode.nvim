@@ -154,9 +154,9 @@ wait_for(function()
 end, "toggling off did not re-render the open unified diff")
 assert(notifications[#notifications] == "Review Mode diff whitespace: shown", "toggle off did not notify")
 -- off means git's own defaults: no -w, and no flag standing in for it
+local plain_args = require("review_mode.git").diff({ "--no-index", "--unified=1000000" })
 assert(
-  vim.deep_equal({ unpack(unified_args, 1, 5) }, { "git", "diff", "--no-index", "--no-color", "--unified=1000000" })
-    and unified_args[6] == "--",
+  vim.deep_equal({ unpack(unified_args, 1, #plain_args) }, plain_args) and unified_args[#plain_args + 1] == "--",
   "unified diff with whitespace shown passed extra flags: " .. table.concat(unified_args, " ")
 )
 assert(vim.deep_equal(hunks("mixed.txt"), { 2, 10 }), "hunks did not recompute after toggling off")

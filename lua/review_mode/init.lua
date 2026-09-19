@@ -31,6 +31,7 @@ local viewed_state = require("review_mode.viewed")
 local github = require("review_mode.github")
 local checkout = require("review_mode.checkout")
 local moved = require("review_mode.moved")
+local git = require("review_mode.git")
 
 M.flush_viewed_sync = viewed_state.flush_viewed_sync
 
@@ -426,6 +427,7 @@ end)
 
 local function parse_changed_files(output)
   state.files = {}
+  state.renames = {}
   state.file_stats = {}
   state.file_order = {}
   state.file_index = {}
@@ -437,21 +439,19 @@ local function parse_changed_files(output)
   state.hunk_ranges = {}
   state.hunk_callbacks = {}
 
-  for line in (output or ""):gmatch("[^\n]+") do
-    local status, rest = line:match("^(%S+)%s+(.+)$")
-    if status and rest then
-      local path = rest:match("[^\t]+$") or rest
-      state.files[path] = status
-      if not status:match("^D") then
-        state.file_order[#state.file_order + 1] = path
-        state.file_index[path] = #state.file_order
-      end
+  for _, entry in ipairs(git.parse_z(output)) do
+    local path, status = entry.path, entry.status
+    state.files[path] = status
+    state.renames[path] = entry.old_path
+    if not status:match("^D") then
+      state.file_order[#state.file_order + 1] = path
+      state.file_index[path] = #state.file_order
+    end
 
-      local dir = vim.fs.dirname(path)
-      while dir and dir ~= "." and dir ~= "" do
-        state.dirs[dir] = true
-        dir = vim.fs.dirname(dir)
-      end
+    local dir = vim.fs.dirname(path)
+    while dir and dir ~= "." and dir ~= "" do
+      state.dirs[dir] = true
+      dir = vim.fs.dirname(dir)
     end
   end
 
@@ -467,111 +467,104 @@ local function parse_numstat_count(value)
   return tonumber(value) or 0
 end
 
-local function numstat_path(path)
-  path = path or ""
-  local renamed = path:match("{.-=>%s*(.-)}")
-  if renamed then
-    return (path:gsub("{.-=>%s*.-}", renamed))
-  end
-  return path:match("[^\t]+$") or path
-end
-
 local function parse_changed_file_stats(output)
   state.file_stats = {}
-
-  for line in (output or ""):gmatch("[^\n]+") do
-    local additions, deletions, path = line:match("^(%S+)%s+(%S+)%s+(.+)$")
-    if additions and deletions and path then
-      state.file_stats[numstat_path(path)] = {
-        additions = parse_numstat_count(additions),
-        deletions = parse_numstat_count(deletions),
-      }
-    end
+  for _, entry in ipairs(git.parse_z(output, true)) do
+    state.file_stats[entry.path] = {
+      additions = parse_numstat_count(entry.additions),
+      deletions = parse_numstat_count(entry.deletions),
+    }
   end
 end
 
 -- Returns start lines by path, a content key per hunk (viewed.hunk_keys) by
 -- path, and each hunk's { first, last } new-side lines by path (last < first
--- for a pure deletion, which changes no new line). Once inside a file's hunks
--- only a new `diff` line ends them, so an added line that reads "++ b/x" is
--- content, not a header.
+-- for a pure deletion, which changes no new line).
 local function parse_hunks_by_path(patch)
-  local by_path = {}
-  local bodies = {}
-  local ranges = {}
-  local current_path = nil
-  local body = nil
-  for line in (patch or ""):gmatch("[^\n]+") do
-    local new_start, new_count = nil, nil
-    if current_path then
-      new_start, new_count = line:match("^@@ %-%d+,?%d* %+(%d+),?(%d*) @@")
-    end
-    if line:match("^diff ") then
-      current_path, body = nil, nil
-    elseif new_start then
-      by_path[current_path][#by_path[current_path] + 1] = math.max(1, tonumber(new_start) or 1)
-      -- a missing count means one line, as in unified diff
-      local first = tonumber(new_start)
-      table.insert(ranges[current_path], { first, first + (tonumber(new_count) or 1) - 1 })
-      body = {}
-      table.insert(bodies[current_path], body)
-    elseif body then
-      if line:match("^[-+]") then
-        body[#body + 1] = line
+  local by_path, keys, ranges = {}, {}, {}
+  for _, file in ipairs(git.parse_patch(patch)) do
+    local path = file.new_path
+    if path then
+      by_path[path], ranges[path] = {}, {}
+      local bodies = {}
+      for _, hunk in ipairs(file.hunks) do
+        by_path[path][#by_path[path] + 1] = math.max(1, hunk.new_start)
+        table.insert(ranges[path], { hunk.new_start, hunk.new_start + hunk.new_count - 1 })
+        local body = {}
+        for _, line in ipairs(hunk.lines) do
+          if line:match("^[-+]") then
+            body[#body + 1] = line
+          end
+        end
+        bodies[#bodies + 1] = body
       end
-    elseif line:match("^%+%+%+ b/(.+)$") then
-      current_path = line:match("^%+%+%+ b/(.+)$")
-      by_path[current_path] = by_path[current_path] or {}
-      bodies[current_path] = bodies[current_path] or {}
-      ranges[current_path] = ranges[current_path] or {}
-    elseif line:match("^%+%+%+ /dev/null$") then
-      current_path = nil
+      keys[path] = viewed_state.hunk_keys(bodies)
     end
-  end
-
-  local keys = {}
-  for path, path_bodies in pairs(bodies) do
-    keys[path] = viewed_state.hunk_keys(path_bodies)
   end
   return by_path, keys, ranges
+end
+
+-- forward: the merge base resolves inside the map build, and a gitsigns base
+-- already applied has to follow it
+local set_gitsigns_base
+
+-- The merge base with the base branch, once per load: the base side of the
+-- review is read from it (core.base_rev). A local review's base already is one.
+-- Resolved alongside the maps, not before them, so it costs the load no time.
+local function resolve_merge_base(generation)
+  if state.head_ref ~= nil then
+    state.merge_base = nil
+    return
+  end
+  system_async({ "git", "merge-base", core.base_ref(), "HEAD" }, { cwd = state.root }, function(sha)
+    if not core.is_current(generation) then
+      return
+    end
+    sha = sha ~= "" and sha or nil
+    local changed = sha ~= state.merge_base
+    state.merge_base = sha
+    if changed and state.gitsigns_base_applied then
+      set_gitsigns_base()
+    end
+  end)
 end
 
 local function build_changed_maps_async(generation, callback)
   core.reset_changed_data()
   state.maps_loading = true
-  system_async(
-    { "git", "diff", "--name-status", "--find-renames", "--no-ext-diff", "--no-color", core.diff_range() },
-    { cwd = state.root },
-    function(output, err)
-      if not core.is_current(generation) then
-        return
-      end
-
-      state.maps_loading = false
-      if not output then
-        state.maps_loaded = true
-        callback(err or "failed to load changed files")
-        return
-      end
-
-      parse_changed_files(output)
-      system_async(
-        { "git", "diff", "--numstat", "--find-renames", "--no-ext-diff", "--no-color", core.diff_range() },
-        { cwd = state.root },
-        function(numstat)
-          if not core.is_current(generation) then
-            return
-          end
-
-          if numstat then
-            parse_changed_file_stats(numstat)
-          end
-          state.maps_loaded = true
-          callback(nil)
-        end
-      )
+  resolve_merge_base(generation)
+  system_async(git.diff({ "--name-status", "-z", "--find-renames", core.diff_range() }), {
+    cwd = state.root,
+    raw = true,
+  }, function(output, err)
+    if not core.is_current(generation) then
+      return
     end
-  )
+
+    state.maps_loading = false
+    if not output then
+      state.maps_loaded = true
+      callback(err or "failed to load changed files")
+      return
+    end
+
+    parse_changed_files(output)
+    system_async(
+      git.diff({ "--numstat", "-z", "--find-renames", core.diff_range() }),
+      { cwd = state.root, raw = true },
+      function(numstat)
+        if not core.is_current(generation) then
+          return
+        end
+
+        if numstat then
+          parse_changed_file_stats(numstat)
+        end
+        state.maps_loaded = true
+        callback(nil)
+      end
+    )
+  end)
 end
 
 local function finish_hunks_for_path(path, hunks, keys, ranges)
@@ -696,25 +689,14 @@ local function load_hunks_for_paths(paths, on_done)
   end
 
   local generation = state.generation
-  local args = {
-    "git",
-    "diff",
-    "--unified=0",
-    "--diff-filter=ACMRT",
-    "--no-ext-diff",
-    "--no-color",
-    core.diff_range(),
-    "--",
-  }
-  if needs_rename_detection then
-    table.insert(args, 5, "--find-renames")
-  else
-    table.insert(args, 5, "--no-renames")
-  end
+  local args = { "--unified=0", "--diff-filter=ACMRT" }
+  args[#args + 1] = needs_rename_detection and "--find-renames" or "--no-renames"
   if state.config.diff.ignore_whitespace then
-    table.insert(args, 5, "-w")
+    args[#args + 1] = "-w"
   end
-  vim.list_extend(args, pending_paths)
+  vim.list_extend(args, { core.diff_range(), "--" })
+  -- a renamed file's old path too: pathspec limits before rename detection
+  args = git.diff(vim.list_extend(args, git.pathspec(pending_paths, state.renames)))
 
   system_async(args, { cwd = state.root }, function(patch)
     if not core.is_current(generation) then
@@ -918,18 +900,9 @@ local function start_background_hunk_scan()
       return
     end
 
-    local args = {
-      "git",
-      "diff",
-      "--unified=0",
-      "--find-renames",
-      "--diff-filter=ACMRT",
-      "--no-ext-diff",
-      "--no-color",
-      core.diff_range(),
-    }
+    local args = git.diff({ "--unified=0", "--find-renames", "--diff-filter=ACMRT", core.diff_range() })
     if state.config.diff.ignore_whitespace then
-      table.insert(args, 3, "-w")
+      table.insert(args, #args, "-w")
     end
     system_async(args, { cwd = state.root }, function(patch)
       if not core.is_current(generation) then
@@ -1369,7 +1342,7 @@ local function jump_comment(delta, unresolved_only)
   jump_to_path(target.path, target.line)
 end
 
-local function set_gitsigns_base()
+function set_gitsigns_base()
   if not state.config.gitsigns.enabled then
     return
   end
@@ -1378,14 +1351,14 @@ local function set_gitsigns_base()
   vim.schedule(function()
     local ok, gitsigns = pcall(require, "gitsigns")
     if ok and gitsigns.change_base then
-      gitsigns.change_base(core.base_ref(), true, function()
+      gitsigns.change_base(core.base_rev(), true, function()
         if state.active then
           prefetch_current_buffer(0)
         end
       end)
       return
     end
-    pcall(vim.cmd, "Gitsigns change_base " .. core.base_ref() .. " --global")
+    pcall(vim.cmd, "Gitsigns change_base " .. core.base_rev() .. " --global")
   end)
 end
 

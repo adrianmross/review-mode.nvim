@@ -4,6 +4,7 @@ local M = {}
 
 local core = require("review_mode.state")
 local util = require("review_mode.util")
+local git = require("review_mode.git")
 
 local state = core.state
 local trim = util.trim
@@ -211,8 +212,14 @@ local function unified_diff_lines(diff, path)
     return { "No differences: " .. path }
   end
 
+  -- headers only: inside a hunk "--- x" is a deleted "-- x" line
+  local header = true
   for index, line in ipairs(lines) do
-    if line:find("^diff %-%-git ") then
+    if line:find("^@@ ") then
+      header = false
+    elseif not header then
+      break
+    elseif line:find("^diff %-%-git ") then
       lines[index] = "diff --git base/" .. path .. " head/" .. path
     elseif line:find("^%-%-%- ") and line ~= "--- /dev/null" then
       lines[index] = "--- base/" .. path
@@ -424,11 +431,11 @@ local function open_old_unified(path, current_win, current_buf, base_content, ge
   local base_rel = base_missing and "/dev/null"
     or write_temp_diff_file(tmpdir, "base", path, util.split_blob_lines(base_content))
   -- the whole file, always: condensing is folding, so zR shows it all
-  local args = { "git", "diff", "--no-index", "--no-color", "--unified=1000000" }
+  local args = { "--no-index", "--unified=1000000" }
   if state.config.diff.ignore_whitespace then
     args[#args + 1] = "-w"
   end
-  vim.list_extend(args, { "--", base_rel, head_rel })
+  args = git.diff(vim.list_extend(args, { "--", base_rel, head_rel }))
   vim.system(args, { text = true, cwd = tmpdir }, function(result)
     vim.schedule(function()
       pcall(vim.fn.delete, tmpdir, "rf")
@@ -487,7 +494,8 @@ local function open_old_view(path, current_win, current_buf)
   state.old_loading = true
 
   system_async(
-    { "git", "show", core.base_ref() .. ":" .. path },
+    -- the merge base, under the name the file had there
+    { "git", "show", core.base_rev() .. ":" .. core.base_path(path) },
     { cwd = state.root, raw = true },
     function(content, err)
       if not core.is_current(generation) then

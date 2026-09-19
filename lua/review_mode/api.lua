@@ -370,16 +370,12 @@ end
 --- The PR diff for one file, as raw text. Async: git is slow enough on a large
 --- file to stall a picker preview. callback(diff, err).
 function M.file_diff(path, callback)
-  util.system_async({
-    "git",
-    "diff",
-    "--find-renames",
-    "--no-ext-diff",
-    "--no-color",
-    core.diff_range(),
-    "--",
-    path,
-  }, { cwd = state.root, raw = true }, callback)
+  local git = require("review_mode.git")
+  local args = git.diff({ "--find-renames", core.diff_range(), "--" })
+  util.system_async(vim.list_extend(args, git.pathspec({ path }, state.renames)), {
+    cwd = state.root,
+    raw = true,
+  }, callback)
 end
 
 -- Threads ---------------------------------------------------------------------

@@ -46,7 +46,7 @@ local function diff_windows(path, head)
     return {}
   end
   -- a path missing at the base is an added file: every line is in the diff
-  local base = git_lines({ "show", merge_base[1] .. ":" .. path }) or {}
+  local base = git_lines({ "show", merge_base[1] .. ":" .. core.base_path(path) }) or {}
   local windows = {}
   for _, hunk in ipairs(vim.diff(joined(base), joined(head), { result_type = "indices" })) do
     local first = math.max(1, hunk[3] - DIFF_CONTEXT + (hunk[4] == 0 and 1 or 0))
@@ -159,7 +159,9 @@ end
 --- there.
 function M.edited_files(opts)
   local saved = {}
-  for _, path in ipairs(git_lines({ "diff", "--name-only", "HEAD" }) or {}) do
+  -- unquoted names, so a non-ASCII path matches its buffer
+  local name_only = vim.list_slice(require("review_mode.git").diff({ "--name-only", "HEAD" }), 2)
+  for _, path in ipairs(git_lines(name_only) or {}) do
     saved[path] = true
   end
   if opts and opts.buf then

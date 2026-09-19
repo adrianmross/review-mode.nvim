@@ -26,7 +26,8 @@ local diff_spawns = 0
 local diff_exits = 0
 local real_system = vim.system
 vim.system = function(cmd, opts, on_exit)
-  local is_diff = cmd[1] == "git" and cmd[2] == "diff"
+  -- git.diff puts "-c core.quotePath=false" before the subcommand
+  local is_diff = cmd[1] == "git" and vim.list_contains(cmd, "diff")
   local wrapped = on_exit
   if is_diff then
     diff_spawns = diff_spawns + 1

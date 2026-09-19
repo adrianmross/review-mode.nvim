@@ -11,6 +11,7 @@ local M = {}
 
 local core = require("review_mode.state")
 local util = require("review_mode.util")
+local git = require("review_mode.git")
 
 local state = core.state
 
@@ -40,33 +41,22 @@ end
 --- start, as the hunk list keys it) whose every non-blank line is moved.
 function M.detect(patch)
   local dels, adds, hunks = {}, {}, {}
-  local old_path, new_path, hunk
-  local old_line, new_line, old_left, new_left = 0, 0, 0, 0
-
-  for line in ((patch or "") .. "\n"):gmatch("(.-)\n") do
-    if old_left > 0 or new_left > 0 then
-      -- counted from the @@ header, so a deleted "-- comment" (patch line
-      -- "--- comment") is never mistaken for a file header
-      local sign, text = line:sub(1, 1), vim.trim(line:sub(2))
-      if sign == "-" then
-        dels[#dels + 1] = { path = old_path, line = old_line, text = text, hunk = hunk }
-        old_line, old_left = old_line + 1, old_left - 1
-      elseif sign == "+" then
-        adds[#adds + 1] = { path = new_path, line = new_line, text = text, hunk = hunk }
-        new_line, new_left = new_line + 1, new_left - 1
-      end
-    else
-      local ostart, oc, nstart, nc = line:match("^@@ %-(%d+),?(%d*) %+(%d+),?(%d*) @@")
-      if ostart then
-        old_line, old_left = tonumber(ostart), oc == "" and 1 or tonumber(oc)
-        new_line, new_left = tonumber(nstart), nc == "" and 1 or tonumber(nc)
-        hunk = { path = new_path, line = math.max(1, new_line), moved = false, dirty = false }
-        hunks[#hunks + 1] = hunk
-      elseif line:match("^diff ") then
-        old_path, new_path = nil, nil
-      else
-        old_path = line:match("^%-%-%- a/(.+)$") or old_path
-        new_path = line:match("^%+%+%+ b/(.+)$") or new_path
+  for _, file in ipairs(git.parse_patch(patch)) do
+    for _, h in ipairs(file.hunks) do
+      local hunk = { path = file.new_path, line = math.max(1, h.new_start), moved = false, dirty = false }
+      hunks[#hunks + 1] = hunk
+      local old_line, new_line = h.old_start, h.new_start
+      for _, line in ipairs(h.lines) do
+        local sign, text = line:sub(1, 1), vim.trim(line:sub(2))
+        if sign == "-" then
+          dels[#dels + 1] = { path = file.old_path, line = old_line, text = text, hunk = hunk }
+          old_line = old_line + 1
+        elseif sign == "+" then
+          adds[#adds + 1] = { path = file.new_path, line = new_line, text = text, hunk = hunk }
+          new_line = new_line + 1
+        elseif sign ~= "\\" then
+          old_line, new_line = old_line + 1, new_line + 1
+        end
       end
     end
   end
@@ -190,15 +180,9 @@ function M.load()
   end
 
   local generation = state.generation
-  util.system_async({
-    "git",
-    "diff",
-    "--unified=0",
-    "--find-renames",
-    "--no-ext-diff",
-    "--no-color",
-    core.diff_range(),
-  }, { cwd = state.root }, function(patch)
+  util.system_async(git.diff({ "--unified=0", "--find-renames", core.diff_range() }), {
+    cwd = state.root,
+  }, function(patch)
     if not core.is_current(generation) or not patch then
       return
     end

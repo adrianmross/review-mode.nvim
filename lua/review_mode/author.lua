@@ -73,20 +73,12 @@ end
 --- changed. A pure insertion (count 0) sits after its line, so it counts as
 --- touching that line.
 function M.changed_ranges(patch)
-  local ranges, path = {}, nil
-  for line in (patch or ""):gmatch("[^\n]+") do
-    local old_path = line:match("^%-%-%- a/(.+)$")
-    if old_path then
-      path = old_path
-    elseif line:match("^%-%-%- /dev/null") then
-      path = nil
-    elseif path then
-      local start, count = line:match("^@@ %-(%d+),?(%d*) ")
-      if start then
-        start, count = tonumber(start), tonumber(count ~= "" and count or "1")
-        ranges[path] = ranges[path] or {}
-        table.insert(ranges[path], { start, start + math.max(count, 1) - 1 })
-      end
+  local ranges = {}
+  for _, file in ipairs(require("review_mode.git").parse_patch(patch)) do
+    local path = file.old_path
+    for _, hunk in ipairs(path and file.hunks or {}) do
+      ranges[path] = ranges[path] or {}
+      table.insert(ranges[path], { hunk.old_start, hunk.old_start + math.max(hunk.old_count, 1) - 1 })
     end
   end
   return ranges
@@ -163,41 +155,34 @@ function M.offer_resolve(from, to)
       if not ancestor or not core.is_current(generation) then
         return
       end
-      util.system_async({
-        "git",
-        "-c",
-        "core.quotepath=off",
-        "diff",
-        "--unified=0",
-        "--no-renames",
-        "--no-ext-diff",
-        "--no-color",
-        from,
-        to,
-      }, { cwd = state.root }, function(patch)
-        if not patch or not core.is_current(generation) then
-          return
+      util.system_async(
+        require("review_mode.git").diff({ "--unified=0", "--no-renames", from, to }),
+        { cwd = state.root },
+        function(patch)
+          if not patch or not core.is_current(generation) then
+            return
+          end
+          local threads = M.touched_threads(M.changed_ranges(patch))
+          if #threads == 0 then
+            return
+          end
+          local body = string.format("Fixed in `%s`", to:sub(1, 7))
+          local lines = {}
+          for _, thread in ipairs(threads) do
+            lines[#lines + 1] = summary(thread)
+          end
+          local prompt = string.format(
+            'Reply "%s" and resolve %d thread%s?\n\n%s\n',
+            body,
+            #threads,
+            #threads == 1 and "" or "s",
+            table.concat(lines, "\n")
+          )
+          if vim.fn.confirm(prompt, "&Resolve\n&Skip", 2) == 1 then
+            reply_and_resolve(threads, body)
+          end
         end
-        local threads = M.touched_threads(M.changed_ranges(patch))
-        if #threads == 0 then
-          return
-        end
-        local body = string.format("Fixed in `%s`", to:sub(1, 7))
-        local lines = {}
-        for _, thread in ipairs(threads) do
-          lines[#lines + 1] = summary(thread)
-        end
-        local prompt = string.format(
-          'Reply "%s" and resolve %d thread%s?\n\n%s\n',
-          body,
-          #threads,
-          #threads == 1 and "" or "s",
-          table.concat(lines, "\n")
-        )
-        if vim.fn.confirm(prompt, "&Resolve\n&Skip", 2) == 1 then
-          reply_and_resolve(threads, body)
-        end
-      end)
+      )
     end)
   end)
 end
