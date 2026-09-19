@@ -54,7 +54,11 @@ function M.check()
   -- Only the forge this checkout reviews against needs its CLI: a missing gh
   -- is not an error for a GitLab or local review, nor glab for a GitHub one.
   -- Outside a checkout there is nothing to go by, so gh stays the one expected.
-  local root = has_git and vim.system({ "git", "rev-parse", "--show-toplevel" }, { text = true }):wait() or {}
+  -- pcall: vim.system throws on a missing cwd, and a health check must not
+  local ok, probe = pcall(function()
+    return vim.system({ "git", "rev-parse", "--show-toplevel" }, { text = true }):wait()
+  end)
+  local root = (has_git and ok and probe) or {}
   local provider = root.code == 0 and require("review_mode.providers").select(vim.trim(root.stdout)) or "github"
   for _, forge in ipairs({ { cli = "gh", provider = "github" }, { cli = "glab", provider = "gitlab" } }) do
     local needed = provider == forge.provider

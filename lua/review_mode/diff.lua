@@ -395,6 +395,10 @@ function M.open_scratch_side_by_side(opts)
   vim.api.nvim_set_current_win(current_win)
   vim.cmd("vsplit")
   state.old_win = vim.api.nvim_get_current_win()
+  -- the split starts with the file window's options: save them now, before
+  -- :diffthis changes them, so a close that falls back to restoring this
+  -- window never puts diff-mode options back
+  capture_window_options(state.old_win)
   state.old_target_win = current_win
   state.old_target_buf = current_buf
   state.old_buf = vim.api.nvim_create_buf(false, true)
