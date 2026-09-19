@@ -83,6 +83,10 @@ for _, path in ipairs({ "tests/a.lua", "src/__tests__/a.ts", "a_test.go", "a.tes
 end
 assert(order.stem("lua/init.lua") == nil and order.stem("db.lua") == nil, "generic and short stems name nothing")
 
+-- files = false must not take review startup down with it
+local normalized = require("review_mode.state").normalize_config({ files = false })
+assert(normalized.files.order == "smart", "files = false: " .. vim.inspect(normalized.files))
+
 -- a three-file cycle next to a free file: the free one goes first, the cycle is
 -- broken at its earliest file in diff order, and the rest follow their edges
 local sorted = order.sort({ "c.lua", "a.lua", "b.lua", "free.lua" }, {

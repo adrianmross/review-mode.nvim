@@ -315,6 +315,10 @@ function M.normalize_config(opts)
   if config.comments.compose ~= "panel" and config.comments.compose ~= "prompt" then
     config.comments.compose = defaults.comments.compose
   end
+  -- the same for files = false: the order is read on every changed-file load
+  if type(config.files) ~= "table" then
+    config.files = vim.deepcopy(defaults.files)
+  end
 
   config.session = config.session or {}
   if type(config.session.keys) ~= "table" then
