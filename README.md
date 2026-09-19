@@ -114,13 +114,23 @@ The changed-files picker (`<leader>rf`) is also the review's progress report.
 Each row reads
 
 ```
-42%     +12    -3   3 ✓1  lua/review_mode/init.lua
+ 42%  +5,449  -2,666  3 ✓1  lua/review_mode/init.lua
 ```
 
 how much of the file is reviewed (`✓` once viewed, else the share of its hunks
 viewed), lines added and removed, then its comment threads and how many of
-them are resolved. The title totals the review: `62% reviewed · 4 left · 7
-threads, 3 resolved · +120 -40`. The overall share weighs each file by its
+them are resolved. In snacks.nvim and Telescope the columns are colored:
+added lines green, removed red, the share in an accent (dim at 0%, green once
+viewed), threads in a warning color while any are open and green once all are
+resolved, and the directory dimmed beside the file name. The colors link to
+`Added`, `Removed` and the `Diagnostic*` groups; override any
+`ReviewModePicker*` group (`Added`, `Removed`, `Progress`, `ProgressNone`,
+`Viewed`, `Threads`, `Resolved`, `Dir`) to restyle. `vim.ui.select` has no
+colors, so it shows the same text plain.
+
+The title stays short enough for a picker border, `Files [all] · 62% · 4 left`;
+the full totals (threads, resolved, lines) are in the statusline and
+`:ReviewModeSummary`. The overall share weighs each file by its
 changed lines, so a 400-line file counts for more than a 2-line one, and it
 reads 100% only once every file is viewed. The statusline carries the same
 share, and `:ReviewModeSummary` spells it all out. From Lua,
@@ -155,7 +165,7 @@ layer goes.
 | `<leader>rr` | comment: on a line you edited, suggests your edit; else replies to the thread on this line, or starts one where there is none (a visual range always starts one) |
 | `<leader>rR` | start a new thread here, even over an existing one |
 | `<leader>rx` | resolve / unresolve the thread on this line |
-| `<leader>rf` | changed files: how much of each is reviewed, `+/-`, threads and how many are resolved; the title totals the whole review |
+| `<leader>rf` | changed files: how much of each is reviewed, `+/-`, threads and how many are resolved, in color; the title shows the share reviewed and files left |
 | `<leader>rv` | toggle this file viewed |
 | `<leader>rh` | toggle the hunk under the cursor viewed |
 | `<leader>rd` / `<leader>rD` | base diff / diff layout — in either, unchanged lines are folds: `zR` / `zM` show and hide them, `zo` opens one |

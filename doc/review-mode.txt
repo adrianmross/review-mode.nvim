@@ -65,7 +65,8 @@ Vim (see session.keys to change them):
         <leader>rR      start a new thread, even over an existing one
         <leader>rx      resolve / unresolve the thread on this line
         <leader>rf      changed files: reviewed share, +/-, threads and how
-                        many are resolved; the title totals the review
+                        many are resolved; the title shows the share
+                        reviewed and files left
         <leader>rv      toggle this file viewed
         <leader>rh      toggle the hunk under the cursor viewed
         <leader>rd      base diff (rD layout; zR / zM show / fold unchanged lines)
@@ -124,8 +125,11 @@ require("review_mode").statusline() returns a short summary such as
 files viewed. The share weighs each file by its changed lines and a file by
 its viewed hunks, and reads 100% only once every file is viewed. The
 changed-files picker's rows show the same per file (with +/-, threads and how
-many are resolved) and its title totals the review; api.review_progress()
-returns the totals.
+many are resolved), colored in snacks.nvim and Telescope through the
+ReviewModePicker* groups (Added, Removed, Progress, ProgressNone, Viewed,
+Threads, Resolved, Dir), which link to Added, Removed and the Diagnostic*
+groups. Its title is short, "Files [all] · 62% · 4 left";
+api.review_progress() returns the full totals.
 
 Review is a key layer over normal mode, not a real Vim mode, so mode() never
 returns it and a statusline's stock mode component cannot show it.

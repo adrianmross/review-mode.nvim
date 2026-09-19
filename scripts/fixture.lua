@@ -288,6 +288,26 @@ pr.list_viewed("unviewed")
 assert(snacks_files_opts, "snacks viewed picker was not used")
 assert(snacks_files_opts.title:find("unviewed", 1, true), "snacks file title filter missing")
 assert(snacks_files_opts.items[1].preview == nil, "snacks items should not carry eagerly built previews")
+-- snacks rows are colored: added green, removed red, progress and threads accented
+assert(type(snacks_files_opts.format) == "function", "snacks file rows are not formatted")
+local colored = {}
+for _, segment in ipairs(snacks_files_opts.format(snacks_files_opts.items[1])) do
+  if segment[2] then
+    colored[segment[2]] = segment[1]
+  end
+end
+assert((colored.ReviewModePickerAdded or ""):match("^%+%d"), "added lines are not colored: " .. vim.inspect(colored))
+assert(
+  (colored.ReviewModePickerRemoved or ""):match("^%-%d"),
+  "removed lines are not colored: " .. vim.inspect(colored)
+)
+assert(
+  colored.ReviewModePickerProgressNone == "0%",
+  "an unreviewed file's share is not dimmed: " .. vim.inspect(colored)
+)
+assert(vim.fn.hlexists("ReviewModePickerAdded") == 1, "picker highlight groups were not defined")
+assert(require("review_mode.picker")._thousands(5449) == "5,449", "line counts lack thousands separators")
+assert(require("review_mode.picker")._thousands(1234567) == "1,234,567", "long counts lack separators")
 assert(type(snacks_files_opts.preview) == "function", "snacks file preview should be built per selection")
 assert(snacks_files_preview, "snacks lazy preview was not invoked")
 assert(snacks_files_preview.ft == "diff", "snacks file preview filetype was wrong")
@@ -375,6 +395,20 @@ pr.actions()
 assert(last_notification():find("Files:", 1, true), "telescope action picker did not run selected action")
 pr.list_viewed("unviewed")
 assert(telescope_state.opts.prompt_title:find("unviewed", 1, true), "telescope viewed picker title missing")
+-- Telescope colors by byte range: each range must cover exactly its text
+local telescope_entry = telescope_state.opts.finder.entries[1]
+assert(type(telescope_entry.display) == "function", "telescope file rows are not colored")
+local shown, ranges = telescope_entry.display(telescope_entry)
+local ranged = {}
+for _, range in ipairs(ranges) do
+  ranged[range[2]] = shown:sub(range[1][1] + 1, range[1][2])
+end
+assert((ranged.ReviewModePickerAdded or ""):match("^%+%d+$"), "telescope added range is off: " .. vim.inspect(ranged))
+assert(
+  (ranged.ReviewModePickerRemoved or ""):match("^%-%d+$"),
+  "telescope removed range is off: " .. vim.inspect(ranged)
+)
+assert(ranged.ReviewModePickerProgressNone == "0%", "telescope progress range is off: " .. vim.inspect(ranged))
 wait_for(function()
   local preview_lines = vim.api.nvim_buf_get_lines(telescope_state.preview_buf, 0, -1, false)
   return has_line(preview_lines, "+feature") or has_line(preview_lines, "+new")
@@ -771,8 +805,9 @@ assert(
 assert(has_line_parts(native_labels, { "0%", "+2", "-0", "new.txt" }), "native picker added file label was wrong")
 -- the title carries the whole review
 assert(
-  native_select.opts.prompt:find("0% reviewed · 4 left · 3 threads, 1 resolved · +6 -3", 1, true),
-  "native picker title lacks the review totals: " .. native_select.opts.prompt
+  -- short enough for a border; the full totals live in the statusline and summary
+  native_select.opts.prompt == "Files [unviewed] · 0% · 4 left",
+  "native picker title is not the short totals: " .. native_select.opts.prompt
 )
 -- overall progress weighs files by changed lines: new.txt is 2 of the 9, so
 -- viewing only it reads 22%, not the 25% a per-file count would give. The flag
