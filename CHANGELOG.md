@@ -3,6 +3,10 @@
 ## [0.13.6](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.5...v0.13.6) (2026-09-19)
 
 
+### Features
+
+* **picker:** show review progress per file and for the whole review ([#103](https://github.com/adrianmross/review-mode.nvim/issues/103)) ([c31c30d](https://github.com/adrianmross/review-mode.nvim/commit/c31c30d))
+
 ### Bug Fixes
 
 * **viewed:** run a flush requested while another is in flight ([#102](https://github.com/adrianmross/review-mode.nvim/issues/102)) ([0cb421e](https://github.com/adrianmross/review-mode.nvim/commit/0cb421ef66db4a8d5044e101209556922681dc13))
