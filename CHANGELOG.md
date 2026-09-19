@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.13.9](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.8...v0.13.9) (2026-09-19)
+
+
+### Bug Fixes
+
+* checkouts, GitLab and the inbox beyond one github.com clone ([#125](https://github.com/adrianmross/review-mode.nvim/issues/125)) ([24f7b2b](https://github.com/adrianmross/review-mode.nvim/commit/24f7b2bea1e06a12b3b275efe47ab5c966dc2deb))
+* **comments:** anchor threads, replies and suggestions where GitHub does ([#123](https://github.com/adrianmross/review-mode.nvim/issues/123)) ([069ef60](https://github.com/adrianmross/review-mode.nvim/commit/069ef60ade3e9d498a92b068cb02490695476eb8))
+* **diff:** run every review diff one way and parse it once ([#121](https://github.com/adrianmross/review-mode.nvim/issues/121)) ([583e8b9](https://github.com/adrianmross/review-mode.nvim/commit/583e8b9fa303339f041055a3c1d3126d8bf47d08))
+* never lose drafts, failed posts, stores or review-tree commits ([#120](https://github.com/adrianmross/review-mode.nvim/issues/120)) ([67f861e](https://github.com/adrianmross/review-mode.nvim/commit/67f861e911848fb1c7a38e24f5e792df41ced715))
+* **session:** end every session one way and hand the editor back as found ([#124](https://github.com/adrianmross/review-mode.nvim/issues/124)) ([48db8dc](https://github.com/adrianmross/review-mode.nvim/commit/48db8dc29bbf7e6f1c64c5b8c228939fed4d6a35))
+
 ## [0.13.8](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.7...v0.13.8) (2026-09-19)
 
 
