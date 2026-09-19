@@ -5,8 +5,10 @@
 -- the rest of the ordinary-buffers model keep working, while the user's own
 -- checkout, branch and working tree are never touched.
 --
--- Safety rule for everything below: a worktree with uncommitted changes is
--- never updated and never removed. It is somebody's work.
+-- Safety rule for everything below: a worktree with uncommitted changes, or
+-- with commits that are on neither the PR nor any remote (a trial suggestion
+-- committed there, say), is never updated and never removed. It is somebody's
+-- work, and moving HEAD off those commits would orphan them.
 local M = {}
 
 local core = require("review_mode.state")
@@ -36,9 +38,22 @@ local function realpath(path)
   return vim.uv.fs_realpath(path) or path
 end
 
--- sync status check; "" means clean, nil means git failed
-local function dirty_status(path)
-  return util.system({ "git", "status", "--porcelain" }, { cwd = path })
+-- sync status check; "" means clean, nil means git failed, otherwise what is
+-- there: uncommitted changes, or commits reachable from HEAD but from none of
+-- `refs` and no branch, tag or remote.
+local function dirty_status(path, refs)
+  local status = util.system({ "git", "status", "--porcelain" }, { cwd = path })
+  if status ~= "" then
+    return status and ("uncommitted changes\n" .. status)
+  end
+  -- on a branch, a tag or a remote, a commit outlives the tree; only commits on
+  -- nothing but this detached HEAD would be orphaned
+  local args = { "git", "log", "--oneline", "HEAD", "--not", "--branches", "--tags", "--remotes" }
+  local commits = util.system(vim.list_extend(args, refs), { cwd = path })
+  if commits == nil then
+    return nil
+  end
+  return commits ~= "" and ("commits that are on no branch or remote and not in the PR\n" .. commits) or ""
 end
 
 -- run one command inside the coroutine, resuming when it finishes
@@ -56,13 +71,15 @@ end
 local function default_worktree(ctx)
   local path = ctx.default_path
   if vim.uv.fs_stat(path) then
-    local status = dirty_status(path)
+    -- the PR head it was last checked out at (ctx.prior) counts as the PR's own
+    -- history, so a force-push alone does not make it look like local work
+    local status = dirty_status(path, { ctx.ref, ctx.prior })
     if status == nil then
       return nil, "could not read status of " .. path
     end
     if status ~= "" then
       vim.notify(
-        "Review Mode: " .. path .. " has uncommitted changes; reviewing it as-is, not updated to the PR head",
+        "Review Mode: " .. path .. " has " .. status .. "\nreviewing it as-is, not updated to the PR head",
         vim.log.levels.WARN
       )
       return { path = path, reused = true, dirty = true }
@@ -119,6 +136,9 @@ function M.prepare(opts, callback)
     local base = meta.baseRefName or "main"
     local ref = M.ref(pr)
 
+    -- where the PR head was before this fetch moves it (see default_worktree)
+    local prior = util.system({ "git", "rev-parse", "--verify", "--quiet", ref }, { cwd = root })
+
     -- pull/<n>/head exists on the base repo for fork PRs too; "+" follows force-pushes
     err = select(2, await({ "git", "fetch", "--quiet", "origin", "+pull/" .. pr .. "/head:" .. ref }, root))
     if err then
@@ -137,6 +157,7 @@ function M.prepare(opts, callback)
       base = base,
       ref = ref,
       root = root,
+      prior = prior,
       default_path = vim.fs.joinpath(M.base_dir(), (repo:gsub("/", "_")), "pr-" .. pr),
     }
 
@@ -176,11 +197,15 @@ function M.clean(pr)
     local real = realpath(path)
     local name = vim.fs.basename(real)
     if vim.startswith(real, base) and (not pr or name == "pr-" .. pr) then
-      local status = dirty_status(real)
+      local number = name:match("^pr%-(%d+)$")
+      -- a tree whose name does not say which PR it holds excludes no PR ref, so
+      -- any commit on nothing but its HEAD still counts (excluding "HEAD" here
+      -- would exclude the very commits at risk)
+      local status = dirty_status(real, number and { M.ref(number) } or {})
       if real == session_root then
         refused[#refused + 1] = real .. ": the current review is using it (:ReviewModeStop first)"
       elseif status ~= "" then
-        refused[#refused + 1] = real .. ": uncommitted changes\n" .. (status or "status unavailable")
+        refused[#refused + 1] = real .. ": " .. (status or "status unavailable")
       else
         removable[#removable + 1] = real
       end

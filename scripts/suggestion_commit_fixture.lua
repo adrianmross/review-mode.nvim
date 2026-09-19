@@ -219,6 +219,8 @@ local function edge(name, before, after, start_line, end_line)
     after()
   end
   local plan, err = api.suggestion_commit_plan()
+  -- cleanup: several cases edit inside the trial, and reverting one asks first
+  answer = 1
   api.revert_suggestion(trial.id)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, head_lines)
   return plan, err, name

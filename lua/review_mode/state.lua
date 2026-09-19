@@ -273,7 +273,7 @@ local state = {
   -- the right-hand side of every review diff: nil for a PR (always HEAD), "" for
   -- a local review of the working tree, or a ref to compare against instead
   head_ref = nil,
-  -- <git-dir>/review-mode/<key>.json while a local review is active
+  -- <git-common-dir>/review-mode/<key>.json while a local review is active
   local_store = nil,
   -- End local reviews ---------------------------------------------------------
 }

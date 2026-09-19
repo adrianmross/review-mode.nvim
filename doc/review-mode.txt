@@ -207,17 +207,24 @@ until the draft is confirmed.
                 ```suggestion block, open in a buffer with the file's
                 filetype; :w or <C-s> writes them back, q cancels
         <C-p>   queue the comment in the pending review instead of posting it
-                (new comments only) |review-mode-pending|
-        q       discard the draft
+                (new comments only; not offered on GitLab or in a local
+                review) |review-mode-pending|
+        q       discard the draft (confirmed if it is not empty)
+
+A draft is never thrown away unasked. Opening another draft, or closing the
+panel, over one that is not empty asks "Discard this draft?" first, and
+keeping it keeps the draft and the panel. Where nobody can be asked (the
+session stopping, the panel window closing, :q! on the draft) its text goes to
+the unnamed register and a notice says so.
 
 <C-r> is what lets a reply point at lines other than the one the thread is
 anchored to: select them in the code window, return to the draft, press it.
 
 A posted comment or reply shows in the panel and as a sign at once, marked
-"sending…", and becomes the real comment when GitHub answers. If the post
-fails it is removed and its text is left in the unnamed register, so `p` puts
-it back into a new draft. GitHub only; GitLab and local reviews show the
-comment once it is saved.
+"sending…", and becomes the real comment when GitHub answers (GitLab and local
+reviews show it once it is saved). If a post, reply, edit or queue from the
+draft fails, on any provider, its text is left in the unnamed register, so `p`
+puts it back into a new draft.
 
 ==============================================================================
 PENDING REVIEW                                             *review-mode-pending*
@@ -228,11 +235,16 @@ buffer with every queued comment, and the review body is whatever is typed
 below the marker line.
 
         <CR>    jump to the draft's line
-        dd      drop the draft under the cursor
+        dd      drop the draft under the cursor, after a confirmation
+                (elsewhere, an ordinary dd)
         <C-s>   submit as a COMMENT review
         <C-a>   submit as an APPROVE review
         <C-x>   submit as a REQUEST_CHANGES review
         q       close the buffer
+
+dd drops the draft actually under the cursor, even after lines were added above
+the list. Deleting the marker line does not cost the review body: the next
+redraw puts the marker back above it.
 
 Every submission is confirmed first, showing the event and the number of
 comments. |:ReviewModeSubmit| does the same without the buffer.
@@ -511,8 +523,10 @@ COMMANDS                                                  *review-mode-commands*
                                                         *:ReviewModeCheckoutClean*
 :ReviewModeCheckoutClean [pr]
         Remove review worktrees created by |:ReviewModeCheckout|, after a
-        confirmation. Worktrees with uncommitted changes, and the one the
-        current session is using, are refused and listed. A dirty worktree is
+        confirmation. Worktrees with uncommitted changes or with commits on
+        no branch, tag or remote and not in the PR (a committed trial
+        suggestion, say), and the one the current session is using, are
+        refused and listed. A dirty worktree is
         also never updated: reviewing its PR again reuses it as it stands and
         warns.
 
@@ -555,6 +569,8 @@ COMMANDS                                                  *review-mode-commands*
 :ReviewModeSuggestionRevert [id]
         Put back the lines a trial suggestion replaced: the trial under the
         cursor, or the one with this id from |:ReviewModeSuggestionList|.
+        When you have typed inside the trial since, it asks first: reverting
+        drops those edits too.
 
                                                         *:ReviewModeSuggestionList*
 :ReviewModeSuggestionList
@@ -876,12 +892,16 @@ report that they are not supported in a local review instead of calling gh.
 
 Comments are kept on disk, at:
 
-    <git-dir>/review-mode/<branch-or-head>.json
+    <git-common-dir>/review-mode/<branch>.json
 
-<git-dir> is `git rev-parse --git-dir`: .git in a normal checkout and
-.git/worktrees/<name> in a linked worktree, so parallel worktrees never share
-review comments. It is not --git-common-dir, which is shared, and git never
-tracks any of it. The file is indented with a stable key order so a human or an
+<git-common-dir> is `git rev-parse --git-common-dir`: the main .git, for a
+linked worktree too, so removing a worktree never deletes its comments. The
+name is the branch the head resolves to (HEAD included; another ref by its own
+name, a detached commit as detached-<sha>), percent-encoded so feat/x and
+feat_x never share a file. A store an older release kept under --git-dir is
+copied over the first time the review starts. A file that no longer parses is
+set aside as <file>.corrupt-<time>, never written over. git never tracks any
+of it. The file is indented with a stable key order so a human or an
 agent can read it. Comments load into the same normalized shape GitHub and
 GitLab comments do.
 

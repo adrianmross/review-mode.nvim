@@ -70,7 +70,16 @@ function M.persist_viewed_state()
   entry.order = state.viewed_order
   entry.sync_queue = state.viewed_sync_queue
   entry.hunks = state.hunk_viewed
-  local ok, err = pcall(util.write_json_file, M.viewed_state_path(), M.load_viewed_store())
+  -- One file holds every PR, and another Neovim may have written its own PRs
+  -- since this one read it: merge this PR's entry into what is on disk now,
+  -- rather than writing back a stale copy of everyone else's.
+  local path = M.viewed_state_path()
+  local ok, err = pcall(function()
+    local store = util.read_json_file(path) or {}
+    store[core.cache_key()] = entry
+    state.viewed_store = store
+    util.write_json_file(path, store)
+  end)
   if not ok then
     vim.notify("Review Mode viewed state: " .. tostring(err), vim.log.levels.WARN)
   end

@@ -9,7 +9,8 @@
 --   * accept    write it into the buffer as a *trial*: unsaved, marked, and
 --               revertible. The applied range is tracked by an extmark, so a
 --               revert restores the original lines even after the user has
---               edited elsewhere in the file.
+--               edited elsewhere in the file. Edits inside the trial are only
+--               dropped by a revert the user confirms.
 --   * accept_all  every suggestion in one file, applied bottom-up.
 --
 -- Trials are buffer state, not review state: they die with a buffer reload and
@@ -511,6 +512,19 @@ function M.revert(id)
   local start_row, finish = trial_range(trial)
   if not start_row then
     return nil, "this trial is no longer tracked"
+  end
+  -- the mark widens to take in typing inside it: putting the original back
+  -- would also throw away the user's own edits there, so ask first
+  local current = vim.api.nvim_buf_get_lines(trial.buf, start_row, finish, false)
+  if not vim.deep_equal(current, trial.lines) then
+    local prompt = string.format(
+      "The trial suggestion on %s:%d was edited since it was applied.\nReverting puts the original lines back and drops those edits.",
+      trial.path,
+      start_row + 1
+    )
+    if vim.fn.confirm(prompt, "&Revert\n&Keep my edits", 2) ~= 1 then
+      return nil, "kept your edits to the trial suggestion; nothing reverted"
+    end
   end
   -- a preview of what this trial replaced has nothing left to show
   local open = (previews[trial.buf] or {})[trial.thread_id]

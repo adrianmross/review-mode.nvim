@@ -251,11 +251,35 @@ end
 
 -- Composer -------------------------------------------------------------------
 
+local function composer_body()
+  if not ui.composer_buf or not vim.api.nvim_buf_is_valid(ui.composer_buf) then
+    return ""
+  end
+  return trim(table.concat(vim.api.nvim_buf_get_lines(ui.composer_buf, 0, -1, false), "\n"))
+end
+
 -- Both scratch buffers are bufhidden = "wipe", so closing the window is what
 -- reclaims them. Deleting the buffer as well tears down a buffer that is
 -- already being wiped, which crashes Neovim.
-local function close_composer()
+--
+-- A draft is never dropped unasked. `how` is "discard" once the text is dealt
+-- with (posted, queued, or the user said discard), "ask" to confirm first --
+-- false comes back when the user keeps editing -- and nil for a close nobody
+-- can be asked about (the session stopping, the panel window gone), where the
+-- buffer's BufWipeout puts the text in the " register.
+local function close_composer(how)
+  if how == "ask" and composer_body() ~= "" then
+    if vim.fn.confirm("Discard this draft?", "&Discard\n&Keep editing", 2) ~= 1 then
+      if composer_is_open() then
+        vim.api.nvim_set_current_win(ui.composer_win)
+      end
+      return false
+    end
+  end
   local win, bufnr = ui.composer_win, ui.composer_buf
+  if how then
+    ui.composer_discarded = bufnr
+  end
   local source = ui.composer_source
   -- only when the draft had focus: closing the panel from the code window must
   -- not move the cursor anywhere
@@ -272,13 +296,7 @@ local function close_composer()
   if was_current and source and source.win and vim.api.nvim_win_is_valid(source.win) then
     vim.api.nvim_set_current_win(source.win)
   end
-end
-
-local function composer_body()
-  if not ui.composer_buf or not vim.api.nvim_buf_is_valid(ui.composer_buf) then
-    return ""
-  end
-  return trim(table.concat(vim.api.nvim_buf_get_lines(ui.composer_buf, 0, -1, false), "\n"))
+  return true
 end
 
 --- Pull the code the user is talking about into the draft, so a reply can
@@ -416,7 +434,7 @@ function M.composer_submit()
     return
   end
 
-  close_composer()
+  close_composer("discard")
   if submit then
     submit(body)
   end
@@ -430,21 +448,25 @@ function M.composer_pend()
   if not pend or body == "" then
     return
   end
-  close_composer()
+  close_composer("discard")
   pend(body)
 end
 
 function M.composer_cancel()
-  if composer_body() ~= "" and vim.fn.confirm("Discard this draft?", "&Discard\n&Keep editing", 2) ~= 1 then
-    return
-  end
-  close_composer()
+  close_composer("ask")
 end
 
 --- Open a multi-line draft buffer. Nothing is sent until |M.composer_submit|
---- has been confirmed, so a stray keystroke cannot post to the PR.
+--- has been confirmed, so a stray keystroke cannot post to the PR. A draft
+--- already open is only replaced once the user agrees to discard it.
 local function open_composer(opts)
-  close_composer()
+  if not close_composer("ask") then
+    return
+  end
+  -- only offer queueing where it can work (not GitLab, not a local review)
+  if not api.can_add_pending() then
+    opts.pend = nil
+  end
 
   if panel_is_open() then
     vim.api.nvim_set_current_win(ui.panel_win)
@@ -491,6 +513,17 @@ local function open_composer(opts)
       M.composer_submit()
     end,
   })
+  -- however the window goes (:q, :only, the session stopping), text that was
+  -- not posted or discarded on purpose survives in the " register
+  vim.api.nvim_create_autocmd("BufWipeout", {
+    buffer = bufnr,
+    once = true,
+    callback = function()
+      if ui.composer_discarded ~= bufnr then
+        util.keep_text(trim(table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")))
+      end
+    end,
+  })
 
   vim.cmd("startinsert")
 end
@@ -528,6 +561,7 @@ local function reply_to_thread(thread, target)
       api.reply({ thread_id = thread.id, comment_id = last_comment.id, body = body }, function(ok, err)
         if not ok then
           vim.notify("Review Mode reply failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
+          util.keep_text(body)
           return
         end
         vim.notify("Submitted PR thread reply")
@@ -550,12 +584,17 @@ local function comment_on_target(source)
     prompt = string.format("Post this comment on %s:%d-%d?", source.path, first, last),
     source = source,
     submit = function(body)
-      api.comment({ path = source.path, start_line = first, end_line = last, body = body })
+      api.comment({ path = source.path, start_line = first, end_line = last, body = body }, function(ok)
+        if not ok then
+          util.keep_text(body)
+        end
+      end)
     end,
     pend = function(body)
       local draft, err = api.add_pending({ path = source.path, start_line = first, end_line = last, body = body })
       if not draft then
         vim.notify("Review Mode pending: " .. tostring(err), vim.log.levels.ERROR)
+        util.keep_text(body)
         return
       end
       vim.notify(string.format("Added pending comment on %s:%d (%d pending)", source.path, last, #api.pending()))
@@ -673,6 +712,7 @@ local function edit_comment(thread, comment, target)
       api.edit_comment({ comment_id = comment.id, body = body }, function(ok, err)
         if not ok then
           vim.notify("Review Mode edit failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
+          util.keep_text(body)
           return
         end
         vim.notify("Edited PR comment")
@@ -782,8 +822,13 @@ local function forget_panel()
   ui.panel_comment_rows = nil
 end
 
-function M.close_panel()
-  close_composer()
+--- Close the panel and its draft. opts.confirm = false (the session stopping)
+--- closes without asking, keeping any draft text in the " register; otherwise
+--- a draft is only discarded once confirmed, and keeping it keeps the panel.
+function M.close_panel(opts)
+  if not close_composer((opts or {}).confirm ~= false and "ask" or nil) then
+    return
+  end
   local win, bufnr = ui.panel_win, ui.panel_buf
   forget_panel()
   if win and vim.api.nvim_win_is_valid(win) then
@@ -932,6 +977,7 @@ function M.suggest_edit(edit)
       api.comment(vim.tbl_extend("force", where, { body = body }), function(ok, err)
         if not ok then
           vim.notify("Review Mode suggestion failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
+          util.keep_text(body)
           return
         end
         if api.undo_edit(edit) then
@@ -945,6 +991,7 @@ function M.suggest_edit(edit)
       local draft, err = api.add_pending(vim.tbl_extend("force", where, { body = body }))
       if not draft then
         vim.notify("Review Mode pending: " .. tostring(err), vim.log.levels.ERROR)
+        util.keep_text(body)
         return
       end
       if api.undo_edit(edit) then

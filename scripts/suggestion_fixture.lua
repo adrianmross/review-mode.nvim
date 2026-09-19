@@ -177,6 +177,29 @@ assert(#after == 12, "revert should leave the unrelated edit's two lines in plac
 assert(#api.suggestion_trials() == 0, "a reverted trial is no longer live")
 assert(#reverted == 1 and reverted[1].id == trial.id, "suggestion_reverted did not fire")
 
+-- Typing inside a trial widens its mark, so a revert would throw that typing
+-- away with it: it asks first, and keeping the edits keeps the trial.
+vim.api.nvim_buf_set_lines(buf, 0, 2, false, {})
+local before_edit = lines()
+local edited = assert(api.accept_suggestion(entries[2], { buf = buf }), "re-applying the line 4 suggestion failed")
+vim.api.nvim_buf_set_text(buf, 3, #"base improved", 3, #"base improved", { " by hand" })
+assert(lines()[4] == "base improved by hand", "the hand edit did not land inside the trial")
+local forbidden_confirm, revert_prompts = vim.fn.confirm, {}
+local revert_answer = 2
+vim.fn.confirm = function(prompt)
+  revert_prompts[#revert_prompts + 1] = prompt
+  return revert_answer
+end
+local kept = api.revert_suggestion(edited.id)
+assert(#revert_prompts == 1, "reverting an edited trial did not ask first")
+assert(not kept and lines()[4] == "base improved by hand", "declining the revert still dropped the hand edit")
+assert(#api.suggestion_trials() == 1, "declining the revert forgot the trial")
+revert_answer = 1
+assert(api.revert_suggestion(edited.id), "confirming the revert of an edited trial failed")
+assert(vim.deep_equal(lines(), before_edit), "a confirmed revert did not restore the original lines")
+vim.fn.confirm = forbidden_confirm
+vim.api.nvim_buf_set_lines(buf, 0, 0, false, { "inserted header", "and another" })
+
 -- Accept all ------------------------------------------------------------------
 
 -- Extmarks outlive a reload, so pruning dead marks is not enough to notice one:

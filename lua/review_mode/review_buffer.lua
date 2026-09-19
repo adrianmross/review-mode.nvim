@@ -18,24 +18,36 @@ local hint = "<CR> jump · dd drop · C-s comment · C-a approve · C-x request 
 
 local events = { comment = "COMMENT", approve = "APPROVE", request_changes = "REQUEST_CHANGES" }
 
--- this UI's own state
-local ui = { buf = nil, rows = {} }
+-- this UI's own state. Draft rows and the body marker are tracked by extmarks,
+-- not line numbers, so they follow the text when lines are added above them.
+local ui = { buf = nil, drafts = {}, marker = nil }
+local ns = vim.api.nvim_create_namespace("review_mode_review_buffer")
 
 local function buf_valid()
   return ui.buf ~= nil and vim.api.nvim_buf_is_valid(ui.buf)
+end
+
+-- The first row (0-based) of the review body. When the marker line itself was
+-- deleted, its extmark has moved onto the line that followed it -- the body's
+-- first line -- so the body is still found and never overwritten.
+local function body_start()
+  local marker = vim.fn.index(vim.api.nvim_buf_get_lines(ui.buf, 0, -1, false), body_marker)
+  if marker >= 0 then
+    return marker + 1, true
+  end
+  local mark = ui.marker and vim.api.nvim_buf_get_extmark_by_id(ui.buf, ns, ui.marker, {})
+  if mark and mark[1] then
+    return mark[1], false
+  end
+  return nil, false
 end
 
 local function body_lines()
   if not buf_valid() then
     return {}
   end
-  local lines = vim.api.nvim_buf_get_lines(ui.buf, 0, -1, false)
-  for index, line in ipairs(lines) do
-    if line == body_marker then
-      return vim.list_slice(lines, index + 1)
-    end
-  end
-  return {}
+  local start = body_start()
+  return start and vim.api.nvim_buf_get_lines(ui.buf, start, -1, false) or {}
 end
 
 --- The review body as typed in the buffer, or "" when it is not open.
@@ -55,31 +67,46 @@ local function render()
     "",
     string.format("Pending comments (%d)", #drafts),
   }
-  ui.rows = {}
+  local rows = {}
   for _, draft in ipairs(drafts) do
     local where = draft.start_line == draft.end_line and tostring(draft.end_line)
       or string.format("%d-%d", draft.start_line, draft.end_line)
     lines[#lines + 1] = string.format("  %s:%s  %s", draft.path, where, draft.body:match("[^\n]*"))
-    ui.rows[#lines] = draft
+    rows[#lines - 1] = draft
   end
   if #drafts == 0 then
     lines[#lines + 1] = "  (none)"
   end
   vim.list_extend(lines, { "", body_marker })
 
-  -- only the part above the marker is ours; the body below stays untouched
-  local current = vim.api.nvim_buf_get_lines(ui.buf, 0, -1, false)
-  local marker = vim.fn.index(current, body_marker)
-  if marker < 0 then
+  -- only the part above the body is ours; the body stays untouched. A missing
+  -- marker is put back where it was, never by rewriting the whole buffer.
+  local start, found = body_start()
+  if not start then
     lines[#lines + 1] = ""
     vim.api.nvim_buf_set_lines(ui.buf, 0, -1, false, lines)
   else
-    vim.api.nvim_buf_set_lines(ui.buf, 0, marker + 1, false, lines)
+    vim.api.nvim_buf_set_lines(ui.buf, 0, start, false, lines)
+    if not found and vim.api.nvim_buf_line_count(ui.buf) == #lines then
+      vim.api.nvim_buf_set_lines(ui.buf, -1, -1, false, { "" })
+    end
   end
+
+  vim.api.nvim_buf_clear_namespace(ui.buf, ns, 0, -1)
+  ui.drafts = {}
+  for row, draft in pairs(rows) do
+    ui.drafts[vim.api.nvim_buf_set_extmark(ui.buf, ns, row, 0, { invalidate = true })] = draft
+  end
+  ui.marker = vim.api.nvim_buf_set_extmark(ui.buf, ns, #lines - 1, 0, {})
 end
 
 local function draft_at_cursor()
-  return ui.rows[vim.api.nvim_win_get_cursor(0)[1]]
+  local row = vim.api.nvim_win_get_cursor(0)[1] - 1
+  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(ui.buf, ns, { row, 0 }, { row, -1 }, { details = true })) do
+    if ui.drafts[mark[1]] and not mark[4].invalid then
+      return ui.drafts[mark[1]]
+    end
+  end
 end
 
 local function jump()
@@ -102,6 +129,12 @@ local function drop()
   local draft = draft_at_cursor()
   if not draft then
     vim.cmd("normal! " .. vim.v.count1 .. "dd")
+    return
+  end
+  -- a queued draft is typed work, and removing it cannot be undone with u
+  local where = string.format("%s:%d", draft.path, draft.end_line)
+  local prompt = string.format("Drop this pending comment?\n\n  %s  %s\n", where, draft.body:match("[^\n]*"))
+  if vim.fn.confirm(prompt, "&Drop\n&Keep", 2) ~= 1 then
     return
   end
   api.remove_pending(draft.id)

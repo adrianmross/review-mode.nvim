@@ -79,16 +79,49 @@ local dotted = assert(local_provider.resolve({ "main...feature" }, cwd), "three-
 assert(dotted.head_ref == "feature", "main...feature was not split into base and head")
 assert(not local_provider.resolve({ "no-such-ref" }, cwd), "an unknown base should fail rather than guess")
 
--- The store lives under --git-dir, so a linked worktree gets its own file. This
--- is the whole isolation claim, so prove it against a real linked worktree.
-local linked = vim.fs.joinpath(vim.fs.dirname(cwd), "linked")
-git({ "worktree", "add", "--detach", linked, "feature" })
-local linked_store = assert(local_provider.store_for(linked, "feature"), "no store for the linked worktree")
+-- The store lives under --git-common-dir, keyed by branch, so removing a linked
+-- worktree (git worktree remove, wt remove) never takes its comments with it.
 local main_store = assert(local_provider.store_for(cwd, "feature"), "no store for the main checkout")
-assert(linked_store ~= main_store, "a linked worktree shared the main checkout's comment store")
-assert(linked_store:find("/worktrees/", 1, true), "linked worktree store is not under .git/worktrees: " .. linked_store)
 assert(main_store:find("/.git/review-mode/feature.json", 1, true), "main store path wrong: " .. main_store)
+assert(
+  local_provider.store_for(cwd, "feat/x") ~= local_provider.store_for(cwd, "feat_x"),
+  "feat/x and feat_x share a comment store"
+)
+
+local linked = vim.fs.joinpath(vim.fs.dirname(cwd), "linked")
+git({ "worktree", "add", "-q", "-b", "wt/branch", linked, "feature" })
+local linked_git_dir = git({ "rev-parse", "--absolute-git-dir" }, linked)
+assert(linked_git_dir:find("/worktrees/", 1, true), "not a linked worktree: " .. linked_git_dir)
+local linked_store = assert(local_provider.store_for(linked, "wt/branch"), "no store for the linked worktree")
+assert(not linked_store:find("/worktrees/", 1, true), "linked worktree store is inside its own git dir")
+local function git_dir_of(store)
+  return vim.uv.fs_realpath(vim.fs.dirname(vim.fs.dirname(store)))
+end
+assert(
+  git_dir_of(linked_store) == git_dir_of(main_store),
+  "linked worktree store is not in the common git dir: " .. linked_store
+)
+
+-- an old store (under the worktree's own git dir, "_" for "/") is carried over
+local legacy = vim.fs.joinpath(linked_git_dir, "review-mode", "wt_branch.json")
+vim.fn.mkdir(vim.fs.dirname(legacy), "p")
+vim.fn.writefile(
+  { '{"version":1,"next_id":2,"threads":[{"id":"t1","path":"file.txt","line":2,"comments":[]}]}' },
+  legacy
+)
+local migrated = assert(local_provider.resolve({}, linked), "resolve in the linked worktree failed")
+assert(migrated.pr == "wt/branch", "the store key is not the linked worktree's branch: " .. tostring(migrated.pr))
+assert(migrated.local_store == linked_store, "resolve did not use the common-dir store")
+assert(vim.fn.filereadable(linked_store) == 1, "the old store was not migrated to " .. linked_store)
+assert(read(linked_store) == read(legacy), "the migrated store lost content")
+
+-- `main HEAD` keys by the branch HEAD is on, not "HEAD" shared by every branch
+local by_head = assert(local_provider.resolve({ "main", "HEAD" }, linked), "resolve main HEAD failed")
+assert(by_head.pr == "wt/branch", "HEAD was not resolved to its branch: " .. tostring(by_head.pr))
+
 git({ "worktree", "remove", "--force", linked })
+assert(vim.fn.filereadable(linked_store) == 1, "removing the worktree deleted its local comments")
+git({ "branch", "-D", "wt/branch" })
 
 -- A local review of the working tree ---------------------------------------------
 
@@ -288,6 +321,28 @@ require("review_mode.review_buffer").submit("approve")
 vim.fn.confirm = original_confirm
 assert(not confirmed, "a local review asked to confirm a submission it cannot make")
 assert(notified("Submitting a review is not supported in a local review"), "submit did not refuse in a local review")
+
+-- a local review cannot queue drafts for a review, so the composer does not
+-- offer it only to refuse (and lose the text)
+vim.cmd.edit("file.txt")
+pr.compose_comment()
+vim.cmd("stopinsert")
+assert(vim.bo.filetype == "markdown", "the composer did not open in a local review")
+assert(not vim.wo.winbar:find("C-p", 1, true), "a local review's composer offered C-p pending")
+assert(vim.fn.maparg("<C-p>", "n") == "", "a local review's composer mapped <C-p>")
+assert(not api.can_add_pending(), "a local review claims it can queue drafts")
+require("review_mode.panel").composer_cancel()
+
+-- a store that no longer parses is set aside, never treated as empty and
+-- written over by the next comment
+local corrupt_text = '{"version":1,"threads":[ half written'
+vim.fn.writefile({ corrupt_text }, main_store)
+run(api.local_comment, { path = "file.txt", line = 2, body = "after the damage" })
+local aside = vim.fn.glob(main_store .. ".corrupt-*", false, true)
+assert(#aside == 1, "a corrupt local store was not kept aside")
+assert(read(aside[1]) == corrupt_text, "the corrupt local store was overwritten")
+assert(notified("kept it as"), "setting the corrupt store aside was not announced")
+assert(#vim.json.decode(read(main_store)).threads == 1, "the new comment did not start a fresh store")
 
 pr.stop()
 vim.fn.writefile({ "deep", "feature" }, dirty)

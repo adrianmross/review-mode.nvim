@@ -1802,7 +1802,7 @@ function M.stop()
   state.head_log_stamp = nil
   core.reset_review_data()
   diff.close_old_view()
-  panel.close_panel()
+  panel.close_panel({ confirm = false })
   annotate_open_buffers()
   refresh_tree()
   announce("stop")
@@ -2300,8 +2300,7 @@ local function show_sending(comment)
       state.comments[comment.path] = vim.list_extend({}, state.comments[comment.path] or {})
       table.insert(state.comments[comment.path], real)
     elseif not created then
-      vim.fn.setreg('"', comment.body)
-      vim.notify('Review Mode: your text is in the " register (p to put it back)', vim.log.levels.WARN)
+      util.keep_text(comment.body)
     end
     refresh_comments_ui()
   end
@@ -2356,6 +2355,9 @@ end
 local function submit_review_comment(path, start_line, end_line, body, callback)
   if not state.repo or not state.pr then
     vim.notify("Review Mode comment: start Review Mode first", vim.log.levels.WARN)
+    if callback then
+      callback(false, "no review session")
+    end
     return
   end
 
@@ -2388,6 +2390,9 @@ local function submit_review_comment(path, start_line, end_line, body, callback)
       if not commit_id then
         settle(nil)
         vim.notify("Review Mode comment: " .. tostring(err or "could not determine PR head SHA"), vim.log.levels.ERROR)
+        if callback then
+          callback(false, err)
+        end
         return
       end
 
