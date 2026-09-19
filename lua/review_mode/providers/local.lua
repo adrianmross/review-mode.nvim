@@ -190,8 +190,6 @@ local function encode(value, indent)
   return "{\n" .. table.concat(parts, ",\n") .. "\n" .. indent .. "}"
 end
 
-M.encode = encode
-
 local function read_doc()
   local doc = state.local_store and util.read_json_file(state.local_store) or nil
   if type(doc) ~= "table" then

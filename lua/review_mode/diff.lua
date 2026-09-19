@@ -205,8 +205,6 @@ local function unified_fold_ranges(lines, context)
   return ranges
 end
 
-M._unified_fold_ranges = unified_fold_ranges
-
 -- eol: whether the file ends in a newline. Written without one, every file
 -- would diff as "\ No newline at end of file".
 local function write_temp_diff_file(tmpdir, side, path, lines, eol)

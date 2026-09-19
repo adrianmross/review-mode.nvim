@@ -91,14 +91,6 @@ function M.is_no_pr(err)
   return false
 end
 
-function M.is_local()
-  return state.provider == "local"
-end
-
-function M.is_gitlab()
-  return state.provider == "gitlab"
-end
-
 -- how each non-GitHub provider finishes "X is not supported ..."
 local unsupported_targets = { gitlab = "on GitLab yet", ["local"] = "in a local review" }
 
