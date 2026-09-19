@@ -220,6 +220,26 @@ vim.api.nvim_buf_set_lines(new_buf, 1, 2, false, { "new two edited" })
 vim.api.nvim_set_current_win(code_win)
 vim.api.nvim_win_set_buf(code_win, buf)
 
+-- cancelled: nothing queued, and the buffers the batch loaded to read the
+-- saved files' edits are gone again, while the ones already open stay, even
+-- one with no unsaved changes (more.txt, open but saved)
+local more_buf = vim.fn.bufadd(vim.fn.fnamemodify("nested/deeper/more.txt", ":p"))
+vim.fn.bufload(more_buf)
+local bufs_before = vim.api.nvim_list_bufs()
+pending_before = #api.pending()
+local confirm_queue = vim.fn.confirm
+vim.fn.confirm = function()
+  return 2
+end
+pr.suggest_edits({ all = true })
+vim.fn.confirm = confirm_queue
+assert(#api.pending() == pending_before, "a cancelled batch should queue nothing")
+assert(
+  vim.deep_equal(vim.api.nvim_list_bufs(), bufs_before),
+  "a cancelled batch should leave no buffers of its own: " .. vim.inspect(vim.api.nvim_list_bufs())
+)
+vim.api.nvim_buf_delete(more_buf, {})
+
 local state = core.state
 local real_order, real_index = vim.deepcopy(state.file_order), vim.deepcopy(state.file_index)
 state.file_order = vim.tbl_filter(function(path)
@@ -227,7 +247,6 @@ state.file_order = vim.tbl_filter(function(path)
 end, state.file_order)
 state.file_index["nested/deeper/more.txt"] = nil
 
-pending_before = #api.pending()
 notes = {}
 pr.suggest_edits({ all = true })
 state.file_order, state.file_index = real_order, real_index

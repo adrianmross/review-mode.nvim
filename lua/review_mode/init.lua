@@ -2572,6 +2572,13 @@ function M.suggest_edits(opts)
 
   local edits = require("review_mode.edits")
   local files, outside_pr = edits.edited_files(not all and { buf = vim.api.nvim_get_current_buf() } or nil)
+  -- a buffer loaded only to read its edits goes again if none were queued:
+  -- a cancelled batch should leave the buffer list as it found it
+  local function drop(file)
+    if file.created then
+      pcall(vim.api.nvim_buf_delete, file.buf, {})
+    end
+  end
   local total, ready, counts = 0, 0, {}
   for _, file in ipairs(files) do
     local found = api.edits({ buf = file.buf })
@@ -2600,6 +2607,7 @@ function M.suggest_edits(opts)
       ) .. not_in_pr,
       vim.log.levels.WARN
     )
+    vim.tbl_map(drop, files)
     return
   end
 
@@ -2614,13 +2622,14 @@ function M.suggest_edits(opts)
     prompt = prompt .. "\n" .. table.concat(counts, "\n") .. not_in_pr
   end
   if vim.fn.confirm(prompt, "&Queue\n&Cancel", 2) ~= 1 then
+    vim.tbl_map(drop, files)
     return
   end
 
   local queued, written, unsaved = 0, {}, {}
   for _, file in ipairs(files) do
     -- bottom-up, so undoing one edit never moves the rows of those above it
-    local undone = 0
+    local undone, queued_here = 0, 0
     for index = #file.ready, 1, -1 do
       local edit = file.ready[index]
       local draft, err = api.add_pending({
@@ -2631,7 +2640,7 @@ function M.suggest_edits(opts)
       })
       if draft then
         undone = undone + (api.undo_edit(edit) and 1 or 0)
-        queued = queued + 1
+        queued, queued_here = queued + 1, queued_here + 1
       else
         vim.notify("Review Mode pending: " .. tostring(err), vim.log.levels.ERROR)
       end
@@ -2646,6 +2655,9 @@ function M.suggest_edits(opts)
           vim.cmd("silent write!")
         end)
       table.insert(ok and written or unsaved, file.path)
+    end
+    if queued_here == 0 then
+      drop(file)
     end
   end
   vim.notify(

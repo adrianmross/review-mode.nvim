@@ -151,9 +151,10 @@ local function edited_file(path, bufnr, saved)
   }
 end
 
---- The files you have edited, as { path, buf, saved, clean }: opts.buf alone,
---- or every file the PR changes that differs from HEAD in a buffer or on disk,
---- loading a buffer for a file that has none so list() can read it. Also
+--- The files you have edited, as { path, buf, saved, clean, created }: opts.buf
+--- alone, or every file the PR changes that differs from HEAD in a buffer or on
+--- disk, loading a buffer for a file that has none so list() can read it
+--- (created: this call made the buffer, so the caller can wipe it). Also
 --- returns the edited paths the PR does not change: no suggestion can land
 --- there.
 function M.edited_files(opts)
@@ -166,8 +167,9 @@ function M.edited_files(opts)
     return path and { edited_file(path, opts.buf, saved[path] == true) } or {}, {}
   end
 
-  local edited = vim.deepcopy(saved)
+  local edited, existing = vim.deepcopy(saved), {}
   for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+    existing[bufnr] = true
     local path = vim.api.nvim_buf_is_loaded(bufnr) and vim.bo[bufnr].modified and util.buf_relpath(bufnr)
     if path then
       edited[path] = true
@@ -177,9 +179,12 @@ function M.edited_files(opts)
   local files, outside = {}, {}
   for _, path in ipairs(state.file_order) do
     if edited[path] then
+      -- by number, not name: bufadd finds a buffer by file, so one opened
+      -- through a symlinked path is still the one that was already there
       local bufnr = vim.fn.bufadd(state.root .. "/" .. path)
       vim.fn.bufload(bufnr)
       files[#files + 1] = edited_file(path, bufnr, saved[path] == true)
+      files[#files].created = not existing[bufnr]
     end
   end
   for path in pairs(edited) do
