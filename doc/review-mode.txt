@@ -64,7 +64,8 @@ Vim (see session.keys to change them):
                         starts one, and several threads on a line ask which
         <leader>rR      start a new thread, even over an existing one
         <leader>rx      resolve / unresolve the thread on this line
-        <leader>rf      changed files with viewed state and comment counts
+        <leader>rf      changed files: reviewed share, +/-, threads and how
+                        many are resolved; the title totals the review
         <leader>rv      toggle this file viewed
         <leader>rh      toggle the hunk under the cursor viewed
         <leader>rd      base diff (rD layout; zR / zM show / fold unchanged lines)
@@ -95,7 +96,12 @@ windows alone.
                                                         *review-mode-statusline*
 vim.g.review_mode is "mode", "session", or nil.
 require("review_mode").statusline() returns a short summary such as
-"REVIEW owner/repo#123 3/12".
+"REVIEW owner/repo#123 62% 3/12": the share of changed lines reviewed, then
+files viewed. The share weighs each file by its changed lines and a file by
+its viewed hunks, and reads 100% only once every file is viewed. The
+changed-files picker's rows show the same per file (with +/-, threads and how
+many are resolved) and its title totals the review; api.review_progress()
+returns the totals.
 
 Review is a key layer over normal mode, not a real Vim mode, so mode() never
 returns it and a statusline's stock mode component cannot show it.
@@ -413,7 +419,9 @@ COMMANDS                                                  *review-mode-commands*
 
                                                         *:ReviewModeSummary*
 :ReviewModeSummary
-        Show file, comment, thread, and viewed-sync counts.
+        Show how much of the review is done (by changed lines), files left,
+        total +/-, comments, threads with how many are resolved, and
+        viewed-sync counts.
 
                                                         *:ReviewModeCheckout*
 :ReviewModeCheckout {number|url}
@@ -667,8 +675,8 @@ viewed, or unviewed again. GitHub has no such mark, so it is kept locally next
 to the file viewed state, keyed by a hash of the hunk's +/- lines rather than
 its position. When the author pushes and the review follows HEAD, a hunk that
 only moved stays viewed and a hunk whose content changed comes back unviewed.
-Viewed hunks get a quiet sign, the changed-files picker shows "(3/7 hunks
-viewed)" for a file you are partway through, and viewed.skip_viewed_hunks = true
+Viewed hunks get a quiet sign, the changed-files picker shows how
+far through a file you are ("42%" for 3 of 7 hunks), and viewed.skip_viewed_hunks = true
 makes ]c / [c pass over them. Viewing the last unviewed hunk of a file marks the
 file viewed, and un-viewing a hunk of a viewed file un-views it, both exactly as
 <leader>rv would (so they sync to GitHub when viewed.sync is on). A file you

@@ -1673,23 +1673,28 @@ function M.statusline()
     end
   end
 
+  -- how much of the change is reviewed, by lines, beside the file count
+  local percent = api.review_percent()
+
   -- a local review's pr is a ref key, so "repo#feat-x" would read as a PR
   if state.provider == "local" then
     return string.format(
-      "%s local %s@%s %d/%d",
+      "%s local %s@%s %d%% %d/%d",
       state.in_mode and "REVIEW" or "review",
       state.repo or "?",
       state.pr or "?",
+      percent,
       viewed,
       #state.file_order
     )
   end
 
   return string.format(
-    "%s %s#%s %d/%d",
+    "%s %s#%s %d%% %d/%d",
     state.in_mode and "REVIEW" or "review",
     state.repo or "?",
     state.pr or "?",
+    percent,
     viewed,
     #state.file_order
   )
@@ -2061,16 +2066,7 @@ function M.summary()
     comment_count = comment_count + #comments
   end
 
-  local thread_count = 0
-  local unresolved_count = 0
-  for _, threads in pairs(state.comment_threads) do
-    for _, thread in ipairs(threads) do
-      thread_count = thread_count + 1
-      if not thread.isResolved then
-        unresolved_count = unresolved_count + 1
-      end
-    end
-  end
+  local progress = api.review_progress()
 
   local queued_sync = 0
   for _ in pairs(state.viewed_sync_queue) do
@@ -2084,8 +2080,15 @@ function M.summary()
       #state.file_order - viewed_count,
       #state.file_order
     ),
+    string.format("Reviewed: %d%% of changed lines, %d file(s) left", progress.percent, progress.files_left),
+    string.format("Lines: +%d -%d", progress.added, progress.removed),
     string.format("Comments: %d", comment_count),
-    string.format("Threads: %d total, %d unresolved", thread_count, unresolved_count),
+    string.format(
+      "Threads: %d total, %d resolved, %d unresolved",
+      progress.threads,
+      progress.resolved,
+      progress.threads - progress.resolved
+    ),
     string.format("Viewed sync: %s, %d queued", state.config.viewed.sync and "enabled" or "disabled", queued_sync),
   }
 

@@ -173,6 +173,69 @@ function M.hunk_progress(path)
   return viewed_state.hunk_progress(path)
 end
 
+-- Review progress ------------------------------------------------------------
+
+--- How far a file is reviewed, 0..1: 1 once it is viewed, else the share of its
+--- hunks viewed (0 until they load, or with viewed tracking off).
+function M.review_fraction(path)
+  if state.viewed[path] then
+    return 1
+  end
+  local seen, total = M.hunk_progress(path)
+  if seen and total and total > 0 then
+    return seen / total
+  end
+  return 0
+end
+
+--- Comment threads on a file, resolved ones included: total, resolved.
+function M.thread_counts(path)
+  local total, resolved = 0, 0
+  for _, thread in ipairs(M.threads({ path = path, include_resolved = true })) do
+    total = total + 1
+    if thread.is_resolved then
+      resolved = resolved + 1
+    end
+  end
+  return total, resolved
+end
+
+--- How much of the review is done, 0..100, each file weighed by its changed
+--- lines (a 400-line file counts for more than a 2-line one), rounded down so
+--- 100 means everything is viewed. Cheap enough for a statusline: no threads.
+function M.review_percent()
+  local weight, done = 0, 0
+  for _, path in ipairs(state.file_order) do
+    local entry = M.file(path) or {}
+    -- a rename or mode change has no lines; let it weigh like one
+    local lines = math.max((entry.added or 0) + (entry.removed or 0), 1)
+    weight = weight + lines
+    done = done + lines * M.review_fraction(path)
+  end
+  return weight > 0 and math.floor(done / weight * 100) or 0
+end
+
+--- The whole review at a glance:
+--- { percent, files, files_viewed, files_left, threads, resolved, added, removed },
+--- percent as review_percent() gives it.
+function M.review_progress()
+  local progress = { files = 0, files_viewed = 0, threads = 0, resolved = 0, added = 0, removed = 0 }
+  for _, path in ipairs(state.file_order) do
+    local entry = M.file(path) or {}
+    local added, removed = entry.added or 0, entry.removed or 0
+    local threads, resolved = M.thread_counts(path)
+    progress.files = progress.files + 1
+    progress.files_viewed = progress.files_viewed + (state.viewed[path] and 1 or 0)
+    progress.threads = progress.threads + threads
+    progress.resolved = progress.resolved + resolved
+    progress.added = progress.added + added
+    progress.removed = progress.removed + removed
+  end
+  progress.files_left = progress.files - progress.files_viewed
+  progress.percent = M.review_percent()
+  return progress
+end
+
 function M.is_active()
   return state.active
 end
