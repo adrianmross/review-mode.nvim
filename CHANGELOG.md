@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.6](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.5...v0.13.6) (2026-09-19)
+
+
+### Bug Fixes
+
+* **viewed:** run a flush requested while another is in flight ([#102](https://github.com/adrianmross/review-mode.nvim/issues/102)) ([0cb421e](https://github.com/adrianmross/review-mode.nvim/commit/0cb421ef66db4a8d5044e101209556922681dc13))
+
 ## [0.13.5](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.4...v0.13.5) (2026-09-19)
 
 
