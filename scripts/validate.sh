@@ -94,6 +94,10 @@ case "$1 $2" in
     if [[ "${REVIEW_MODE_FIXTURE:-}" == "no_pr" ]]; then
       echo 'no pull requests found for branch "feature"' >&2
       exit 1
+    elif [[ "${REVIEW_MODE_FIXTURE:-}" == "unknown_host" ]]; then
+      # gh in a repo whose remotes are on no GitHub host (Gitea, Codeberg, ...)
+      echo 'none of the git remotes configured for this repository point to a known GitHub host. To tell gh about a new GitHub host, please use `gh auth login`' >&2
+      exit 1
     elif [[ "${REVIEW_MODE_FIXTURE:-}" == "gh_auth_fail" ]]; then
       echo 'HTTP 401: Bad credentials (https://api.github.com/graphql)' >&2
       exit 1
@@ -634,6 +638,7 @@ cp -R "$tmp/repo" "$tmp/commit-repo"
 PATH="$tmp/bin:$PATH" \
 XDG_CACHE_HOME="$tmp/fallback-cache" \
 XDG_STATE_HOME="$tmp/fallback-state" \
+GLAB_LOG="$tmp/fallback-glab.log" \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 run_fixture local_fallback_fixture
 

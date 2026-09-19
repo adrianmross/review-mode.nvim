@@ -1659,8 +1659,7 @@ function M.start(opts)
       local providers = require("review_mode.providers")
       if
         state.config.no_pr == "local"
-        and failed_provider ~= "gitlab"
-        and not util.env_value("GH_REVIEW_PR")
+        and not util.env_value(failed_provider == "gitlab" and "GL_REVIEW_MR" or "GH_REVIEW_PR")
         and providers.is_no_pr(err)
       then
         local branch = util.system({ "git", "branch", "--show-current" }, { cwd = failed_root }) or "this branch"

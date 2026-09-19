@@ -60,14 +60,35 @@ function M.select(root)
   return M.detect(url, state.config.gitlab_hosts)
 end
 
+-- What each forge's CLI says when there is nothing to review, matched narrowly
+-- (see is_no_pr).
+local no_pr_answers = {
+  -- gh pr view on a branch without a PR
+  "no pull requests found",
+  -- glab mr view on a branch without an MR (glab's mrutils)
+  "no open merge request available for",
+  -- gh on a remote that is no GitHub host at all (Gitea, Bitbucket, Codeberg):
+  -- there is no forge to ask, so the local refs are all there is
+  "point to a known GitHub host",
+}
+
 --- True when a forge answered that the branch has no PR, as opposed to failing.
 ---
---- Both come back from `gh pr view` as exit 1, so the wording is the only
---- signal. That is the point of matching it narrowly: a network error, an
---- expired token or a rate limit must stay an error, because falling back on
---- one would quietly review a branch that does have a PR, minus its comments.
+--- Both come back from `gh pr view` (or `glab mr view`) as exit 1, so the
+--- wording is the only signal. That is the point of matching it narrowly: a
+--- network error, an expired token or a rate limit must stay an error, because
+--- falling back on one would quietly review a branch that does have a PR, minus
+--- its comments.
 function M.is_no_pr(err)
-  return type(err) == "string" and err:find("no pull requests found", 1, true) ~= nil
+  if type(err) ~= "string" then
+    return false
+  end
+  for _, answer in ipairs(no_pr_answers) do
+    if err:find(answer, 1, true) then
+      return true
+    end
+  end
+  return false
 end
 
 function M.is_local()
