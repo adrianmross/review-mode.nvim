@@ -82,6 +82,19 @@ and the PR head SHA is re-fetched so new comments anchor to a commit GitHub
 knows. Viewed state and loaded comments are kept. Set follow_head = false to
 require |:ReviewModeRefresh| instead.
 
+                                                        *review-mode-order*
+]f / [f, the jump to the next unviewed file, the changed-files picker, ]r / [r
+across files and api.files() walk the PR in one order, set by files.order.
+"smart" (the default) reads code first, with a file that another changed file
+mentions ahead of the file that mentions it; then docs and lockfiles (*.md,
+*.txt, *.rst, doc/, docs/, CHANGELOG, LICENSE, *.lock, package-lock.json,
+*-lock.yaml, go.sum); then tests (test/, tests/, spec/, specs/, __tests__/,
+fixtures/, *_test.*, *.test.*, *_spec.*, *.spec.*, *_fixture.*, test_*.py). B
+mentions A when B's first 64 KiB contain A's file name without its extension
+as a whole word; init, index, mod, main and names under three letters do not
+count. Where nothing links two files git's order stands, and a cycle is broken
+at its earliest file in git's order. "diff" keeps git's order throughout.
+
 On a branch with no PR, :ReviewMode reviews it locally instead (see
 |:ReviewModeLocal|) and says so; the statusline shows "local repo@ref". It falls
 back only when gh answers that there is no PR, never on an auth, network or
@@ -630,6 +643,9 @@ SETUP                                                        *review-mode-setup*
         delay_ms = 250,
       },
       gh_metadata_cache = "10m",
+    },
+    files = {
+      order = "smart", -- or "diff"; see |review-mode-order|
     },
     commands = true,
   })
