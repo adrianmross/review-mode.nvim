@@ -15,13 +15,14 @@ local core = require("review_mode.state")
 local util = require("review_mode.util")
 local hooks = require("review_mode.hooks")
 
---- Accepts 123, "#123", or a https://github.com/owner/repo/pull/123 URL.
---- Returns pr, repo (repo from the URL unless one was given).
+--- Accepts 123, "#123", or a PR URL on any host (github.com or GitHub
+--- Enterprise). Returns pr, repo (repo from the URL unless one was given) and
+--- the URL's host.
 function M.parse_target(target, repo)
   target = vim.trim(tostring(target or ""))
-  local url_repo, number = target:match("github%.com/([^/]+/[^/]+)/pull/(%d+)")
+  local host, url_repo, number = target:match("^https?://([^/]+)/([^/]+/[^/]+)/pull/(%d+)")
   if number then
-    return number, repo or url_repo
+    return number, repo or url_repo, host
   end
   return target:match("^#?(%d+)$"), repo
 end
@@ -32,6 +33,44 @@ end
 
 function M.ref(pr)
   return "refs/review-mode/pr/" .. pr
+end
+
+--- Where the PR's base branch is fetched to: next to the head, and never a
+--- remote-tracking branch, since the base repo need not be any remote.
+function M.base_ref(pr)
+  return "refs/review-mode/base/" .. pr
+end
+
+-- the shared .git of a clone (the main one, for a linked worktree too)
+local function common_dir(path)
+  local dir = util.system({ "git", "rev-parse", "--path-format=absolute", "--git-common-dir" }, { cwd = path })
+  return dir and (vim.uv.fs_realpath(dir) or dir)
+end
+
+--- The default tree for a PR: per repo, and per local clone, so two clones of
+--- one repo never share (or reuse) each other's tree.
+function M.default_path(root, repo, pr)
+  local clone = vim.fn.sha256(common_dir(root) or root):sub(1, 8)
+  return vim.fs.joinpath(M.base_dir(), (repo:gsub("[/:]", "_")) .. "-" .. clone, "pr-" .. pr)
+end
+
+-- owner/repo of a remote URL (https, ssh:// or scp-style), lowercased
+local function remote_slug(url)
+  local path = url:match("^[%w+.-]+://[^/]+/(.+)$") or url:match("^[^/]+:(.+)$")
+  return path and path:gsub("/$", ""):gsub("%.git$", ""):lower()
+end
+
+-- The base repo to fetch from: a remote that already points at it (so its
+-- auth, ssh or not, keeps working), else its web URL.
+local function fetch_source(root, host, repo)
+  local remotes = util.system({ "git", "config", "--get-regexp", "^remote\\..*\\.url$" }, { cwd = root }) or ""
+  local providers = require("review_mode.providers")
+  for url in remotes:gmatch("%.url ([^\n]+)") do
+    if providers.remote_host(url) == host:lower() and remote_slug(url) == repo:lower() then
+      return url
+    end
+  end
+  return string.format("https://%s/%s", host, repo)
 end
 
 local function realpath(path)
@@ -71,6 +110,11 @@ end
 local function default_worktree(ctx)
   local path = ctx.default_path
   if vim.uv.fs_stat(path) then
+    -- only ever reuse a tree of this clone: another's has other refs and work
+    local owner = common_dir(path)
+    if owner ~= common_dir(ctx.root) then
+      return nil, string.format("%s belongs to another clone (%s), not reusing it", path, owner or "not a git worktree")
+    end
     -- the PR head it was last checked out at (ctx.prior) counts as the PR's own
     -- history, so a force-push alone does not make it look like local work
     local status = dirty_status(path, { ctx.ref, ctx.prior })
@@ -102,53 +146,72 @@ local function default_worktree(ctx)
 end
 
 --- Fetch a PR and get a worktree for it. callback(result, err) where result is
---- { path, repo, pr, base, head, ref, reused, dirty }.
+--- { path, repo, pr, base, base_ref, head, ref, reused, dirty }.
 ---
---- opts.pr    number or URL
---- opts.repo  "owner/repo" (optional; defaults to the repo `gh` sees from root)
+--- opts.pr    number or URL (any GitHub host)
+--- opts.repo  "owner/repo" or "host/owner/repo" (optional; defaults to the
+---            repo `gh` sees from root)
 --- opts.root  the local clone to fetch into (defaults to the cwd's repo)
 function M.prepare(opts, callback)
-  if core.state.provider == "gitlab" then
-    return callback(nil, require("review_mode.providers").unsupported("Reviewing in a separate checkout"))
-  end
   opts = opts or {}
+  local root = opts.root or util.repo_root()
+  if not root then
+    return callback(nil, "not in a git repository")
+  end
+  if require("review_mode.providers").select(root) == "gitlab" then
+    return callback(nil, "Reviewing in a separate checkout is not supported on GitLab yet")
+  end
   coroutine.wrap(function()
-    local pr, repo = M.parse_target(opts.pr, opts.repo)
+    local pr, repo, host = M.parse_target(opts.pr, opts.repo)
     if not pr then
       return callback(nil, "expected a PR number or URL, got " .. tostring(opts.pr))
     end
 
-    local root = opts.root or util.repo_root()
-    if not root then
-      return callback(nil, "not in a git repository")
-    end
-
     local view = { "gh", "pr", "view", pr, "--json", "number,headRefOid,baseRefName,url" }
     if repo then
-      vim.list_extend(view, { "--repo", repo })
+      -- gh reads HOST/OWNER/REPO, so an Enterprise URL asks its own host
+      vim.list_extend(view, { "--repo", host and (host .. "/" .. repo) or repo })
     end
     local out, err = await(view, root)
     local ok, meta = pcall(vim.json.decode, out or "")
     if not ok or type(meta) ~= "table" then
       return callback(nil, err or "could not decode gh pr view output")
     end
-    repo = repo or tostring(meta.url or ""):match("github%.com/([^/]+/[^/]+)/pull/") or "repo"
+    -- the PR's own URL names the repo it lives in, which is where to fetch from
+    host, repo = tostring(meta.url or ""):match("^https?://([^/]+)/([^/]+/[^/]+)/pull/%d+")
+    if not repo or type(meta.headRefOid) ~= "string" then
+      return callback(nil, "gh pr view did not return the PR's url and head")
+    end
     local base = meta.baseRefName or "main"
-    local ref = M.ref(pr)
+    local ref, base_ref = M.ref(pr), M.base_ref(pr)
 
     -- where the PR head was before this fetch moves it (see default_worktree)
     local prior = util.system({ "git", "rev-parse", "--verify", "--quiet", ref }, { cwd = root })
 
-    -- pull/<n>/head exists on the base repo for fork PRs too; "+" follows force-pushes
-    err = select(2, await({ "git", "fetch", "--quiet", "origin", "+pull/" .. pr .. "/head:" .. ref }, root))
-    if err then
-      return callback(nil, err)
-    end
-    err = select(2, await({ "git", "fetch", "--quiet", "origin", base }, root))
+    -- pull/<n>/head exists on the base repo for fork PRs too; "+" follows
+    -- force-pushes. The base repo, not origin: origin may be a fork, or another
+    -- repo altogether when the PR came from the inbox or a URL.
+    err = select(
+      2,
+      await({
+        "git",
+        "fetch",
+        "--quiet",
+        fetch_source(root, host, repo),
+        "+refs/pull/" .. pr .. "/head:" .. ref,
+        "+refs/heads/" .. base .. ":" .. base_ref,
+      }, root)
+    )
     if err then
       return callback(nil, err)
     end
     local head = await({ "git", "rev-parse", ref }, root)
+    if head ~= meta.headRefOid then
+      return callback(
+        nil,
+        string.format("fetched %s for %s#%s, but its head is %s: not reviewing it", head, repo, pr, meta.headRefOid)
+      )
+    end
 
     local ctx = {
       repo = repo,
@@ -158,7 +221,7 @@ function M.prepare(opts, callback)
       ref = ref,
       root = root,
       prior = prior,
-      default_path = vim.fs.joinpath(M.base_dir(), (repo:gsub("/", "_")), "pr-" .. pr),
+      default_path = M.default_path(root, repo, pr),
     }
 
     local result
@@ -172,7 +235,8 @@ function M.prepare(opts, callback)
       end
     end
 
-    result = vim.tbl_extend("keep", result, { repo = repo, pr = pr, base = base, head = head, ref = ref })
+    result =
+      vim.tbl_extend("keep", result, { repo = repo, pr = pr, base = base, base_ref = base_ref, head = head, ref = ref })
     hooks.emit("checkout_ready", { path = result.path, pr = pr, head = head, repo = repo })
     callback(result, nil)
   end)()
@@ -183,6 +247,14 @@ end
 --- are refused and listed. Worktrees made by a prepare_checkout hook live
 --- elsewhere and belong to whatever made them.
 function M.clean(pr)
+  if pr ~= nil then
+    local number = M.parse_target(pr)
+    if not number then
+      vim.notify("Review Mode: expected a PR number or URL, got " .. tostring(pr), vim.log.levels.ERROR)
+      return
+    end
+    pr = number
+  end
   local root = util.repo_root()
   local list = root and util.system({ "git", "worktree", "list", "--porcelain" }, { cwd = root })
   if not list then
@@ -194,9 +266,15 @@ function M.clean(pr)
   local session_root = core.state.active and core.state.root and realpath(core.state.root)
   local removable, refused = {}, {}
   for path in list:gmatch("worktree ([^\n]+)") do
-    local real = realpath(path)
+    local gone = not vim.uv.fs_stat(path)
+    -- a gone tree has no realpath of its own, but its parent usually still does
+    local real = gone and vim.fs.joinpath(realpath(vim.fs.dirname(path)), vim.fs.basename(path)) or realpath(path)
     local name = vim.fs.basename(real)
-    if vim.startswith(real, base) and (not pr or name == "pr-" .. pr) then
+    local ours = vim.startswith(real, base) and (not pr or name == "pr-" .. pr)
+    if ours and gone then
+      -- deleted by hand: no status to read, and git keeps only its registration
+      refused[#refused + 1] = real .. ": prunable, the directory is gone (`git worktree prune` clears it)"
+    elseif ours then
       local number = name:match("^pr%-(%d+)$")
       -- a tree whose name does not say which PR it holds excludes no PR ref, so
       -- any commit on nothing but its HEAD still counts (excluding "HEAD" here
@@ -234,6 +312,7 @@ function M.clean(pr)
       local number = vim.fs.basename(path):match("^pr%-(%d+)$")
       if number then
         util.system({ "git", "update-ref", "-d", M.ref(number) }, { cwd = root })
+        util.system({ "git", "update-ref", "-d", M.base_ref(number) }, { cwd = root })
       end
       hooks.emit("checkout_removed", { path = path, pr = number })
     end

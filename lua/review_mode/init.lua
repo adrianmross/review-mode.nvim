@@ -1528,6 +1528,7 @@ local function teardown()
   state.repo = nil
   state.pr = nil
   state.base = nil
+  state.base_ref = nil
   state.head = nil
   state.head_ref = nil
   state.local_store = nil
@@ -1546,6 +1547,7 @@ end
 
 --- opts (all optional; no opts keeps the env/`gh` discovery):
 ---   root, repo, pr, base, head  the session's context, instead of env/`gh`
+---   base_ref                    the ref the base is read from, instead of origin/<base>
 ---   workspace                   "tab" | "inplace", overriding mode.workspace
 ---   provider                    "github" | "gitlab" | "local", instead of auto
 ---   local_args                  `:ReviewModeLocal` arguments, for provider "local"
@@ -1590,6 +1592,7 @@ function M.start(opts)
   state.head = opts.head or util.env_value("GH_REVIEW_HEAD")
   state.workspace = opts.workspace
   state.head_ref = opts.head_ref
+  state.base_ref = opts.base_ref
   state.local_store = opts.local_store
   state.provider = provider
   if state.provider == "gitlab" then
@@ -3107,6 +3110,7 @@ function M.review_pr(opts, callback)
       repo = result.repo,
       pr = result.pr,
       base = result.base,
+      base_ref = result.base_ref,
       head = result.head,
       workspace = "tab",
     })

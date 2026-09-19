@@ -54,7 +54,12 @@ local origin_tab = vim.api.nvim_get_current_tabpage()
 -- the fixture repo's origin is "." so the PR ref it fetches lives here too
 git({ "update-ref", "refs/pull/123/head", "feature" })
 local feature_sha = git({ "rev-parse", "feature" })
-local tree = vim.fs.joinpath(vim.fn.stdpath("cache"), "review-mode", "worktrees", "owner_repo", "pr-123")
+local checkout = require("review_mode.checkout")
+local tree = checkout.default_path(user_repo, "owner/repo", "123")
+assert(
+  vim.startswith(tree, vim.fs.joinpath(vim.fn.stdpath("cache"), "review-mode", "worktrees", "owner_repo-")),
+  "tree is not under the cache, per repo: " .. tree
+)
 
 local function review(target)
   local done, ok, result

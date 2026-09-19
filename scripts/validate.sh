@@ -102,7 +102,13 @@ case "$1 $2" in
     elif [[ "$args" == *"title,state,isDraft,mergeable,reviewDecision,headRefName,baseRefName,url"* ]]; then
       printf '{"title":"Improve review tools","state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","reviewDecision":"REVIEW_REQUIRED","headRefName":"feature","baseRefName":"main","url":"https://github.com/owner/repo/pull/123"}\n'
     elif [[ "$args" == *"number,headRefOid,baseRefName,url"* ]]; then
-      printf '{"number":123,"headRefOid":"abc123","baseRefName":"main","url":"https://github.com/owner/repo/pull/123"}\n'
+      # checkout: the PR's head is whatever its repo's pull ref holds, unless a
+      # fixture says the server reports another; the URL names the PR's repo
+      if [[ -n "${REVIEW_MODE_PR_VIEW_LOG:-}" ]]; then
+        printf '%s\n' "$args" >> "$REVIEW_MODE_PR_VIEW_LOG"
+      fi
+      head="${REVIEW_MODE_HEAD_OID:-$(git -C "${REVIEW_MODE_PR_REPO_DIR:-.}" rev-parse -q --verify refs/pull/123/head || echo abc123)}"
+      printf '{"number":123,"headRefOid":"%s","baseRefName":"main","url":"%s"}\n' "$head" "${REVIEW_MODE_PR_URL:-https://github.com/owner/repo/pull/123}"
     else
       printf '{"baseRefName":"main","headRefOid":"abc123","number":123}\n'
     fi
@@ -363,6 +369,8 @@ git add file.txt nested/other.txt nested/deeper/more.txt new.txt
 git commit -q -m feature
 git remote add origin .
 git update-ref refs/remotes/origin/main refs/heads/main
+# a checkout fetches from the PR's repo URL; point that URL back at this repo
+git config url."$tmp/repo".insteadOf https://github.com/owner/repo
 
 PATH="$tmp/bin:$PATH" \
 XDG_CACHE_HOME="$tmp/cache" \
@@ -392,6 +400,15 @@ XDG_CACHE_HOME="$tmp/checkout-cache" \
 XDG_STATE_HOME="$tmp/checkout-state" \
 REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
 run_fixture no_checkout_fixture
+
+# Checkouts across repos, forks, GitHub Enterprise and clones. Builds its own
+# repos; the gh mock reads the PR's URL and head from the fixture's env.
+PATH="$tmp/bin:$PATH" \
+XDG_CACHE_HOME="$tmp/checkout-forges-cache" \
+XDG_STATE_HOME="$tmp/checkout-forges-state" \
+REVIEW_MODE_PR_VIEW_LOG="$tmp/checkout-forges-gh.log" \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+run_fixture checkout_forges_fixture
 
 PATH="$tmp/bin:$PATH" \
 XDG_CACHE_HOME="$tmp/async-preview-cache" \
