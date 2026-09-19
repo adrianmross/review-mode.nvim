@@ -90,29 +90,32 @@ function M.untouched(refs, ranges)
   return out
 end
 
---- Flatten buf_request_all results into { filename, path, lnum, col }, 1-based,
---- path relative to root (or absolute when the file is outside it).
-function M.locations(results, root)
-  local refs = {}
+--- Flatten buf_request_all results into { filename, path, lnum, col }, 1-based
+--- with a byte column, path relative to root (or absolute when the file is
+--- outside it), plus the errors servers answered with. `encodings` maps a
+--- client id to its offset_encoding: a position's character counts UTF-16 (or
+--- UTF-8/32) units in that client's encoding, not bytes.
+function M.locations(results, root, encodings)
+  local refs, errors = {}, {}
   -- through symlinks (macOS /var is /private/var), or relpath misses the root
   root = root and (vim.uv.fs_realpath(root) or root)
-  for _, response in pairs(results or {}) do
-    for _, location in ipairs(response.result or {}) do
-      local uri = location.uri or location.targetUri
-      local range = location.range or location.targetSelectionRange or location.targetRange
-      if uri and range then
-        local fname = vim.uri_to_fname(uri)
-        fname = vim.uv.fs_realpath(fname) or fname
-        refs[#refs + 1] = {
-          filename = fname,
-          path = root and vim.fs.relpath(root, fname) or fname,
-          lnum = range.start.line + 1,
-          col = range.start.character + 1,
-        }
-      end
+  for client_id, response in pairs(results or {}) do
+    local err = response.err or response.error
+    if err then
+      errors[#errors + 1] = type(err) == "table" and tostring(err.message or vim.inspect(err)) or tostring(err)
+    end
+    local encoding = encodings and encodings[client_id] or "utf-16"
+    for _, item in ipairs(vim.lsp.util.locations_to_items(response.result or {}, encoding)) do
+      local fname = vim.uv.fs_realpath(item.filename) or item.filename
+      refs[#refs + 1] = {
+        filename = fname,
+        path = root and vim.fs.relpath(root, fname) or fname,
+        lnum = item.lnum,
+        col = item.col,
+      }
     end
   end
-  return refs
+  return refs, errors
 end
 
 -- Treesitter ------------------------------------------------------------------
@@ -182,28 +185,38 @@ end
 
 -- LSP -------------------------------------------------------------------------
 
---- Ask every attached server for the references to fn. callback(results, err),
---- results as vim.lsp.buf_request_all hands them over. Gives up after
---- timeout ms.
+--- Ask every attached server for the references to fn. callback(results, err,
+--- encodings), results as vim.lsp.buf_request_all hands them over and
+--- encodings by client id (see M.locations). Gives up after timeout ms.
 function M.references(bufnr, fn, timeout, callback)
   local done = false
-  local function finish(results, err)
+  local function finish(results, err, encodings)
     if not done then
       done = true
-      callback(results, err)
+      callback(results, err, encodings)
     end
   end
 
   local line = vim.api.nvim_buf_get_lines(bufnr, fn.line - 1, fn.line, false)[1] or ""
-  local client = vim.lsp.get_clients({ bufnr = bufnr, method = "textDocument/references" })[1]
-  local encoding = client and client.offset_encoding or "utf-16"
-  local params = {
-    textDocument = { uri = vim.uri_from_bufnr(bufnr) },
-    position = { line = fn.line - 1, character = vim.str_utfindex(line, encoding, fn.col, false) },
-    context = { includeDeclaration = false },
-  }
-  local cancel = vim.lsp.buf_request_all(bufnr, "textDocument/references", params, function(results)
-    finish(results, nil)
+  local clients = vim.lsp.get_clients({ bufnr = bufnr, method = "textDocument/references" })
+  local encodings = {}
+  for _, client in ipairs(clients) do
+    encodings[client.id] = client.offset_encoding or "utf-16"
+  end
+  -- each server gets the column in its own encoding
+  local function params(client)
+    local encoding = client and client.offset_encoding or "utf-16"
+    return {
+      textDocument = { uri = vim.uri_from_bufnr(bufnr) },
+      position = { line = fn.line - 1, character = vim.str_utfindex(line, encoding, fn.col, false) },
+      context = { includeDeclaration = false },
+    }
+  end
+  -- ponytail: 0.10 takes one params table for every server, so there the first
+  -- server's encoding is used for all
+  local request_params = vim.fn.has("nvim-0.11") == 1 and params or params(clients[1])
+  local cancel = vim.lsp.buf_request_all(bufnr, "textDocument/references", request_params, function(results)
+    finish(results, nil, encodings)
   end)
   vim.defer_fn(function()
     if not done and type(cancel) == "function" then
@@ -264,21 +277,27 @@ function M.run(opts, callback)
       local fn = fns[index]
       if not fn then
         vim.fn.setqflist({}, " ", { title = "Review Mode: blast radius of " .. path, items = items })
-        if #items == 0 then
+        if #items == 0 and #errors == 0 then
           notify(string.format("every caller of %d changed function(s) is in this PR", #fns))
         elseif opts.open ~= false then
           vim.cmd("copen")
         end
         if #errors > 0 then
-          notify(table.concat(errors, "; "), vim.log.levels.WARN)
+          -- a server that errored (or is still indexing) answered nothing, which
+          -- must not read as "no callers missed"
+          notify("incomplete, the language server did not answer: " .. table.concat(errors, "; "), vim.log.levels.WARN)
         end
         return callback(items, nil)
       end
-      M.references(bufnr, fn, opts.timeout or 5000, function(results, ref_err)
+      M.references(bufnr, fn, opts.timeout or 5000, function(results, ref_err, encodings)
         if ref_err then
           errors[#errors + 1] = fn.name .. ": " .. ref_err
         end
-        for _, ref in ipairs(M.untouched(M.locations(results, root), ranges)) do
+        local refs, lsp_errors = M.locations(results, root, encodings)
+        for _, lsp_err in ipairs(lsp_errors) do
+          errors[#errors + 1] = fn.name .. ": " .. lsp_err
+        end
+        for _, ref in ipairs(M.untouched(refs, ranges)) do
           items[#items + 1] = {
             filename = ref.filename,
             lnum = ref.lnum,

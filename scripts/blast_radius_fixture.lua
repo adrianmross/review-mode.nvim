@@ -54,6 +54,8 @@ write("lib.lua", {
 })
 write("caller_a.lua", { 'local lib = require("lib")', 'return lib.parse("a")' })
 write("caller_b.lua", { 'local lib = require("lib")', 'local v = lib.parse("b")', "local w = lib.helper(1)" })
+-- non-ASCII ahead of the call: a UTF-16 character is not a byte column here
+write("caller_u.lua", { 'local lib = require("lib")', 'local ü = lib.parse("ü")' })
 git({ "add", "." })
 git({ "commit", "-q", "-m", "base" })
 -- parse's signature changes and caller_a is updated; caller_b is not.
@@ -179,14 +181,26 @@ local answers = {
   [2] = { location("caller_a.lua", 2), location("caller_b.lua", 2) }, -- parse
   [6] = { location("caller_b.lua", 3) }, -- helper
 }
-local requests, cancelled, silent = {}, 0, false
+local requests, cancelled, silent, failing = {}, 0, false, false
+local clients = { { id = 1, offset_encoding = "utf-16" } }
 local get_clients = vim.lsp.get_clients
 vim.lsp.get_clients = function()
-  return { { id = 1, offset_encoding = "utf-16" } }
+  return clients
 end
+-- as Neovim 0.11 does: params may be a function, asked once per client
 vim.lsp.buf_request_all = function(bufnr, method, params, handler)
-  requests[#requests + 1] = { bufnr = bufnr, method = method, params = params }
-  if not silent then
+  local per_client = {}
+  for _, client in ipairs(clients) do
+    per_client[client.id] = type(params) == "function" and params(client, bufnr) or params
+  end
+  params = per_client[clients[1].id]
+  requests[#requests + 1] = { bufnr = bufnr, method = method, params = params, per_client = per_client }
+  if failing then
+    vim.schedule(function()
+      -- a server that is still indexing answers an error and no result
+      handler({ [1] = { err = { code = -32801, message = "content modified: still indexing" } } })
+    end)
+  elseif not silent then
     vim.schedule(function()
       -- two clients answering the same caller must not list it twice
       local found = answers[params.position.line] or {}
@@ -222,6 +236,35 @@ silent, notifications = true, {}
 run({ timeout = 50 })
 assert(#result == 0 and cancelled == 1, "a silent server should time out and be cancelled")
 assert(notified("parse: timed out after 50 ms"), "the timeout was not reported")
+
+-- A server error is reported as such, never as "every caller is in this PR".
+silent, failing, notifications = false, true, {}
+run()
+assert(#result == 0, "an erroring server produced callers: " .. vim.inspect(result))
+assert(notified("still indexing"), "the LSP error was not reported: " .. vim.inspect(notifications))
+assert(not notified("every caller"), "an LSP error read as every caller being in the PR")
+failing = false
+
+-- Positions: a column in each server's own encoding going out, and a byte
+-- column coming back. "ü" is two bytes and one UTF-16 unit.
+local u_line = 'local ü = lib.parse("ü")'
+local lib_byte = u_line:find("lib", 1, true) - 1 -- 0-based byte 11
+local u_uri = vim.uri_from_fname(dir .. "/caller_u.lua")
+local u_range = { start = { line = 1, character = 10 }, ["end"] = { line = 1, character = 13 } }
+local refs = blast.locations({ [1] = { result = { { uri = u_uri, range = u_range } } } }, dir, { [1] = "utf-16" })
+assert(refs[1] and refs[1].col == lib_byte + 1, "UTF-16 character 10 is byte column 12: " .. vim.inspect(refs))
+
+clients = { { id = 1, offset_encoding = "utf-16" }, { id = 3, offset_encoding = "utf-8" } }
+local scratch = vim.api.nvim_create_buf(false, true)
+vim.api.nvim_buf_set_lines(scratch, 0, -1, false, { u_line })
+silent, requests = true, {}
+blast.references(scratch, { line = 1, col = lib_byte }, 10, function() end)
+local sent = requests[1].per_client
+assert(sent[1].position.character == 10, "utf-16 server was sent " .. sent[1].position.character)
+assert(sent[3].position.character == lib_byte, "utf-8 server was sent " .. sent[3].position.character)
+wait_for(function()
+  return cancelled == 2
+end, "the scratch request did not time out")
 
 vim.lsp.get_clients = get_clients -- the real one runs on exit
 harness.done()
