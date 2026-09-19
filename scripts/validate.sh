@@ -612,3 +612,11 @@ cp -R "$tmp/repo" "$tmp/hunk-repo"
     -c "set noswapfile" \
     -l "$repo_root/scripts/hunk_viewed_fixture.lua"
 )
+
+# Moved code: marked as moved, and passed over by ]c / [c. Builds its own repo.
+XDG_CACHE_HOME="$tmp/moved-cache" \
+XDG_STATE_HOME="$tmp/moved-state" \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+nvim --headless -u NONE -i NONE \
+  -c "set noswapfile" \
+  -l "$repo_root/scripts/moved_code_fixture.lua"

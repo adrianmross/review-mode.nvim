@@ -124,7 +124,7 @@ layer goes.
 
 | key | action |
 |---|---|
-| `]c` / `[c` | next / previous PR hunk (Vim's own change jump in a diff window) |
+| `]c` / `[c` | next / previous PR hunk, passing over hunks that only move code (Vim's own change jump in a diff window) |
 | `]r` / `[r` | next / previous PR comment thread |
 | `]f` / `[f` | next / previous changed file |
 
@@ -976,6 +976,8 @@ require("review_mode").setup({
     partial_line_highlights = true,
     unified_context = 3,
     use_fast_diffopt = true,
+    detect_moved = true,
+    skip_moved = true,
   },
   ci = {
     diagnostics = true, -- CI check-run annotations as diagnostics (GitHub)
@@ -1112,6 +1114,23 @@ behind `]c` / `[c` use `git diff -w`. A file whose only changes are whitespace
 stays in the changed files; the changed-files picker marks it
 `(whitespace only)` and `api.file(path).whitespace_only` is true once its hunks
 have loaded.
+
+### Moved code
+
+A refactor that moves a function shows it as N deleted and N added lines. Review
+Mode finds those blocks once per load, from one `git diff` of the whole review:
+a run of added lines that matches a run of deleted lines anywhere in the review,
+ignoring indentation, of at least 3 lines and 20 letters or digits (git's own
+`--color-moved` threshold). Each moved-in line gets a `»` sign, and the first
+line of a block says where it came from (`moved from a.lua:120`), both in
+`ReviewModeMoved` (linked to `Comment`). A block edited on the way is not a
+match, so it reads as the new code it is.
+
+With `diff.skip_moved = true` (the default), `]c` / `[c` pass over hunks that are
+nothing but moved code, the deleted side included; blank lines added around the
+block do not count against it. The code is still marked and reachable, it just
+is not a stop. Toggle it from the actions picker, or set `diff.detect_moved =
+false` to turn detection off.
 
 ## Notes
 

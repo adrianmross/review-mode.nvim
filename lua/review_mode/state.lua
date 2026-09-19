@@ -70,6 +70,10 @@ local defaults = {
     partial_line_highlights = true,
     unified_context = 3,
     use_fast_diffopt = true,
+    -- mark lines a PR moves unchanged ("moved from a.lua:12"), and let ]c / [c
+    -- pass over hunks that are nothing but moved code
+    detect_moved = true,
+    skip_moved = true,
   },
   -- CI check-run annotations on the PR head as vim.diagnostic entries, in a
   -- namespace of their own (GitHub only)

@@ -834,8 +834,10 @@ wait_for(function()
   return notification_count("Review Mode viewed sync queued") > wedged_notifications
 end, "a refresh during a flush wedged the viewed sync queue")
 vim.env.REVIEW_MODE_FAIL_MUTATION = nil
-pr.flush_viewed_sync()
+-- the failing flush above may still be in flight, and a flush while one is in
+-- flight is a no-op, so keep asking until one runs (the guard makes it safe)
 wait_for(function()
+  pr.flush_viewed_sync()
   return viewed_sync_queue_count() == 0
 end, "queued viewed sync mutation was not flushed after a refresh")
 
