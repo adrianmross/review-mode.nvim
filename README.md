@@ -114,7 +114,7 @@ The changed-files picker (`<leader>rf`) is also the review's progress report.
 Each row reads
 
 ```
-43%     +12    -3   3 ✓1  lua/review_mode/init.lua
+42%     +12    -3   3 ✓1  lua/review_mode/init.lua
 ```
 
 how much of the file is reviewed (`✓` once viewed, else the share of its hunks
@@ -1137,7 +1137,7 @@ locally next to the file viewed state, keyed by a hash of the hunk's `+`/`-`
 lines rather than its position. When the author pushes and the review follows
 HEAD, a hunk that only moved stays viewed and a hunk whose content changed comes
 back unviewed. Viewed hunks get a quiet `✓` sign, the changed-files picker shows
-how far through a file you are (`43%` for 3 of 7 hunks), and
+how far through a file you are (`42%` for 3 of 7 hunks), and
 `viewed.skip_viewed_hunks = true` makes `]c` / `[c` pass over them. Viewing the
 last unviewed hunk of a file marks the file viewed, and un-viewing a hunk of a
 viewed file un-views it, both exactly as `<leader>rv` would (so they sync to
