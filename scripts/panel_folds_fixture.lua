@@ -92,6 +92,8 @@ vim.cmd.edit("file.txt")
 local code_win = vim.api.nvim_get_current_win()
 -- line 6 carries no thread, so the panel lists every thread in the file
 vim.api.nvim_win_set_cursor(code_win, { 6, 0 })
+-- a distinctive eob, set before the panel opens, to be found again after
+vim.opt.fillchars:append("eob:•")
 panel.open_panel()
 wait_for(function()
   return panel.panel_is_open()
@@ -136,6 +138,17 @@ local function fold_text_at(row)
 end
 
 -- Folded by default -----------------------------------------------------------
+
+-- 'fillchars' carries everyone's items, so setting the fold one must not take
+-- the rest with it
+assert(
+  vim.api.nvim_get_option_value("fillchars", { win = panel_win }):match("eob:•"),
+  "opening the panel clobbered fillchars: " .. vim.api.nvim_get_option_value("fillchars", { win = panel_win })
+)
+assert(
+  vim.api.nvim_get_option_value("fillchars", { win = panel_win }):match("fold: "),
+  "the panel did not set its own fold fill"
+)
 
 local suggestion_row = row_of("┌ suggestion")
 assert(fold_state(suggestion_row) == suggestion_row, "the suggestion block did not render as a closed fold")

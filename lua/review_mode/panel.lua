@@ -184,8 +184,17 @@ local function apply_folds(folds)
   vim.wo[win].foldenable = true
   vim.wo[win].foldlevel = 0
   vim.wo[win].foldtext = "v:lua.require'review_mode.panel'.foldtext()"
-  -- the summary says everything; the default fold fill only adds noise
-  vim.wo[win].fillchars = "fold: "
+  -- The summary says everything; the default fold fill only adds noise. Only
+  -- the "fold" item is ours, though -- 'fillchars' is one option carrying
+  -- everyone's items, so an eob: or a vert: set elsewhere has to survive.
+  local items = {}
+  for item in vim.api.nvim_get_option_value("fillchars", { win = win }):gmatch("[^,]+") do
+    if not item:match("^fold:") then
+      items[#items + 1] = item
+    end
+  end
+  items[#items + 1] = "fold: "
+  vim.wo[win].fillchars = table.concat(items, ",")
   vim.api.nvim_win_call(win, function()
     vim.cmd("normal! zE")
     for _, fold in ipairs(folds or {}) do
