@@ -126,7 +126,14 @@ case "$1 $2" in
       cat "$REVIEW_MODE_THREADS_FILE"
     elif [[ -n "${REVIEW_MODE_THREADS_FILE:-}" && "$args" == *"PullRequestReviewThread"* ]]; then
       printf 'graphql thread page %s\n' "$args" >> "${REVIEW_MODE_GH_LOG:-/dev/null}"
-      cat "$REVIEW_MODE_THREADS_FILE.page"
+      # one file per cursor, so a follow-up page can itself report another
+      page="$REVIEW_MODE_THREADS_FILE.page"
+      for arg in "$@"; do
+        case "$arg" in
+          after=*) page="$REVIEW_MODE_THREADS_FILE.page.${arg#after=}" ;;
+        esac
+      done
+      cat "$page"
     elif [[ "$args" == *"reviewThreads"* && "${REVIEW_MODE_FIXTURE:-}" == "reactions" ]]; then
       printf '%s\n' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"id":"thread_1","path":"file.txt","line":2,"originalLine":2,"startLine":null,"diffSide":"RIGHT","isResolved":false,"isOutdated":false,"comments":{"nodes":[{"id":"comment_1","databaseId":1,"path":"file.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-02T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r1","state":"SUBMITTED","authorAssociation":"OWNER","viewerDidAuthor":false,"body":"Needs review","author":{"login":"reviewer"},"reactionGroups":[{"content":"THUMBS_UP","viewerHasReacted":true,"reactors":{"totalCount":2}},{"content":"HOORAY","viewerHasReacted":false,"reactors":{"totalCount":1}}]},{"id":"comment_5","databaseId":5,"path":"file.txt","line":2,"originalLine":2,"startLine":null,"createdAt":"2024-01-03T03:04:05Z","url":"https://github.com/owner/repo/pull/123#discussion_r5","state":"SUBMITTED","authorAssociation":"MEMBER","viewerDidAuthor":true,"body":"Done","author":{"login":"maintainer"},"reactionGroups":[]}]}}]}}}}}'
     elif [[ "$args" == *"reviewThreads"* && "${REVIEW_MODE_FIXTURE:-}" == "edit_delete" ]]; then
