@@ -1,6 +1,6 @@
 # The hero demo, cut as a story rather than a feature tour:
 #
-#   hook    0:00  a wrong number on screen, in code anyone can read
+#   hook    0:00  a PR that quietly stops charging for quantity
 #   gap     0:04  you can see the fix; the PR page cannot help you write it
 #   loss    0:07  what reviewers do instead: describe the fix in prose
 #   mess    0:11  and hand-build a ```suggestion block, indentation and all
@@ -35,25 +35,28 @@ Set TypingSpeed 55ms
 Set PlaybackSpeed 1.0
 
 # --- setup, off camera -------------------------------------------------------
+# The review is started here, not on camera: a cold start spends ~15s fetching
+# the PR and its diff, and a viewer should meet the bug, not a spinner.
 Hide
-Type "cd ${REVIEW_MODE_DEMO_DIR:-$HOME/Projects/adrianmross/review-mode-demo}" Enter
+Type "cd ${REVIEW_MODE_DEMO_DIR:-$HOME/Projects/wiz/worktrunks/review-mode-demo.fix-cart-total}" Enter
 Type "clear" Enter
-Type "nvim -u ${REVIEW_MODE_PLUGIN_ROOT:-$HOME/Projects/adrianmross/review-mode.nvim}/demo/init.lua" Enter
-Sleep 2s
+Type "nvim -u ${REVIEW_MODE_PLUGIN_ROOT:-$HOME/Projects/adrianmross/review-mode.nvim}/demo/init.lua src/cart.ts" Enter
+Sleep 6s
+Type " rm"
+Sleep 14s
+Type "]c"
+Sleep 3s
+Down
+Sleep 1s
 Show
 
-# --- HOOK: the review opens on the bug ---------------------------------------
-# One keystroke in, and the PR is ordinary buffers with the cursor on the hunk.
-Type " rm"
+# --- HOOK: the line the PR changed -------------------------------------------
+# Open on the review: ordinary buffers, the cursor already on the changed line,
+# REVIEW in the statusline.
 Sleep 2500ms
-Type "]c"
-Sleep 2s
 
 # --- GAP: you can see the fix ------------------------------------------------
-# A beat on the line itself: qty is counted in the summary and never charged.
-Down Down
-Sleep 900ms
-Up
+# The discount went in; the quantity fell out of the same line.
 Sleep 1800ms
 
 # --- LOSS + MESS: the way this normally goes ---------------------------------
@@ -61,29 +64,32 @@ Sleep 1800ms
 # about a fix, and a suggestion block hand-indented by eye.
 Type " rr"
 Sleep 1200ms
-Type "this misses qty — can you multiply by"
+Type "this drops qty — can you multiply by"
 Sleep 700ms
 Type " i.qt"
 Sleep 400ms
 Backspace@120ms 3
 Sleep 600ms
-Type "quantity and re-run the"
+Type "quantity as well as the"
 Sleep 900ms
 Escape
 Sleep 700ms
 Type "q"
+Sleep 900ms
+# a draft with words in it asks before it is thrown away
+Type "D"
 Sleep 1500ms
 
 # --- CLARITY: fix it in the file instead -------------------------------------
 # The buffer is the real file, so the fix is a normal edit with normal tools.
 Set TypingSpeed 45ms
-Type "ci("
+Type "cc"
 Sleep 500ms
-Type "items.reduce((sum, i) => sum + i.price * i.qtty"
+Type "return items.reduce((sum, i) => sum + i.price * i.qtty"
 Sleep 400ms
 Backspace@110ms 2
 Sleep 300ms
-Type "y, 0)"
+Type "y * (1 - discount), 0)"
 Escape
 Sleep 2200ms
 
@@ -91,11 +97,11 @@ Sleep 2200ms
 Set TypingSpeed 55ms
 Type " rr"
 Sleep 2800ms
-Type "qty was dropped here, so a cart of 3 bills as 1."
+Type "the discount landed, but qty fell out: a cart of 3 bills as 1."
 Sleep 1600ms
 Ctrl+S
-Sleep 900ms
-Type "y"
+Sleep 1200ms
+Type "P"
 Sleep 2600ms
 
 # --- LAND: the working tree matches the PR again -----------------------------
