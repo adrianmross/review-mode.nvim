@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.13.10](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.9...v0.13.10) (2026-09-22)
+
+
+### Features
+
+* **comments:** show the PR conversation in the thread panel ([#133](https://github.com/adrianmross/review-mode.nvim/issues/133)) ([0d95aa8](https://github.com/adrianmross/review-mode.nvim/commit/0d95aa8e0fa5b29763482d7b7028db2c593af669))
+* **panel:** fold suggestions by default, step messages with ]r ([#132](https://github.com/adrianmross/review-mode.nvim/issues/132)) ([a9b1cff](https://github.com/adrianmross/review-mode.nvim/commit/a9b1cff255728b750f4d785d9eba1f3e4951866c))
+* **picker:** compact file rows, a colored preview, qualifiers and sort ([#118](https://github.com/adrianmross/review-mode.nvim/issues/118)) ([240f709](https://github.com/adrianmross/review-mode.nvim/commit/240f70976c403ca200030b4639c9277437bf7128))
+
+
+### Bug Fixes
+
+* **viewed:** load stored viewed state before publishing changed files ([#128](https://github.com/adrianmross/review-mode.nvim/issues/128)) ([7e2624c](https://github.com/adrianmross/review-mode.nvim/commit/7e2624c5a7e6aaecf44e65308f7db4d0eee691f3))
+
 ## [0.13.9](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.8...v0.13.9) (2026-09-19)
 
 
