@@ -1431,6 +1431,9 @@ end
 
 local function load_review_async(generation, opts)
   opts = opts or {}
+  -- before the maps, not after: the name list makes files changed ahead of the
+  -- numstat call, and a stored viewed mark has to be there when they do
+  viewed_state.load_viewed_state()
   build_changed_maps_async(generation, function(err)
     if not core.is_current(generation) then
       return
@@ -1441,7 +1444,6 @@ local function load_review_async(generation, opts)
       return
     end
 
-    viewed_state.load_viewed_state()
     refresh_tree()
     annotate_open_buffers()
     viewed_state.sync_viewed_from_github_async(generation)
