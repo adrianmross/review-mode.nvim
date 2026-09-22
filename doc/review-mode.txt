@@ -187,6 +187,18 @@ or outdated. Fenced code inside a comment is drawn as code instead of as more
 prose, and a `suggestion` block is drawn as the diff it would apply: the lines
 it replaces above the lines it proposes.
 
+That suggestion is folded shut by default, so a long block cannot push the
+conversation off screen. It shows as a one-line summary, >
+
+  ▸ suggestion  +3 −2  lua/foo.lua:12
+<
+opened with Vim's own fold keys: `za` `zo` `zc` for one block, `zR` `zM` for
+all. Any other fenced block of four lines or more folds the same way. The
+panel re-renders as the cursor moves and remembers what you opened, so a block
+stays open until you close it; `p` and `a` act on the thread, not on the
+rendered lines, so they work on a folded block too. Set
+panel.collapse_suggestions = false to draw every block out in full.
+
 Keys inside the panel:
 
         r       reply to the thread under the cursor (a new thread when
@@ -196,7 +208,11 @@ Keys inside the panel:
         a       apply the thread's suggestion to the buffer
         o       open the comment on GitHub
         <CR>    jump to the thread's line in the code window
-        ]r [r   next / previous thread in the panel
+        ]r [r   next / previous message: each comment's header, across
+                thread boundaries
+        ]] [[   next / previous thread
+        za zo zc  open or close the folded block under the cursor
+        zR zM   open or close every folded block
         <C-l>   reload comments from GitHub
         +       react to the comment under the cursor
         e       edit your comment under the cursor in a draft buffer
@@ -661,7 +677,7 @@ review discussion:
 >
   ]c    next PR hunk
   [c    previous PR hunk
-  ]r    next PR comment thread
+  ]r    next PR comment thread (in the panel: next message |review-mode-panel|)
   [r    previous PR comment thread
   ]f    next changed file
   [f    previous changed file
@@ -710,6 +726,7 @@ SETUP AND OPTIONS                    *review-mode-setup* *review-mode-options*
     },
     panel = {
       auto_open = false,
+      collapse_suggestions = true,
       follow_cursor = true,
       position = "right",
       width = 60,

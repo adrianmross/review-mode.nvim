@@ -145,7 +145,67 @@ end
 
 local panel_hint = "r reply · R new thread · e edit · dd delete · + react · "
   .. "x resolve · a apply · s review · o open · <CR> jump · q close"
-  .. " · p preview · A accept all"
+  .. " · p preview · A accept all · za fold · ]r message · ]] thread"
+
+-- Folds -----------------------------------------------------------------------
+--
+-- The panel re-renders as the cursor moves, and manual folds do not survive
+-- having every line replaced under them. So the open/closed state is kept by
+-- comment id here and re-applied after each render, or every block a reader
+-- opened would snap shut on the next cursor move.
+
+--- 'foldtext' for the panel: the folded block's own one-line summary.
+function M.foldtext()
+  local first = vim.v.foldstart - 1
+  for _, fold in ipairs(ui.panel_folds or {}) do
+    if fold.first == first then
+      return (fold.summary:gsub("^(%s*)", "%1▸ ", 1))
+    end
+  end
+  return vim.fn.getline(vim.v.foldstart)
+end
+
+local function sync_folds()
+  if not panel_is_open() then
+    return
+  end
+  vim.api.nvim_win_call(ui.panel_win, function()
+    for _, fold in ipairs(ui.panel_folds or {}) do
+      ui.panel_fold_open[fold.key] = vim.fn.foldclosed(fold.first + 1) == -1 or nil
+    end
+  end)
+end
+
+local function apply_folds(folds)
+  ui.panel_folds = folds
+  ui.panel_fold_open = ui.panel_fold_open or {}
+  local win = ui.panel_win
+  vim.wo[win].foldmethod = "manual"
+  vim.wo[win].foldenable = true
+  vim.wo[win].foldlevel = 0
+  vim.wo[win].foldtext = "v:lua.require'review_mode.panel'.foldtext()"
+  -- The summary says everything; the default fold fill only adds noise. Only
+  -- the "fold" item is ours, though -- 'fillchars' is one option carrying
+  -- everyone's items, so an eob: or a vert: set elsewhere has to survive.
+  local items = {}
+  for item in vim.api.nvim_get_option_value("fillchars", { win = win }):gmatch("[^,]+") do
+    if not item:match("^fold:") then
+      items[#items + 1] = item
+    end
+  end
+  items[#items + 1] = "fold: "
+  vim.wo[win].fillchars = table.concat(items, ",")
+  vim.api.nvim_win_call(win, function()
+    vim.cmd("normal! zE")
+    for _, fold in ipairs(folds or {}) do
+      -- :fold creates the fold closed, which is the default this wants
+      pcall(vim.cmd, string.format("%d,%dfold", fold.first + 1, fold.last + 1))
+      if ui.panel_fold_open[fold.key] then
+        pcall(vim.cmd, string.format("%dfoldopen", fold.first + 1))
+      end
+    end
+  end)
+end
 
 local function render_panel()
   if not panel_is_open() then
@@ -177,13 +237,16 @@ local function render_panel()
     end
   end
 
-  local lines, marks, rows, comment_rows = api.render_threads(threads, {
+  local collapse = api.config().panel.collapse_suggestions ~= false
+  local lines, marks, rows, comment_rows, folds = api.render_threads(threads, {
     width = width,
     empty = empty,
     hint = panel_hint,
+    collapse = collapse,
   })
 
   write_render(ui.panel_buf, lines, marks)
+  apply_folds(collapse and folds or {})
   ui.panel_threads = threads
   ui.panel_rows = rows
   ui.panel_comment_rows = comment_rows
@@ -662,23 +725,40 @@ local function jump_to_thread(thread, target)
   pcall(vim.api.nvim_win_set_cursor, target.win, { util.clamp_line(thread.line), 0 })
 end
 
-local function panel_move(delta)
-  local threads = ui.panel_threads or {}
-  if #threads == 0 then
-    return
-  end
-
+-- Every thread header row, or every comment header row: ]] steps threads, ]r
+-- steps the messages inside them, which in a long back-and-forth is the unit
+-- you actually want.
+local function panel_stops(per_comment)
   local rows = {}
-  for _, thread in ipairs(threads) do
-    local row = (ui.panel_rows or {})[thread.id]
-    if row then
-      rows[#rows + 1] = row
+  for _, thread in ipairs(ui.panel_threads or {}) do
+    if per_comment then
+      for _, comment in ipairs(thread.comments or {}) do
+        local row = (ui.panel_comment_rows or {})[comment.id]
+        if row then
+          rows[#rows + 1] = row
+        end
+      end
+    else
+      local row = (ui.panel_rows or {})[thread.id]
+      if row then
+        rows[#rows + 1] = row
+      end
     end
   end
   table.sort(rows)
+  return rows
+end
+
+local function panel_move(delta, per_comment)
+  local rows = panel_stops(per_comment)
+  if #rows == 0 then
+    return
+  end
 
   local current = vim.api.nvim_win_get_cursor(ui.panel_win)[1] - 1
-  local index = 1
+  -- 0 when the cursor sits above the first stop, so a forward step lands on it
+  -- rather than skipping it
+  local index = 0
   for position, row in ipairs(rows) do
     if row <= current then
       index = position
@@ -805,11 +885,25 @@ local function apply_panel_keys(bufnr)
     open_thread_url(panel_thread_at_cursor())
   end)
   map("]r", function()
-    panel_move(1)
+    panel_move(1, true)
   end)
   map("[r", function()
+    panel_move(-1, true)
+  end)
+  map("]]", function()
+    panel_move(1)
+  end)
+  map("[[", function()
     panel_move(-1)
   end)
+  -- Vim's own fold keys, as the diff uses them; each one records what it did,
+  -- so the next render re-applies it instead of snapping the block shut.
+  for _, key in ipairs({ "za", "zo", "zc", "zR", "zM", "zA", "zO", "zC" }) do
+    map(key, function()
+      vim.cmd("normal! " .. key)
+      sync_folds()
+    end)
+  end
   map("<C-l>", function()
     api.reload_comments()
   end)
@@ -836,6 +930,7 @@ local function forget_panel()
   ui.panel_win, ui.panel_buf = nil, nil
   ui.panel_threads, ui.panel_rows, ui.panel_target = nil, nil, nil
   ui.panel_comment_rows = nil
+  ui.panel_folds, ui.panel_fold_open = nil, nil
 end
 
 --- Close the panel and its draft. opts.confirm = false (the session stopping)
@@ -893,6 +988,7 @@ function M.open_panel()
 
   ui.panel_buf = bufnr
   ui.panel_win = win
+  ui.panel_fold_open = {}
   vim.api.nvim_win_set_buf(ui.panel_win, bufnr)
   vim.bo[bufnr].filetype = "review-thread"
   vim.bo[bufnr].bufhidden = "wipe"

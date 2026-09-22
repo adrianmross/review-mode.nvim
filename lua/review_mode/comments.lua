@@ -265,7 +265,7 @@ local Writer = {}
 Writer.__index = Writer
 
 local function writer()
-  return setmetatable({ lines = {}, marks = {} }, Writer)
+  return setmetatable({ lines = {}, marks = {}, folds = {} }, Writer)
 end
 
 function Writer:add(text, hl, line_hl)
@@ -315,7 +315,7 @@ local function write_code(out, lines, label, indent)
   for _, line in ipairs(lines) do
     out:add(indent .. "│ " .. line, nil, "ReviewModeCommentCode")
   end
-  out:add(indent .. "└", "ReviewModeThreadRule")
+  return fence_row, out:add(indent .. "└", "ReviewModeThreadRule")
 end
 
 -- A suggestion is a replacement for the lines it is anchored to, so show it as
@@ -332,8 +332,22 @@ local function write_suggestion(out, new_lines, original_lines, indent)
   if #new_lines == 0 then
     out:add(indent .. "│+", nil, "ReviewModeSuggestionAdd")
   end
-  out:add(indent .. "└", "ReviewModeThreadRule")
+  return fence_row, out:add(indent .. "└", "ReviewModeThreadRule")
 end
+
+-- A fenced block's one-line summary, drawn in place of the block while its
+-- fold is closed: what a suggestion would do, or how big other code is.
+local function fold_summary(segment, original_lines, location)
+  if segment.kind ~= "suggestion" then
+    return string.format("%s  %d lines", segment.lang ~= "" and segment.lang or "code", #segment.lines)
+  end
+  local summary = string.format("suggestion  +%d −%d", #segment.lines, #(original_lines or {}))
+  return location and (summary .. "  " .. location) or summary
+end
+
+-- A suggestion is what the thread is about, so it folds however short it is;
+-- other code only earns a fold once it costs more room than its summary.
+local collapse_min_lines = 4
 
 local function write_comment(out, comment, index, opts)
   local indent = "   "
@@ -380,10 +394,19 @@ local function write_comment(out, comment, index, opts)
       if index > 1 then
         out:blank()
       end
+      local first, last
       if segment.kind == "suggestion" then
-        write_suggestion(out, segment.lines, opts.original_lines, indent)
+        first, last = write_suggestion(out, segment.lines, opts.original_lines, indent)
       else
-        write_code(out, segment.lines, segment.lang ~= "" and segment.lang or "code", indent)
+        first, last = write_code(out, segment.lines, segment.lang ~= "" and segment.lang or "code", indent)
+      end
+      if opts.collapse and comment.id and (segment.kind == "suggestion" or #segment.lines >= collapse_min_lines) then
+        out.folds[#out.folds + 1] = {
+          key = tostring(comment.id) .. ":" .. index,
+          first = first,
+          last = last,
+          summary = indent .. fold_summary(segment, opts.original_lines, opts.location),
+        }
       end
       out:blank()
     end
@@ -407,8 +430,9 @@ end
 --- Render threads into buffer lines plus extmark specs.
 ---
 --- @param threads table list of normalized threads
---- @param opts table width, now, original_lines, empty, hint
---- @return table lines, table marks, table rows keyed by thread id, table header rows keyed by comment id
+--- @param opts table width, now, original_lines, empty, hint, collapse
+--- @return table lines, table marks, table rows keyed by thread id, table header
+--- rows keyed by comment id, table foldable code blocks { key, first, last, summary }
 function M.render(threads, opts)
   opts = opts or {}
   opts.width = math.max(30, tonumber(opts.width) or 60)
@@ -424,7 +448,7 @@ function M.render(threads, opts)
         out:add(line, "ReviewModeHint")
       end
     end
-    return out.lines, out.marks, rows, comment_rows
+    return out.lines, out.marks, rows, comment_rows, out.folds
   end
 
   for index, thread in ipairs(threads) do
@@ -459,6 +483,8 @@ function M.render(threads, opts)
       local comment_row = write_comment(out, comment, comment_index, {
         width = opts.width,
         now = opts.now,
+        collapse = opts.collapse,
+        location = location,
         -- a thread's own context wins, so two suggestions on one line do not
         -- both render the first one's replaced lines
         original_lines = comment_index == 1 and (thread.original_lines or opts.original_lines) or nil,
@@ -477,7 +503,7 @@ function M.render(threads, opts)
     end
   end
 
-  return out.lines, out.marks, rows, comment_rows
+  return out.lines, out.marks, rows, comment_rows, out.folds
 end
 
 --- Write rendered lines and their marks into a scratch buffer.

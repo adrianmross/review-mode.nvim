@@ -61,6 +61,9 @@ local defaults = {
   },
   panel = {
     auto_open = false,
+    -- render a comment's suggestion (and any long fenced code) as a closed
+    -- fold with a one-line summary, opened with Vim's own za / zo / zR
+    collapse_suggestions = true,
     follow_cursor = true,
     position = "right",
     width = 60,
@@ -306,7 +309,12 @@ function M.normalize_config(opts)
   end
   config.mode = mode
 
-  local panel = config.panel or {}
+  -- panel = false the same as comments/files below: the fields are read on
+  -- every render, so a non-table falls back to the defaults rather than crash
+  if type(config.panel) ~= "table" then
+    config.panel = vim.deepcopy(defaults.panel)
+  end
+  local panel = config.panel
   if panel.position ~= "left" and panel.position ~= "right" then
     panel.position = defaults.panel.position
   end
