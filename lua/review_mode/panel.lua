@@ -968,7 +968,13 @@ local function apply_panel_keys(bufnr)
     end)
   end
   map("<C-l>", function()
-    api.reload_comments()
+    -- whichever view is showing: the conversation is fetched apart from the
+    -- threads, so reloading comments would leave it as it was
+    if ui.conversation then
+      api.reload_conversation()
+    else
+      api.reload_comments()
+    end
   end)
   -- Reactions --
   map("+", function()

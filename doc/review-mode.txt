@@ -250,7 +250,8 @@ A review that was submitted with an empty body says nothing beyond its
 verdict, so it is left out.
 
 The conversation is loaded the first time something asks for it, and
-conversation_loaded |review-mode-events| fires when it arrives.
+conversation_loaded |review-mode-events| fires when it arrives. `<C-l>` in the
+panel reloads whichever view is showing, threads or conversation.
 `api.conversation()` returns the same list |review-mode-api|. On GitLab it is
 the MR notes that carry no diff position, read from the discussions already
 fetched; replying there is not supported yet. A local review has no PR, so it
@@ -1225,6 +1226,7 @@ Threads and comments ~
   api.open_url(url, cb)       open the PR or a comment in the browser
   api.conversation()          the PR conversation |review-mode-conversation|
   api.reply_conversation(body, cb)  comment on the conversation
+  api.reload_conversation()   refetch it
   api.local_comment(opts, cb) create a local comment thread on disk
   api.local_store()           the local review's comment file, or nil
 

@@ -820,6 +820,19 @@ function M.normalize_conversation(issue_comments, reviews)
   return out
 end
 
+--- A forced reload that arrived mid-load asked for data this run cannot hold
+--- (the comment just posted): drop this run's result and fetch again. Returns
+--- true when it did. The GitLab provider's load ends through it too.
+function M.conversation_superseded()
+  state.conversation_loading = false
+  if not state.conversation_reload_queued then
+    return false
+  end
+  state.conversation_reload_queued = false
+  M.load_conversation_async({ force = true })
+  return true
+end
+
 --- Load the conversation, then emit "conversation_loaded". A local review has
 --- no forge to ask, so it is a no-op rather than an error.
 function M.load_conversation_async(opts)
@@ -827,7 +840,13 @@ function M.load_conversation_async(opts)
   if state.provider == "local" or not state.active then
     return
   end
-  if state.conversation_loading or (state.conversation_loaded and not opts.force) then
+  if state.conversation_loading then
+    -- the running load may predate the write that forced this one, as with
+    -- comments: remember the force and fetch again when it lands
+    state.conversation_reload_queued = state.conversation_reload_queued or opts.force == true
+    return
+  end
+  if state.conversation_loaded and not opts.force then
     return
   end
   if state.provider == "gitlab" then
@@ -842,13 +861,16 @@ function M.load_conversation_async(opts)
 
   local generation = state.generation
   state.conversation_loading = true
+  state.conversation_reload_queued = false
   local endpoint = string.format("repos/%s/issues/%s/comments?per_page=100", state.repo, state.pr)
   issue_comments_async(generation, endpoint, {}, function(comments, err)
     if not core.is_current(generation) then
       return
     end
     if not comments then
-      state.conversation_loading = false
+      if M.conversation_superseded() then
+        return
+      end
       vim.notify("Failed to load the PR conversation: " .. tostring(err or "unknown error"), vim.log.levels.WARN)
       return
     end
@@ -862,7 +884,9 @@ function M.load_conversation_async(opts)
       if not core.is_current(generation) then
         return
       end
-      state.conversation_loading = false
+      if M.conversation_superseded() then
+        return
+      end
       if type(reviews) ~= "table" then
         vim.notify(
           "Failed to load the PR review summaries: " .. tostring(review_err or "unknown error"),

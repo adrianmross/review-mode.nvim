@@ -163,6 +163,35 @@ toggle()
 assert(not panel_text():match("── Conversation"), "c did not toggle back to the threads")
 toggle()
 
+-- Reloading ------------------------------------------------------------------------
+
+local function page_requests()
+  return #log_matching("issues/123/comments%?")
+end
+
+-- <C-l> reloads whichever view is showing: the conversation is fetched apart
+-- from the threads, so reloading comments would leave it as it was
+local before, rounds = page_requests(), #loaded
+vim.api.nvim_set_current_win(panel_win)
+assert(vim.fn.maparg("<C-l>", "n", false, true).callback, "the panel has no <C-l> mapping")()
+wait_for(function()
+  return #loaded == rounds + 1
+end, "<C-l> in the conversation view did not refetch the conversation")
+assert(page_requests() == before + 2, "<C-l> did not walk the conversation's pages: " .. vim.inspect(gh_log()))
+
+-- A forced reload issued while one is in flight is not dropped: the running
+-- load cannot hold what forced the second one, so it runs again.
+before, rounds = page_requests(), #loaded
+api.reload_conversation()
+api.reload_conversation()
+wait_for(function()
+  return #loaded == rounds + 1
+end, "the first forced reload never finished")
+wait_for(function()
+  return page_requests() == before + 4
+end, "a forced reload issued mid-flight was dropped: " .. vim.inspect(gh_log()))
+assert(#api.conversation() == 3, "the queued reload lost the conversation")
+
 -- Replying ------------------------------------------------------------------------
 
 local function posts()
@@ -199,6 +228,7 @@ vim.wait(200)
 assert(#posts() == 0, "a declined confirmation still posted: " .. vim.inspect(gh_log()))
 
 answer = 1
+rounds = #loaded
 panel.composer_submit()
 wait_for(function()
   return #posts() == 1
@@ -212,7 +242,7 @@ end, "no confirmation notification: " .. vim.inspect(notifications))
 
 -- the post refreshes the conversation
 wait_for(function()
-  return #loaded == 2
+  return #loaded > rounds
 end, "the post did not reload the conversation")
 
 vim.notify = notify

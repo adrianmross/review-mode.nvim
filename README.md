@@ -290,7 +290,7 @@ posted through the same draft buffer and confirmation as a reply; the keys that
 act on a thread (`x`, `a`, `e`, `dd`, `+`) have nothing to act on.
 
 `api.conversation()` returns the same list, and the `conversation_loaded` event
-fires when it arrives. On GitLab it is the MR notes that carry no diff position;
+fires when it arrives; `<C-l>` reloads whichever view the panel is showing. On GitLab it is the MR notes that carry no diff position;
 replying there is not supported yet. A local review has no PR, so it has no
 conversation and nothing is fetched.
 
@@ -450,6 +450,7 @@ api.can_modify_comment(comment_id)   --> true, or false and why not
 -- the PR conversation: issue comments and submitted review bodies, oldest first
 api.conversation()   --> { { kind = "comment"|"review", review_state, author, created_at, body, ... }, ... }
 api.reply_conversation("Thanks, pushed a fix", cb)
+api.reload_conversation()
 
 -- navigation ("hunk" | "comment" | "unresolved" | "file")
 api.goto_next("comment") / api.goto_prev("hunk")

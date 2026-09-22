@@ -483,6 +483,11 @@ function M.conversation()
   return state.conversation or {}
 end
 
+--- Refetch the conversation, whatever is already loaded.
+function M.reload_conversation()
+  return github.load_conversation_async({ force = true })
+end
+
 --- Post a comment on the PR's conversation. callback(ok, err).
 function M.reply_conversation(body, callback)
   return github.post_conversation_comment(body, callback)

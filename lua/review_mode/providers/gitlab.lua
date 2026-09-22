@@ -245,13 +245,14 @@ end
 --- walks, so asking for it costs one request only when comments are not loaded.
 function M.load_conversation()
   M.discussions_async(function(discussions, err)
+    if github.conversation_superseded() then
+      return
+    end
     if type(discussions) ~= "table" then
-      state.conversation_loading = false
       vim.notify("Failed to load MR notes: " .. tostring(err or "unknown error"), vim.log.levels.WARN)
       return
     end
     state.conversation = M.conversation_notes(discussions, M.web_url())
-    state.conversation_loading = false
     state.conversation_loaded = true
     hooks.emit("conversation_loaded", { repo = state.repo, pr = state.pr, count = #state.conversation })
   end)

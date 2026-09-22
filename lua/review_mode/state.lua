@@ -232,6 +232,7 @@ local state = {
   conversation = {},
   conversation_loading = false,
   conversation_loaded = false,
+  conversation_reload_queued = false,
   viewed = {},
   -- per path, the hunk keys marked viewed
   hunk_viewed = {},
@@ -526,6 +527,7 @@ function M.reset_review_data()
   state.conversation = {}
   state.conversation_loading = false
   state.conversation_loaded = false
+  state.conversation_reload_queued = false
   state.viewed = {}
   state.hunk_viewed = {}
   state.viewed_sync_queue = {}
