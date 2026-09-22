@@ -1,0 +1,31 @@
+1
+00:00:00,300 --> 00:00:03,800
+A PR that bills a cart of three as one.
+
+2
+00:00:04,000 --> 00:00:07,000
+You can see the fix. The PR page can't help you write it.
+
+3
+00:00:07,200 --> 00:00:11,000
+So reviewers describe the fix in prose…
+
+4
+00:00:11,200 --> 00:00:15,000
+…or hand-build a suggestion block, indentation and all.
+
+5
+00:00:15,200 --> 00:00:19,000
+Instead: fix it in the file. Your LSP, your formatter, your keys.
+
+6
+00:00:19,200 --> 00:00:23,000
+Then one key turns the edit into the suggestion.
+
+7
+00:00:23,200 --> 00:00:26,500
+Posted — and the edit is undone. Your tree matches the PR again.
+
+8
+00:00:26,700 --> 00:00:29,500
+review-mode.nvim
