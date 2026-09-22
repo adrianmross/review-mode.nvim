@@ -54,6 +54,18 @@ case "$1 $2" in
   "api repos/owner/repo/pulls/123/comments?per_page=100"|"api repos/owner/repo/pulls/123/comments?per_page=100&page=1")
     printf '%s\n' '[{"id":1,"path":"file.txt","line":2,"body":"Needs review","user":{"login":"reviewer"},"created_at":"2024-01-02T03:04:05Z","html_url":"https://github.com/owner/repo/pull/123#discussion_r1","author_association":"OWNER","reactions":{"+1":2,"laugh":0,"hooray":1,"heart":0,"rocket":0,"eyes":0,"total_count":3}},{"id":2,"path":"file.txt","line":4,"body":"Check final line","user":{"login":"reviewer"},"created_at":"2024-01-02T03:04:05Z","author_association":"NONE","reactions":{"+1":0,"total_count":0}}]'
     ;;
+  # PR conversation: issue comments, paginated with a Link header (the include
+  # branch below adds it), and the submitted reviews with their state.
+  "api repos/owner/repo/issues/123/comments?per_page=100"|"api repos/owner/repo/issues/123/comments?per_page=100&page=2")
+    if [[ "$2" == *"page=2"* ]]; then
+      printf '%s\n' '[{"id":202,"body":"And the second page holds this one.","user":{"login":"bob"},"created_at":"2024-01-02T07:00:00Z","html_url":"https://github.com/owner/repo/pull/123#issuecomment-202","author_association":"CONTRIBUTOR","reactions":{"+1":0,"total_count":0}}]'
+    else
+      printf '%s\n' '[{"id":201,"body":"Why this approach?","user":{"login":"alice"},"created_at":"2024-01-02T05:00:00Z","html_url":"https://github.com/owner/repo/pull/123#issuecomment-201","author_association":"MEMBER","reactions":{"+1":2,"hooray":0,"total_count":2}}]'
+    fi
+    ;;
+  "api repos/owner/repo/pulls/123/reviews?per_page=100")
+    printf '%s\n' '[{"id":301,"state":"APPROVED","body":"Looks good, one question about the cache","user":{"login":"carol"},"submitted_at":"2024-01-02T06:00:00Z","html_url":"https://github.com/owner/repo/pull/123#pullrequestreview-301","author_association":"OWNER"},{"id":302,"state":"COMMENTED","body":"","user":{"login":"dave"},"submitted_at":"2024-01-02T06:30:00Z","html_url":"https://github.com/owner/repo/pull/123#pullrequestreview-302","author_association":"NONE"}]'
+    ;;
   "api repos/owner/repo/pulls/123/comments/1/replies"|"api repos/owner/repo/pulls/123/comments/2/replies"|"api repos/owner/repo/pulls/123/comments/3/replies"|"api repos/owner/repo/pulls/123/comments/41/replies")
     args="$*"
     if [[ "$args" == *"--method POST"* ]]; then
@@ -84,6 +96,8 @@ case "$1 $2" in
     if [[ "$3 $4" == "POST repos/owner/repo/pulls/123/requested_reviewers" ]]; then
       printf 'rerequest %s\n' "$*" >> "${REVIEW_MODE_AUTHOR_LOG:-/dev/null}"
       printf '{"number":123}\n'
+    elif [[ "$3 $4" == "POST repos/owner/repo/issues/123/comments" ]]; then
+      printf '{"id":400,"body":"posted"}\n'
     elif [[ "$3 $4" == "PATCH repos/owner/repo/pulls/comments/11" ]]; then
       printf '{"id":11,"path":"file.txt","line":2,"body":"edited"}\n'
     elif [[ "$3 $4" != "DELETE repos/owner/repo/pulls/comments/11" ]]; then
@@ -252,6 +266,8 @@ case "$1 $2" in
     inm=""
     for arg in "$@"; do
       case "$arg" in
+        # a Link header's next page is a full URL, as GitHub's are
+        https://api.github.com/*) endpoint="${arg#https://api.github.com/}" ;;
         repos/*) endpoint="$arg" ;;
         "If-None-Match: "*) inm="${arg#If-None-Match: }" ;;
       esac
@@ -265,7 +281,13 @@ case "$1 $2" in
       printf 'HTTP/2.0 304 Not Modified\nEtag: %s\r\n\r\n' "$etag"
       exit 1
     fi
-    printf 'HTTP/2.0 200 OK\nEtag: %s\r\nContent-Type: application/json; charset=utf-8\r\n\r\n' "$etag"
+    # the conversation's first page points at its second one, the way GitHub
+    # paginates: the page count is only ever in the Link header
+    link=""
+    if [[ "$endpoint" == *"issues/123/comments"* && "$endpoint" != *"page=2"* ]]; then
+      link='Link: <https://api.github.com/repos/owner/repo/issues/123/comments?per_page=100&page=2>; rel="next"\r\n'
+    fi
+    printf 'HTTP/2.0 200 OK\nEtag: %s\r\n%bContent-Type: application/json; charset=utf-8\r\n\r\n' "$etag" "$link"
     # reuse the payload the plain branch already answers with
     "$0" api "$endpoint"
     ;;

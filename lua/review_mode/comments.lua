@@ -56,6 +56,14 @@ local notable_association = {
   FIRST_TIMER = "first-timer",
 }
 
+-- A submitted review's verdict, as it reads in the conversation view.
+local review_state_label = {
+  APPROVED = "approved",
+  CHANGES_REQUESTED = "changes requested",
+  COMMENTED = "commented",
+  DISMISSED = "dismissed",
+}
+
 local function width_of(text)
   return vim.fn.strdisplaywidth(text or "")
 end
@@ -352,13 +360,18 @@ local collapse_min_lines = 4
 local function write_comment(out, comment, index, opts)
   local indent = "   "
   local author = comment.author or "reviewer"
-  local prefix = index == 1 and " " or " ↳ "
+  -- a conversation is a list of separate messages, not one thread of replies
+  local prefix = (index == 1 or opts.flat) and " " or " ↳ "
   local header = prefix .. author
 
   local meta = {}
   local association = notable_association[comment.association]
   if association then
     meta[#meta + 1] = association
+  end
+  local verdict = review_state_label[comment.review_state]
+  if verdict then
+    meta[#meta + 1] = verdict
   end
   local when = M.relative_time(comment.created_at, opts.now)
   if when then
@@ -457,24 +470,31 @@ function M.render(threads, opts)
     end
 
     local label, state_hl = thread_state(thread)
-    local location = thread.path or "?"
-    if thread.line then
-      location = string.format("%s:%s", location, thread.line)
-    end
-    if thread.side == "LEFT" then
-      -- the line numbers the file before the PR, not the one in the buffer
-      location = location .. " (base)"
-    end
-    local badge = "● " .. label
-    local replies = #(thread.comments or {})
-    if replies > 1 then
-      badge = string.format("↩ %d  %s", replies - 1, badge)
+    -- a titled thread (the PR conversation) sits on no line and resolves
+    -- nothing, so it carries its title instead of a location and no badge
+    local location = thread.title or thread.path or "?"
+    local badge = ""
+    if not thread.title then
+      if thread.line then
+        location = string.format("%s:%s", location, thread.line)
+      end
+      if thread.side == "LEFT" then
+        -- the line numbers the file before the PR, not the one in the buffer
+        location = location .. " (base)"
+      end
+      badge = "● " .. label
+      local replies = #(thread.comments or {})
+      if replies > 1 then
+        badge = string.format("↩ %d  %s", replies - 1, badge)
+      end
     end
 
     local row = out:add(rule(location, opts.width, badge))
     rows[thread.id or tostring(index)] = row
     out:span(row, #"── ", #"── " + #location, "ReviewModeThreadPath")
-    out:span(row, #out.lines[row + 1] - #badge, -1, state_hl)
+    if badge ~= "" then
+      out:span(row, #out.lines[row + 1] - #badge, -1, state_hl)
+    end
 
     for comment_index, comment in ipairs(thread.comments or {}) do
       if comment_index > 1 then
@@ -485,6 +505,7 @@ function M.render(threads, opts)
         now = opts.now,
         collapse = opts.collapse,
         location = location,
+        flat = thread.title ~= nil,
         -- a thread's own context wins, so two suggestions on one line do not
         -- both render the first one's replaced lines
         original_lines = comment_index == 1 and (thread.original_lines or opts.original_lines) or nil,
