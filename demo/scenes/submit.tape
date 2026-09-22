@@ -46,7 +46,6 @@ Type "double check this against the receipt"
 Sleep 500ms
 Ctrl+P
 Sleep 900ms
-Escape
 
 # --- GAP: the readiness list --------------------------------------------------
 Type " rs"
