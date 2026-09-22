@@ -76,6 +76,17 @@ local function thread(id, path, line, comments, extra)
   }, extra)
 end
 
+-- thread_a fills a whole first page of comments (100), so its last two replies
+-- only arrive through the follow-up query -- and the second page reports a
+-- third, so the loop has to keep going and then stop.
+local first_page = {
+  comment(41, "alice", "Please rename this"),
+  comment(11, "adrian", "Renamed", { viewerDidAuthor = true }),
+}
+for id = 300, 397 do
+  first_page[#first_page + 1] = comment(id, "alice", "filler " .. id)
+end
+
 -- file.txt on the feature branch has 10 lines: one, two, "", base changed,
 -- same1..same5, tail
 local payload = {
@@ -86,10 +97,7 @@ local payload = {
           pageInfo = { hasNextPage = false },
           nodes = {
             -- a conversation: the reply must go to 41, the first comment
-            thread("thread_a", "file.txt", 2, {
-              comment(41, "alice", "Please rename this"),
-              comment(11, "adrian", "Renamed", { viewerDidAuthor = true }),
-            }, { more = "cur1" }),
+            thread("thread_a", "file.txt", 2, first_page, { more = "cur1" }),
             -- outdated: GitHub has dropped the live lines
             thread("thread_b", "file.txt", nil, {
               comment(51, "alice", "```suggestion\nnew five\n```", { originalLine = 5, originalStartLine = 4 }),
@@ -118,15 +126,17 @@ local payload = {
   },
 }
 vim.fn.writefile({ vim.json.encode(payload) }, threads_file)
-vim.fn.writefile({
-  vim.json.encode({
-    data = {
-      node = {
-        comments = { pageInfo = { hasNextPage = false }, nodes = { comment(43, "bob", "Third comment") } },
+local function write_page(cursor, nodes, more)
+  vim.fn.writefile({
+    vim.json.encode({
+      data = {
+        node = { comments = { pageInfo = { hasNextPage = more ~= nil, endCursor = more }, nodes = nodes } },
       },
-    },
-  }),
-}, threads_file .. ".page")
+    }),
+  }, threads_file .. ".page." .. cursor)
+end
+write_page("cur1", { comment(43, "bob", "Third comment") }, "cur2")
+write_page("cur2", { comment(44, "bob", "Last reply") })
 
 -- Unit: the comment model ---------------------------------------------------------
 
@@ -197,10 +207,29 @@ wait_for(function()
   return find_thread("file.txt", "thread_a") ~= nil and settled()
 end, "anchoring fixture comments did not load")
 
--- a thread longer than the first page of comments is fetched whole
+-- a thread longer than the first page of comments is fetched whole, page after
+-- page, and the newest reply -- the one only the last page carries -- is there
 local thread_a = find_thread("file.txt", "thread_a")
-assert(#thread_a.comments == 3, "a thread's comments past the first page were not fetched")
+assert(#thread_a.comments == 102, "a thread's comments past the first page were not fetched: " .. #thread_a.comments)
+assert(thread_a.comments[102].body == "Last reply", "the newest reply of a long thread is missing")
 assert(gh_calls("after=cur1") == 1, "the second page of a thread's comments was not asked for")
+assert(gh_calls("after=cur2") == 1, "the follow-up loop stopped before the last page of a thread")
+-- and the loop stops there: only the thread that overflowed costs extra calls,
+-- the other six in this payload cost none
+assert(gh_calls("graphql thread page") == 2, "the thread comment loop did not stop at the last page")
+assert(gh_calls("graphql reviewThreads") == 1, "the thread query itself was repeated")
+
+-- the cache stores the whole thread, so a cached start is not a truncated one
+local github = require("review_mode.github")
+local cached = github.read_comment_cache("owner/repo#123")
+assert(cached and cached.grouped and cached.grouped["file.txt"], "the comment cache was not written")
+api.unstable_state().comments = {}
+api.unstable_state().comment_threads = {}
+assert(github.hydrate_comments(), "the freshly written comment cache did not hydrate")
+local from_cache = find_thread("file.txt", "thread_a")
+assert(#from_cache.comments == 102, "the cache kept a truncated thread: " .. #from_cache.comments)
+assert(from_cache.comments[102].body == "Last reply", "the newest reply was lost through the cache")
+assert(gh_calls("graphql thread page") == 2, "hydrating from the cache spent gh calls")
 
 -- unresolved counts are threads: thread_a's three comments are one
 assert(api.unresolved_count("file.txt") == 6, "unresolved_count counted comments, not threads")
