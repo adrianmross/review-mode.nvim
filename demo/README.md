@@ -36,11 +36,41 @@ Export twice: a GIF at 1200px for the README (GitHub autoplays it; keep it under
 8 MB, raise `PlaybackSpeed` before you drop quality), and the MP4 for the blog
 and X.
 
-## Other takes worth having
+## Other takes
 
-Each is its own tape, same structure, one idea:
+`demo/scenes/` carries six more, each its own tape, same structure, one idea:
+the changed-files picker (`files`), the thread panel (`panel`), trying a
+suggestion on for size (`trial`), blast radius (`blast`), a CI failure as a
+diagnostic (`ci`), and pending review → submit (`submit`). Record and reset
+them the same way as `suggestion.tape`; `panel`/`trial` additionally need a
+posted suggestion comment as a fixture (see each tape's header).
 
-- **Blast radius** — a changed signature, and the callers the PR did not touch.
-- **CI on the line** — a failing check as a diagnostic where the failure is.
-- **Commit with credit** — applying suggestions and committing them with the
-  reviewer as co-author.
+## The combined reel
+
+`demo/reel.sh` stitches finished takes (`cinema.sh`'s `*.shot.mp4` output)
+into one video, crossfading from one scene into the next:
+
+```bash
+for f in demo/suggestion.gif demo/scenes/{files,panel,trial,blast,ci,submit}.gif; do
+  TILT=$([ "$f" = demo/suggestion.gif ] && echo 1 || echo 0) demo/cinema.sh "$f"
+done
+demo/reel.sh demo/suggestion.shot.mp4 demo/scenes/{files,panel,trial,blast,ci,submit}.shot.mp4
+```
+
+Every take ends with a few seconds of dead air — asciinema/agg hold the last
+frame (and the tmux `[detached]` message on its way out) well past where the
+content actually ends. That's invisible in a standalone GIF but shows up as a
+blank beat mid-crossfade in a combined reel. Re-render tighter-tailed sources
+before handing them to `cinema.sh` for the reel specifically (leave the
+committed `*.gif`/`*.shot.mp4` alone — their 3s hold is correct for viewing
+one take on its own):
+
+```bash
+agg --font-size 18 --theme dracula --last-frame-duration 0.3 demo/scenes/<name>.cast /tmp/<name>.gif
+cp demo/scenes/<name>.srt demo/scenes/<name>.keys.json /tmp/
+TILT=0 demo/cinema.sh /tmp/<name>.gif
+```
+
+(`suggestion.gif` predates keeping its `.cast`; trim its `.shot.mp4`'s dead
+tail directly instead, e.g. `ffmpeg -i demo/suggestion.shot.mp4 -t 43.7 -c copy ...` —
+re-check the exact cut point if the tape changes.)

@@ -20,7 +20,7 @@ Require gh
 Set Shell "zsh"
 Set FontSize 18
 Set Width 1400
-Set Height 620
+Set Height 800
 Set Padding 24
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 55ms
@@ -38,7 +38,7 @@ Sleep 3s
 Down
 Sleep 1s
 Type " rt"
-Sleep 4s
+Sleep 7s
 Ctrl+W
 Type "w"
 Sleep 500ms
