@@ -1,0 +1,62 @@
+[
+  {
+    "t": 4.31,
+    "key": "<leader>rr"
+  },
+  {
+    "t": 5.724,
+    "key": "this drops qty \u2014 can you multiply by"
+  },
+  {
+    "t": 9.095,
+    "key": " i.qt"
+  },
+  {
+    "t": 10.879,
+    "key": "quantity as well as the"
+  },
+  {
+    "t": 13.474,
+    "key": "<Escape>"
+  },
+  {
+    "t": 14.319,
+    "key": "q"
+  },
+  {
+    "t": 15.295,
+    "key": "D"
+  },
+  {
+    "t": 16.894,
+    "key": "cc"
+  },
+  {
+    "t": 17.526,
+    "key": "return items.reduce((sum, i) => sum + i.price * i.qtty"
+  },
+  {
+    "t": 21.831,
+    "key": "y * (1 - discount), 0)"
+  },
+  {
+    "t": 23.204,
+    "key": "<Escape>"
+  },
+  {
+    "t": 25.55,
+    "key": "<leader>rr"
+  },
+  {
+    "t": 28.57,
+    "key": "the discount landed, but qty fell out: a cart of 3 bills as 1."
+  },
+  {
+    "t": 34.727,
+    "key": "<C-s>"
+  },
+  {
+    "t": 36.072,
+    "key": "P"
+  }
+]

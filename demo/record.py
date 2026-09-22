@@ -21,6 +21,7 @@ ends the take). Output "x.gif" names the file.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
@@ -51,12 +52,19 @@ def duration(text: str) -> float:
 class Tape:
     """The parts of a tape this renderer understands."""
 
+    # Every key sent while the take is rolling, as {t, label}: a viewer cannot
+    # see a keystroke, so the finisher draws them, and it needs to know when.
+    keylog: list[dict]
+    started: float | None
+
     def __init__(self, path: Path):
         self.gif = path.with_suffix(".gif")
         self.width, self.height, self.font_size = 1400, 800, 18
         self.typing = 0.055
         self.setup: list[tuple] = []
         self.take: list[tuple] = []
+        self.keylog = []
+        self.started = None
         self._parse(path)
 
     def _parse(self, path: Path) -> None:
@@ -74,6 +82,10 @@ class Tape:
                 target = self.setup
                 continue
             target.append(("cmd", line))
+
+    def note(self, label: str) -> None:
+        if self.started is not None:
+            self.keylog.append({"t": round(time.time() - self.started, 3), "key": label})
 
     def render_ops(self, ops: list[tuple]) -> None:
         """Replay parsed lines into the pane.
@@ -118,7 +130,10 @@ class Tape:
                     index += 1
                     continue
                 if token == "Type":
-                    for char in tokens[index]:
+                    text = tokens[index]
+                    # a leader sequence reads as one chord, not three letters
+                    self.note("<leader>" + text[1:] if text.startswith(" ") and len(text) <= 3 else text)
+                    for char in text:
                         tmux("send-keys", "-t", SESSION, "-l", char)
                         time.sleep(self.typing)
                     index += 1
@@ -135,10 +150,12 @@ class Tape:
                         time.sleep(gap)
                     continue
                 if token.startswith("Ctrl+"):
+                    self.note(f"<C-{token.split('+', 1)[1].lower()}>")
                     tmux("send-keys", "-t", SESSION, f"C-{token.split('+', 1)[1].lower()}")
                     time.sleep(0.12)
                     continue
                 if token in keys:
+                    self.note(f"<{token}>")
                     tmux("send-keys", "-t", SESSION, keys[token])
                     time.sleep(0.12)
                     continue
@@ -234,6 +251,7 @@ def main() -> int:
             env={**os.environ, "TERM": os.environ.get("DEMO_TERM", "xterm-256color")},
         )
         time.sleep(2)  # let the attach paint the first frame
+        tape.started = time.time()
         tape.render_ops(tape.take)
         time.sleep(1)
         tmux("detach-client", "-s", SESSION)
@@ -244,6 +262,9 @@ def main() -> int:
     if not cast.exists():
         print("no cast was recorded", file=sys.stderr)
         return 1
+    keys_path = tape.gif.with_suffix(".keys.json")
+    keys_path.write_text(json.dumps(tape.keylog, indent=2))
+
     made = run("agg", "--font-size", str(tape.font_size), "--theme", "dracula", str(cast), str(tape.gif))
     if made.returncode != 0:
         print(made.stderr.strip(), file=sys.stderr)
