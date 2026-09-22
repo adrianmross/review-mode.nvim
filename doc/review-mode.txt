@@ -217,6 +217,8 @@ Keys inside the panel:
         +       react to the comment under the cursor
         e       edit your comment under the cursor in a draft buffer
         dd      delete your comment under the cursor, after a confirmation
+        c       switch between the threads and the PR conversation
+                |review-mode-conversation|
         s       open the pending review buffer |review-mode-pending|
         q       close the panel
         p       preview the suggestion in the code |review-mode-suggestions|
@@ -233,6 +235,27 @@ so the panel's `x`, |:ReviewModeResolveThread|, |:ReviewModeUnresolveThread|
 and the GitLab provider all show it, and it uses its own namespace so it never
 disturbs the comment signs or virtual text. comments.resolve_flash_ms is how
 long it lasts in milliseconds; 0 turns it off.
+
+                                                    *review-mode-conversation*
+The panel's `c` key switches between the threads and the PR's conversation:
+the comments on the pull request that are not anchored to a line, and the
+bodies of submitted reviews with the verdict they carried (approved, changes
+requested, commented). They are shown oldest first, with the same author,
+association, time and reaction styling as a thread. `c` switches back.
+
+In the conversation view `r` drafts a new comment on the PR, posted through
+the same draft buffer and confirmation as a thread reply |review-mode-draft|;
+the keys that act on a thread (x, a, e, dd, +) have nothing to act on there.
+A review that was submitted with an empty body says nothing beyond its
+verdict, so it is left out.
+
+The conversation is loaded the first time something asks for it, and
+conversation_loaded |review-mode-events| fires when it arrives. `<C-l>` in the
+panel reloads whichever view is showing, threads or conversation.
+`api.conversation()` returns the same list |review-mode-api|. On GitLab it is
+the MR notes that carry no diff position, read from the discussions already
+fetched; replying there is not supported yet. A local review has no PR, so it
+has no conversation and nothing is fetched.
 
                                                        *review-mode-reactions*
 The panel's `+` key and |:ReviewModeReact| toggle one of GitHub's eight
@@ -1201,6 +1224,9 @@ Threads and comments ~
   api.reaction_contents       the eight reactions and their emoji
   api.comment_paths()         every path that carries comments
   api.open_url(url, cb)       open the PR or a comment in the browser
+  api.conversation()          the PR conversation |review-mode-conversation|
+  api.reply_conversation(body, cb)  comment on the conversation
+  api.reload_conversation()   refetch it
   api.local_comment(opts, cb) create a local comment thread on disk
   api.local_store()           the local review's comment file, or nil
 
@@ -1262,6 +1288,7 @@ argument and the autocommand's `data`.
   leave                ReviewModeLeave               you step out
   stop                 ReviewModeStop                the session ends
   comments_loaded      ReviewModeCommentsLoaded      comments finish loading
+  conversation_loaded  ReviewModeConversationLoaded  the PR conversation loads
   highlights_changed   ReviewModeHighlightsChanged   the colorscheme changed
                                                      and the groups are reset
   viewed_changed       ReviewModeViewedChanged       viewed state changes

@@ -215,6 +215,49 @@ function M.discussions_async(callback)
   page(1)
 end
 
+--- MR notes that are not diff discussions: the conversation, oldest first, in
+--- the shape review_mode.api.conversation() promises. GitLab has no review
+--- summaries, so every entry is a plain note; system notes ("changed the
+--- description") are events, not discussion, and are dropped.
+function M.conversation_notes(discussions, web_url)
+  local out = {}
+  for _, discussion in ipairs(discussions or {}) do
+    for _, note in ipairs(discussion.notes or {}) do
+      if not note.position and not note.system then
+        out[#out + 1] = {
+          id = note.id,
+          kind = "comment",
+          author = note.author and note.author.username or nil,
+          created_at = note.created_at,
+          body = note.body,
+          url = web_url and note.id and string.format("%s#note_%s", web_url, note.id) or nil,
+        }
+      end
+    end
+  end
+  table.sort(out, function(left, right)
+    return (left.created_at or "") < (right.created_at or "")
+  end)
+  return out
+end
+
+--- The conversation comes out of the discussions the comment load already
+--- walks, so asking for it costs one request only when comments are not loaded.
+function M.load_conversation()
+  M.discussions_async(function(discussions, err)
+    if github.conversation_superseded() then
+      return
+    end
+    if type(discussions) ~= "table" then
+      vim.notify("Failed to load MR notes: " .. tostring(err or "unknown error"), vim.log.levels.WARN)
+      return
+    end
+    state.conversation = M.conversation_notes(discussions, M.web_url())
+    state.conversation_loaded = true
+    hooks.emit("conversation_loaded", { repo = state.repo, pr = state.pr, count = #state.conversation })
+  end)
+end
+
 --- Fetch discussions. github.load_comments_async hands over here after its
 --- guards and cache check, so both forges share those.
 function M.fetch_comments_async(generation)

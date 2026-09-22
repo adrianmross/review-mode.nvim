@@ -726,4 +726,214 @@ function M.delete_comment(comment_id, callback)
   return true
 end
 
+-- The PR conversation ------------------------------------------------------------
+-- The discussion that is not anchored to a line: the PR's issue comments, and
+-- the bodies of submitted reviews with the verdict they carried. Loaded on
+-- demand (nothing asks for it until a UI does) and kept in one list, oldest
+-- first, in the same comment shape the thread renderer draws.
+
+local review_state_order = { APPROVED = true, CHANGES_REQUESTED = true, COMMENTED = true, DISMISSED = true }
+
+--- The next page of a paginated REST response, from its Link header, or nil.
+--- The page count is never known up front, so this is what says there is more.
+function M.next_page_url(link)
+  for url, rel in tostring(link or ""):gmatch([[<([^>]+)>;%s*rel="([^"]+)"]]) do
+    if rel == "next" then
+      return url
+    end
+  end
+  return nil
+end
+
+local function issue_comments_async(generation, endpoint, out, callback)
+  util.gh_include_async({ "api", "--include", endpoint }, function(response, err)
+    if not core.is_current(generation) then
+      return
+    end
+    if not response then
+      callback(nil, err)
+      return
+    end
+    if response.status < 200 or response.status >= 300 then
+      callback(nil, string.format("gh returned HTTP %d for the PR conversation", response.status))
+      return
+    end
+    local ok, decoded = pcall(vim.json.decode, response.body)
+    if not ok or type(decoded) ~= "table" then
+      callback(nil, "Failed to decode gh JSON output")
+      return
+    end
+    vim.list_extend(out, decoded)
+
+    local next_url = M.next_page_url(response.headers.link)
+    if next_url then
+      issue_comments_async(generation, next_url, out, callback)
+      return
+    end
+    callback(out, nil)
+  end)
+end
+
+--- Issue comments and review bodies as one list, oldest first. A review with an
+--- empty body said nothing beyond its verdict, so only its state would show:
+--- drop it.
+function M.normalize_conversation(issue_comments, reviews)
+  local out = {}
+  for _, comment in ipairs(issue_comments or {}) do
+    out[#out + 1] = {
+      id = comment.id,
+      node_id = comment.node_id,
+      kind = "comment",
+      author = comment.user and comment.user.login or nil,
+      association = comment.author_association,
+      created_at = comment.created_at,
+      body = comment.body,
+      url = comment.html_url,
+      reactions = comments_ui.normalize_rest(comment).reactions,
+      viewer_did_author = nil,
+    }
+  end
+
+  for _, review in ipairs(reviews or {}) do
+    if util.trim(review.body or "") ~= "" then
+      out[#out + 1] = {
+        id = review.id,
+        node_id = review.node_id,
+        kind = "review",
+        review_state = review_state_order[review.state] and review.state or nil,
+        author = review.user and review.user.login or nil,
+        association = review.author_association,
+        created_at = review.submitted_at,
+        body = review.body,
+        url = review.html_url,
+      }
+    end
+  end
+
+  table.sort(out, function(left, right)
+    local left_at, right_at = left.created_at or "", right.created_at or ""
+    if left_at == right_at then
+      return tostring(left.id) < tostring(right.id)
+    end
+    return left_at < right_at
+  end)
+  return out
+end
+
+--- A forced reload that arrived mid-load asked for data this run cannot hold
+--- (the comment just posted): drop this run's result and fetch again. Returns
+--- true when it did. The GitLab provider's load ends through it too.
+function M.conversation_superseded()
+  state.conversation_loading = false
+  if not state.conversation_reload_queued then
+    return false
+  end
+  state.conversation_reload_queued = false
+  M.load_conversation_async({ force = true })
+  return true
+end
+
+--- Load the conversation, then emit "conversation_loaded". A local review has
+--- no forge to ask, so it is a no-op rather than an error.
+function M.load_conversation_async(opts)
+  opts = opts or {}
+  if state.provider == "local" or not state.active then
+    return
+  end
+  if state.conversation_loading then
+    -- the running load may predate the write that forced this one, as with
+    -- comments: remember the force and fetch again when it lands
+    state.conversation_reload_queued = state.conversation_reload_queued or opts.force == true
+    return
+  end
+  if state.conversation_loaded and not opts.force then
+    return
+  end
+  if state.provider == "gitlab" then
+    -- MR notes without a diff position are already in the discussions the
+    -- comment load walks, so GitLab's conversation comes from there
+    state.conversation_loading = true
+    return require("review_mode.providers.gitlab").load_conversation()
+  end
+  if not state.repo or not state.pr then
+    return
+  end
+
+  local generation = state.generation
+  state.conversation_loading = true
+  state.conversation_reload_queued = false
+  local endpoint = string.format("repos/%s/issues/%s/comments?per_page=100", state.repo, state.pr)
+  issue_comments_async(generation, endpoint, {}, function(comments, err)
+    if not core.is_current(generation) then
+      return
+    end
+    if not comments then
+      if M.conversation_superseded() then
+        return
+      end
+      vim.notify("Failed to load the PR conversation: " .. tostring(err or "unknown error"), vim.log.levels.WARN)
+      return
+    end
+
+    -- ponytail: one page of reviews; a PR with more than 100 submitted reviews
+    -- can page here the way the comments do
+    gh_json_async({
+      "api",
+      string.format("repos/%s/pulls/%s/reviews?per_page=100", state.repo, state.pr),
+    }, function(reviews, review_err)
+      if not core.is_current(generation) then
+        return
+      end
+      if M.conversation_superseded() then
+        return
+      end
+      if type(reviews) ~= "table" then
+        vim.notify(
+          "Failed to load the PR review summaries: " .. tostring(review_err or "unknown error"),
+          vim.log.levels.WARN
+        )
+        reviews = {}
+      end
+      state.conversation = M.normalize_conversation(comments, reviews)
+      state.conversation_loaded = true
+      hooks.emit("conversation_loaded", { repo = state.repo, pr = state.pr, count = #state.conversation })
+    end)
+  end)
+end
+
+--- Post a comment on the PR's conversation (an issue comment). callback(ok, err).
+function M.post_conversation_comment(body, callback)
+  if state.provider ~= "github" then
+    require("review_mode.providers").unsupported("Replying to the conversation", callback)
+    return false
+  end
+  body = util.trim(body or "")
+  if body == "" then
+    return refuse("a body is required", callback)
+  end
+  if not state.repo or not state.pr then
+    return refuse("start Review Mode first", callback)
+  end
+
+  gh_json_async({
+    "api",
+    "--method",
+    "POST",
+    string.format("repos/%s/issues/%s/comments", state.repo, state.pr),
+    "-f",
+    "body=" .. body,
+  }, function(result, err)
+    if not result then
+      refuse(err or "unknown error", callback)
+      return
+    end
+    M.load_conversation_async({ force = true })
+    hooks.emit("comment_posted", { repo = state.repo, pr = state.pr, conversation = true })
+    if callback then
+      callback(true, nil)
+    end
+  end)
+  return true
+end
+
 return M

@@ -36,6 +36,7 @@ M.events = {
   "leave",
   "stop",
   "comments_loaded",
+  "conversation_loaded",
   "highlights_changed",
   "viewed_changed",
   "panel_open",
@@ -465,6 +466,31 @@ end
 --- Reload comments from GitHub, bypassing the disk cache.
 function M.reload_comments()
   return github.load_comments_async({ force = true })
+end
+
+-- Conversation ------------------------------------------------------------------
+
+--- The PR's conversation: its issue comments and the bodies of submitted
+--- reviews, oldest first. Each entry is a comment as M.render_threads draws
+--- one, plus kind ("comment" or "review") and, for a review, review_state
+--- ("APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED").
+---
+--- Loading is lazy and asynchronous: the first call starts it and returns what
+--- is loaded so far, and "conversation_loaded" says when there is more. A local
+--- review has no conversation, so it returns {} and fetches nothing.
+function M.conversation()
+  github.load_conversation_async({})
+  return state.conversation or {}
+end
+
+--- Refetch the conversation, whatever is already loaded.
+function M.reload_conversation()
+  return github.load_conversation_async({ force = true })
+end
+
+--- Post a comment on the PR's conversation. callback(ok, err).
+function M.reply_conversation(body, callback)
+  return github.post_conversation_comment(body, callback)
 end
 
 -- Reactions ---------------------------------------------------------------------

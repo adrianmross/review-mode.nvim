@@ -430,6 +430,10 @@ hooks.on("pending_changed", function()
   schedule_comments_ui_refresh()
 end)
 
+hooks.on("conversation_loaded", function()
+  panel.schedule_refresh()
+end)
+
 -- Resolve feedback: the flash rides the event, not the network call, so the
 -- GitLab provider's own resolve and any future one get it for free.
 hooks.on("thread_resolved", function(data)

@@ -228,6 +228,11 @@ local state = {
   comments = {},
   comment_threads = {},
   comments_loading = false,
+  -- the PR's issue comments and submitted review bodies, oldest first
+  conversation = {},
+  conversation_loading = false,
+  conversation_loaded = false,
+  conversation_reload_queued = false,
   viewed = {},
   -- per path, the hunk keys marked viewed
   hunk_viewed = {},
@@ -519,6 +524,10 @@ function M.reset_review_data()
   state.comments = {}
   state.comment_threads = {}
   state.comments_loading = false
+  state.conversation = {}
+  state.conversation_loading = false
+  state.conversation_loaded = false
+  state.conversation_reload_queued = false
   state.viewed = {}
   state.hunk_viewed = {}
   state.viewed_sync_queue = {}

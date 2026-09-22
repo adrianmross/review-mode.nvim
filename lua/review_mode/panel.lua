@@ -145,7 +145,7 @@ end
 
 local panel_hint = "r reply · R new thread · e edit · dd delete · + react · "
   .. "x resolve · a apply · s review · o open · <CR> jump · q close"
-  .. " · p preview · A accept all · za fold · ]r message · ]] thread"
+  .. " · p preview · A accept all · za fold · ]r message · ]] thread · c conversation"
 
 -- Folds -----------------------------------------------------------------------
 --
@@ -207,6 +207,38 @@ local function apply_folds(folds)
   end)
 end
 
+local conversation_hint = "r comment · c back to threads · za fold · <C-l> reload · q close"
+
+-- The conversation is the PR's own discussion, not a thread on a line: it is a
+-- view of the whole panel (toggled with `c`) rather than something the cursor
+-- can wander into, so the line-based keys have nothing to act on here.
+local function render_conversation(width)
+  local entries = api.conversation()
+  local threads = {}
+  if #entries > 0 then
+    threads[1] = { id = "conversation", title = "Conversation", comments = entries }
+  end
+
+  local session = api.session()
+  -- a long review body carries the same fenced code a thread comment does, so
+  -- it folds the same way, under the same za and the same remembered state
+  local collapse = api.config().panel.collapse_suggestions ~= false
+  local lines, marks, _, _, folds = api.render_threads(threads, {
+    width = width,
+    empty = session and session.provider == "local" and "A local review has no PR conversation"
+      or "No PR conversation yet",
+    hint = conversation_hint,
+    collapse = collapse,
+  })
+  write_render(ui.panel_buf, lines, marks)
+  apply_folds(collapse and folds or {})
+  -- nothing here is a thread on a line, so the thread keys and ]r / ]] find
+  -- nothing: the conversation is one flat list, which j and k already walk
+  ui.panel_threads, ui.panel_rows, ui.panel_comment_rows = {}, {}, {}
+  ui.panel_target = panel_target()
+  vim.wo[ui.panel_win].winbar = "PR conversation"
+end
+
 local function render_panel()
   if not panel_is_open() then
     return
@@ -214,6 +246,10 @@ local function render_panel()
 
   api.ensure_highlights()
   local width = vim.api.nvim_win_get_width(ui.panel_win)
+  if ui.conversation then
+    return render_conversation(width)
+  end
+  vim.wo[ui.panel_win].winbar = "PR threads"
   local target = panel_target()
   local threads, empty = {}, "No PR file in focus"
 
@@ -649,6 +685,25 @@ local function reply_to_thread(thread, target)
   })
 end
 
+local function comment_on_conversation()
+  open_composer({
+    name = "conversation",
+    title = "Comment on the PR conversation",
+    prompt = "Post this comment to the PR conversation?",
+    source = panel_source(nil, ui.panel_target),
+    submit = function(body)
+      api.reply_conversation(body, function(ok, err)
+        if not ok then
+          vim.notify("Review Mode conversation: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
+          util.keep_text(body)
+          return
+        end
+        vim.notify("Posted a comment on the PR conversation")
+      end)
+    end,
+  })
+end
+
 local function comment_on_target(source)
   if not source then
     vim.notify("Review Mode comment: no PR file in focus", vim.log.levels.WARN)
@@ -854,7 +909,15 @@ local function apply_panel_keys(bufnr)
     jump_to_thread(panel_thread_at_cursor(), ui.panel_target)
   end)
   -- r comments, as <leader>rr does: a reply here, a new thread on an empty panel
+  map("c", function()
+    ui.conversation = not ui.conversation
+    render_panel()
+  end)
   map("r", function()
+    if ui.conversation then
+      comment_on_conversation()
+      return
+    end
     local thread = panel_thread_at_cursor()
     if thread then
       reply_to_thread(thread, ui.panel_target)
@@ -905,7 +968,13 @@ local function apply_panel_keys(bufnr)
     end)
   end
   map("<C-l>", function()
-    api.reload_comments()
+    -- whichever view is showing: the conversation is fetched apart from the
+    -- threads, so reloading comments would leave it as it was
+    if ui.conversation then
+      api.reload_conversation()
+    else
+      api.reload_comments()
+    end
   end)
   -- Reactions --
   map("+", function()
@@ -931,6 +1000,7 @@ local function forget_panel()
   ui.panel_threads, ui.panel_rows, ui.panel_target = nil, nil, nil
   ui.panel_comment_rows = nil
   ui.panel_folds, ui.panel_fold_open = nil, nil
+  ui.conversation = nil
 end
 
 --- Close the panel and its draft. opts.confirm = false (the session stopping)

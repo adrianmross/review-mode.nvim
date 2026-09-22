@@ -272,10 +272,27 @@ Keys inside the panel:
 | `+` | react to the comment under the cursor |
 | `e` | edit your comment under the cursor in a draft buffer |
 | `dd` | delete your comment under the cursor, after a confirmation |
+| `c` | switch between the threads and the PR conversation |
 | `s` | open the pending review buffer |
 | `q` | close the panel |
 | `p` | preview the thread's suggestion in the code, without applying it (once applied: what it replaced) |
 | `A` | apply every suggestion in the file, after a confirmation |
+
+### The conversation
+
+`c` switches the panel between the threads and the PR's **conversation**: the
+comments on the pull request that are not anchored to a line, plus the bodies of
+submitted reviews with the verdict they carried (`approved`, `changes
+requested`, `commented`), oldest first and with the same author, time and
+reaction styling as a thread. A review submitted with an empty body says nothing
+beyond its verdict, so it is left out. `r` there drafts a new comment on the PR,
+posted through the same draft buffer and confirmation as a reply; the keys that
+act on a thread (`x`, `a`, `e`, `dd`, `+`) have nothing to act on.
+
+`api.conversation()` returns the same list, and the `conversation_loaded` event
+fires when it arrives; `<C-l>` reloads whichever view the panel is showing. On GitLab it is the MR notes that carry no diff position;
+replying there is not supported yet. A local review has no PR, so it has no
+conversation and nothing is fetched.
 
 ### Replies are drafted, not typed into a prompt
 
@@ -429,6 +446,11 @@ api.reaction_contents                                   -- the eight contents an
 api.edit_comment({ comment_id = ..., body = ... }, cb)  -- your own comments only
 api.delete_comment(comment_id, cb)
 api.can_modify_comment(comment_id)   --> true, or false and why not
+
+-- the PR conversation: issue comments and submitted review bodies, oldest first
+api.conversation()   --> { { kind = "comment"|"review", review_state, author, created_at, body, ... }, ... }
+api.reply_conversation("Thanks, pushed a fix", cb)
+api.reload_conversation()
 
 -- navigation ("hunk" | "comment" | "unresolved" | "file")
 api.goto_next("comment") / api.goto_prev("hunk")
