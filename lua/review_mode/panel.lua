@@ -377,6 +377,13 @@ end
 -- can be asked about (the session stopping, the panel window gone), where the
 -- buffer's BufWipeout puts the text in the " register.
 local function close_composer(how)
+  -- <C-s>/<C-p>/<C-g> etc. are mapped in insert mode too (that's how you
+  -- normally finish typing a draft), so without this the code window you
+  -- land back in stays in insert mode and the next keys you type get
+  -- inserted into your file instead of running as commands.
+  if vim.fn.mode():match("^[iR]") then
+    vim.cmd("stopinsert")
+  end
   if how == "ask" and composer_body() ~= "" then
     if vim.fn.confirm("Discard this draft?", "&Discard\n&Keep editing", 2) ~= 1 then
       if composer_is_open() then
