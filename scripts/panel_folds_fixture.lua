@@ -152,17 +152,21 @@ vim.api.nvim_win_set_cursor(panel_win, { suggestion_row, 0 })
 press("za")
 assert(fold_state(suggestion_row) == -1, "za did not open the fold")
 
--- The panel follows the cursor: moving in the code window redraws it. The
--- opened block must still be open afterwards.
-vim.api.nvim_set_current_win(code_win)
-vim.api.nvim_win_set_cursor(code_win, { 7, 0 })
-panel.schedule_refresh()
-wait_for(function()
-  return vim.api.nvim_win_call(panel_win, function()
-    return vim.fn.foldclosed(row_of("┌ suggestion")) == -1
-  end)
-end, "the re-render snapped the opened suggestion shut")
-vim.api.nvim_set_current_win(panel_win)
+-- The panel follows the cursor: moving in the code window redraws it, and the
+-- opened block must still be open afterwards. Wait the debounce out and then
+-- redraw once synchronously, so the assertion cannot race the timer into
+-- reading the fold before anything has redrawn it.
+local function redraw()
+  vim.api.nvim_set_current_win(code_win)
+  vim.api.nvim_win_set_cursor(code_win, { 7, 0 })
+  panel.schedule_refresh()
+  vim.wait(api.config().performance.ui_refresh_debounce_ms + 300)
+  panel.open_panel()
+  vim.api.nvim_set_current_win(panel_win)
+end
+
+redraw()
+assert(fold_state(row_of("┌ suggestion")) == -1, "the re-render snapped the opened suggestion shut")
 
 -- the second thread's suggestion was never opened, so it is still folded
 local second = nil
@@ -180,12 +184,14 @@ assert(fold_state(row_of("┌ suggestion")) ~= -1, "zM did not close the folds")
 press("zR")
 assert(fold_state(row_of("┌ suggestion")) == -1, "zR did not open the folds")
 assert(fold_state(second) == -1, "zR should open every block")
-panel.schedule_refresh()
-wait_for(function()
-  return vim.api.nvim_win_call(panel_win, function()
-    return vim.fn.foldclosed(second) == -1
-  end)
-end, "zR did not survive the re-render")
+redraw()
+assert(fold_state(second) == -1, "zR did not survive the re-render")
+assert(fold_state(row_of("┌ suggestion")) == -1, "zR did not survive the re-render")
+
+press("zM")
+redraw()
+assert(fold_state(second) ~= -1, "a block closed with zM reopened on the re-render")
+press("zR")
 
 -- Motions ---------------------------------------------------------------------
 
