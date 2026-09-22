@@ -246,6 +246,15 @@ its resolved/outdated state. Fenced code inside a comment is drawn as code
 rather than as more prose, and a `suggestion` block is drawn as the diff it
 would apply — the lines it replaces above the lines it proposes.
 
+That suggestion is folded shut by default, so a long block cannot push the
+conversation off screen: it shows as a one-line summary (`▸ suggestion  +3 −2
+lua/foo.lua:12`) that Vim's own fold keys open — `za` / `zo` / `zc` for one
+block, `zR` / `zM` for all. Any other fenced block of four lines or more folds
+the same way. The panel re-renders as the cursor moves and remembers what you
+opened, so a block stays open until you close it. `p` and `a` act on the
+thread, so they work on a folded block too. Set `panel.collapse_suggestions =
+false` to draw every block out in full.
+
 Keys inside the panel:
 
 | key | action |
@@ -256,7 +265,9 @@ Keys inside the panel:
 | `a` | apply the thread's suggestion to the buffer as a trial; again to revert it |
 | `o` | open the comment on GitHub |
 | `<CR>` | jump to the thread's line in the code window |
-| `]r` / `[r` | next / previous thread in the panel |
+| `]r` / `[r` | next / previous message — each comment's header, across threads |
+| `]]` / `[[` | next / previous thread |
+| `za` `zo` `zc` `zR` `zM` | open or close a folded suggestion, or all of them |
 | `<C-l>` | reload comments from GitHub |
 | `+` | react to the comment under the cursor |
 | `e` | edit your comment under the cursor in a draft buffer |
@@ -1230,6 +1241,7 @@ require("review_mode").setup({
   },
   panel = {
     auto_open = false,
+    collapse_suggestions = true, -- suggestions render as closed folds
     follow_cursor = true,
     position = "right", -- "right" | "left"
     width = 60,
