@@ -1,0 +1,11 @@
+1
+00:00:00,300 --> 00:00:02,000
+A thread is sitting on this line.
+
+2
+00:00:02,500 --> 00:00:05,000
+Leader-r-t opens the panel beside the code.
+
+3
+00:00:05,500 --> 00:00:09,500
+za unfolds the suggestion, right there.

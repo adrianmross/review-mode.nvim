@@ -1,0 +1,15 @@
+1
+00:00:00,300 --> 00:00:03,300
+One more comment — queued, not posted alone.
+
+2
+00:00:03,800 --> 00:00:06,300
+Leader-r-s: the readiness list, before you send.
+
+3
+00:00:06,800 --> 00:00:09,000
+C-s submits the review.
+
+4
+00:00:09,500 --> 00:00:13,000
+Confirmed, and it's on the PR.
