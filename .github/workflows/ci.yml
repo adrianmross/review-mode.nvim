@@ -8,7 +8,11 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
+
+# a new push to a PR supersedes the run on its old head; main keeps every run
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   validate:
@@ -31,6 +35,41 @@ jobs:
 
       - name: Run validation
         run: devenv test --no-eval-cache
+
+  # the suite on the oldest Neovim the plugin supports, the current release and
+  # nightly (allowed to fail: an upstream break should not block a PR)
+  neovim:
+    name: Neovim ${{ matrix.neovim }}
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.neovim == 'nightly' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        neovim: [v0.11.0, stable, nightly]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # origin/main, so validate.sh's git diff --check covers the PR's commits
+          fetch-depth: 0
+
+      - name: Install Neovim
+        uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: ${{ matrix.neovim }}
+
+      - name: Install StyLua
+        env:
+          STYLUA_VERSION: v2.1.0
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/stylua.zip" \
+            "https://github.com/JohnnyMorganz/StyLua/releases/download/$STYLUA_VERSION/stylua-linux-x86_64.zip"
+          unzip -q "$RUNNER_TEMP/stylua.zip" -d "$RUNNER_TEMP/stylua"
+          echo "$RUNNER_TEMP/stylua" >> "$GITHUB_PATH"
+
+      - name: Run validation
+        run: bash scripts/validate.sh
 
   release-intent:
     name: Release Intent

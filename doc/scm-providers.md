@@ -29,7 +29,7 @@ require("review_mode").setup({
 })
 ```
 
-`command` overrides the executable; `args` is an argv list, never a shell string.
+For external providers, `command` overrides the executable; `args` is an argv list, never a shell string.
 Project args replace the default list in full. `pr` selects a PR.
 `base_remote` selects the local Git remote used for base diffs; fetch the base
 branch before reviewing. Provider/repository/PR keys isolate cached comments

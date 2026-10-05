@@ -1,5 +1,204 @@
 # Changelog
 
+## [0.13.10](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.9...v0.13.10) (2026-09-22)
+
+
+### Features
+
+* **comments:** show the PR conversation in the thread panel ([#133](https://github.com/adrianmross/review-mode.nvim/issues/133)) ([0d95aa8](https://github.com/adrianmross/review-mode.nvim/commit/0d95aa8e0fa5b29763482d7b7028db2c593af669))
+* **panel:** fold suggestions by default, step messages with ]r ([#132](https://github.com/adrianmross/review-mode.nvim/issues/132)) ([a9b1cff](https://github.com/adrianmross/review-mode.nvim/commit/a9b1cff255728b750f4d785d9eba1f3e4951866c))
+* **picker:** compact file rows, a colored preview, qualifiers and sort ([#118](https://github.com/adrianmross/review-mode.nvim/issues/118)) ([240f709](https://github.com/adrianmross/review-mode.nvim/commit/240f70976c403ca200030b4639c9277437bf7128))
+
+
+### Bug Fixes
+
+* **viewed:** load stored viewed state before publishing changed files ([#128](https://github.com/adrianmross/review-mode.nvim/issues/128)) ([7e2624c](https://github.com/adrianmross/review-mode.nvim/commit/7e2624c5a7e6aaecf44e65308f7db4d0eee691f3))
+
+## [0.13.9](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.8...v0.13.9) (2026-09-19)
+
+
+### Bug Fixes
+
+* checkouts, GitLab and the inbox beyond one github.com clone ([#125](https://github.com/adrianmross/review-mode.nvim/issues/125)) ([24f7b2b](https://github.com/adrianmross/review-mode.nvim/commit/24f7b2bea1e06a12b3b275efe47ab5c966dc2deb))
+* **comments:** anchor threads, replies and suggestions where GitHub does ([#123](https://github.com/adrianmross/review-mode.nvim/issues/123)) ([069ef60](https://github.com/adrianmross/review-mode.nvim/commit/069ef60ade3e9d498a92b068cb02490695476eb8))
+* **diff:** run every review diff one way and parse it once ([#121](https://github.com/adrianmross/review-mode.nvim/issues/121)) ([583e8b9](https://github.com/adrianmross/review-mode.nvim/commit/583e8b9fa303339f041055a3c1d3126d8bf47d08))
+* never lose drafts, failed posts, stores or review-tree commits ([#120](https://github.com/adrianmross/review-mode.nvim/issues/120)) ([67f861e](https://github.com/adrianmross/review-mode.nvim/commit/67f861e911848fb1c7a38e24f5e792df41ced715))
+* **session:** end every session one way and hand the editor back as found ([#124](https://github.com/adrianmross/review-mode.nvim/issues/124)) ([48db8dc](https://github.com/adrianmross/review-mode.nvim/commit/48db8dc29bbf7e6f1c64c5b8c228939fed4d6a35))
+
+## [0.13.8](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.7...v0.13.8) (2026-09-19)
+
+
+### Features
+
+* **picker:** color the changed-files rows and shorten the title ([#112](https://github.com/adrianmross/review-mode.nvim/issues/112)) ([e7b16aa](https://github.com/adrianmross/review-mode.nvim/commit/e7b16aa230751f67283d7ec575b2aff364ce8fb1))
+
+## [0.13.7](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.6...v0.13.7) (2026-09-19)
+
+
+### Features
+
+* **author:** resolve threads a commit fixed, walk unresolved, re-request review ([#110](https://github.com/adrianmross/review-mode.nvim/issues/110)) ([968f0d4](https://github.com/adrianmross/review-mode.nvim/commit/968f0d4c34e8e1d16794a75a551d9ffa61ddcb1c))
+* **review:** list what an approval has not covered yet ([#106](https://github.com/adrianmross/review-mode.nvim/issues/106)) ([ef8fc61](https://github.com/adrianmross/review-mode.nvim/commit/ef8fc610ef60ef307fcd6f35247b733f7e4bcb8e))
+* **review:** walk a PR in a reading order, definitions before uses ([#109](https://github.com/adrianmross/review-mode.nvim/issues/109)) ([183bfa9](https://github.com/adrianmross/review-mode.nvim/commit/183bfa98ac39602194bf02388a3c7dd040e18eed))
+* **suggestions:** commit trial suggestions, crediting the suggesters ([#108](https://github.com/adrianmross/review-mode.nvim/issues/108)) ([8d6607a](https://github.com/adrianmross/review-mode.nvim/commit/8d6607aef6d33834b4d114d0daa0a27c35245ede))
+* **suggestions:** turn your edits across the whole PR into suggestions ([#107](https://github.com/adrianmross/review-mode.nvim/issues/107)) ([ec7e857](https://github.com/adrianmross/review-mode.nvim/commit/ec7e8575aa93c44ebd101f4282f07167ca3d34f8))
+
+## [0.13.6](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.5...v0.13.6) (2026-09-19)
+
+
+### Features
+
+* **picker:** show review progress per file and for the whole review ([#103](https://github.com/adrianmross/review-mode.nvim/issues/103)) ([c31c30d](https://github.com/adrianmross/review-mode.nvim/commit/c31c30d))
+
+### Bug Fixes
+
+* **viewed:** run a flush requested while another is in flight ([#102](https://github.com/adrianmross/review-mode.nvim/issues/102)) ([0cb421e](https://github.com/adrianmross/review-mode.nvim/commit/0cb421ef66db4a8d5044e101209556922681dc13))
+
+## [0.13.5](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.4...v0.13.5) (2026-09-19)
+
+
+### Features
+
+* **ci:** show CI check-run annotations as diagnostics ([#99](https://github.com/adrianmross/review-mode.nvim/issues/99)) ([141e869](https://github.com/adrianmross/review-mode.nvim/commit/141e869164e4b27c4ddc7e5be3b22a5efeb6d06d))
+* **diff:** hide whitespace-only changes ([#95](https://github.com/adrianmross/review-mode.nvim/issues/95)) ([f453248](https://github.com/adrianmross/review-mode.nvim/commit/f453248f55c4e1b9985671741a0430aaa8790457))
+* **diff:** mark moved code and let ]c skip hunks that only move it ([#96](https://github.com/adrianmross/review-mode.nvim/issues/96)) ([cbb70ea](https://github.com/adrianmross/review-mode.nvim/commit/cbb70ea638ac01b49ba0b41c1cd3ec35c9878414))
+* **inbox:** pick a PR waiting on your review and review it ([#93](https://github.com/adrianmross/review-mode.nvim/issues/93)) ([5c1f88b](https://github.com/adrianmross/review-mode.nvim/commit/5c1f88be893db6f62194d02813ef75c24d2a4079))
+* **review:** list callers of changed functions the PR did not touch ([#97](https://github.com/adrianmross/review-mode.nvim/issues/97)) ([c36edf7](https://github.com/adrianmross/review-mode.nvim/commit/c36edf7688dce86799fcd3e98a699a32fbf49ca3))
+* **viewed:** mark individual hunks viewed ([#98](https://github.com/adrianmross/review-mode.nvim/issues/98)) ([dbfc08b](https://github.com/adrianmross/review-mode.nvim/commit/dbfc08b9b8ff00e9d5b8dfc82e322a5b6c39df06))
+
+
+### Performance Improvements
+
+* **comments:** show comments and replies while they post ([#100](https://github.com/adrianmross/review-mode.nvim/issues/100)) ([29604ad](https://github.com/adrianmross/review-mode.nvim/commit/29604ad7d84adc5fc061cc43d621468a9a82dc8f))
+* **startup:** draw cached comment signs before gh names the PR ([#94](https://github.com/adrianmross/review-mode.nvim/issues/94)) ([4b2f973](https://github.com/adrianmross/review-mode.nvim/commit/4b2f973fbd2615f1edbae594876a1737387d2da6))
+
+## [0.13.4](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.3...v0.13.4) (2026-09-18)
+
+
+### Features
+
+* **suggestions:** write a suggestion by editing the code ([#90](https://github.com/adrianmross/review-mode.nvim/issues/90)) ([2e12ad7](https://github.com/adrianmross/review-mode.nvim/commit/2e12ad788c6e260745d12157d894075b2dee9772))
+
+## [0.13.3](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.2...v0.13.3) (2026-09-18)
+
+
+### Bug Fixes
+
+* **suggestions:** keep preview and trial apply from drawing over each other ([#88](https://github.com/adrianmross/review-mode.nvim/issues/88)) ([d3bf113](https://github.com/adrianmross/review-mode.nvim/commit/d3bf113130dad7747a52651ef67265f17229bddb))
+
+## [0.13.2](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.1...v0.13.2) (2026-09-18)
+
+
+### Features
+
+* **diff:** make condensed and full file fold states in both layouts ([#86](https://github.com/adrianmross/review-mode.nvim/issues/86)) ([afa4f30](https://github.com/adrianmross/review-mode.nvim/commit/afa4f30cf7ed29dbb9c1f35ef1ec632105c5c983))
+
+## [0.13.1](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.0...v0.13.1) (2026-09-18)
+
+
+### Features
+
+* **actions:** list every action, grouped, with its key ([#83](https://github.com/adrianmross/review-mode.nvim/issues/83)) ([67414a4](https://github.com/adrianmross/review-mode.nvim/commit/67414a49ad66bf607a4ac88e880f7da0ef3b68bf))
+
+## [0.13.0](https://github.com/adrianmross/review-mode.nvim/compare/v0.12.4...v0.13.0) (2026-09-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* **keys:** default review keys are renamed; <leader>rc, ]h/[h and <Esc> are gone.
+
+### Features
+
+* **keys:** make r the one comment key ([#81](https://github.com/adrianmross/review-mode.nvim/issues/81)) ([3d1ee99](https://github.com/adrianmross/review-mode.nvim/commit/3d1ee9968fbfea43a1735d5ef313ca54766290d9))
+
+## [0.12.4](https://github.com/adrianmross/review-mode.nvim/compare/v0.12.3...v0.12.4) (2026-09-18)
+
+
+### Features
+
+* **review:** panel-first defaults and keys that ship with the plugin ([#79](https://github.com/adrianmross/review-mode.nvim/issues/79)) ([ab3b8c0](https://github.com/adrianmross/review-mode.nvim/commit/ab3b8c091f2d0171a58748691542cbb92a81e8b0))
+
+## [0.12.3](https://github.com/adrianmross/review-mode.nvim/compare/v0.12.2...v0.12.3) (2026-09-18)
+
+
+### Features
+
+* **review:** review a branch with no PR locally ([#76](https://github.com/adrianmross/review-mode.nvim/issues/76)) ([7d412ba](https://github.com/adrianmross/review-mode.nvim/commit/7d412baffb0ce51d0f1eab749bca0f903301e785))
+
+## [0.12.2](https://github.com/adrianmross/review-mode.nvim/compare/v0.12.1...v0.12.2) (2026-09-18)
+
+
+### Features
+
+* **comments:** show when a thread's resolved state changes ([#70](https://github.com/adrianmross/review-mode.nvim/issues/70)) ([21196aa](https://github.com/adrianmross/review-mode.nvim/commit/21196aa7828ea52f14de46b5860dc74a336a94ef))
+* **local:** review local diffs with on-disk comments ([#72](https://github.com/adrianmross/review-mode.nvim/issues/72)) ([d851459](https://github.com/adrianmross/review-mode.nvim/commit/d851459801b21bc8d91960fb1ff5b4c2f9b6632a))
+* **suggestions:** preview, trial-apply and accept suggestions ([#74](https://github.com/adrianmross/review-mode.nvim/issues/74)) ([32930c5](https://github.com/adrianmross/review-mode.nvim/commit/32930c59bda8ed496cd82afbb6ffff09adf332c1))
+
+
+### Performance Improvements
+
+* **github:** cache the PR node id and revalidate comments with ETags ([#73](https://github.com/adrianmross/review-mode.nvim/issues/73)) ([ff8ca91](https://github.com/adrianmross/review-mode.nvim/commit/ff8ca9133106ac3af5eb27ad52302fbef1e0bae5))
+
+## [0.12.1](https://github.com/adrianmross/review-mode.nvim/compare/v0.12.0...v0.12.1) (2026-09-17)
+
+
+### Features
+
+* **checkout:** review a PR without checking it out ([#64](https://github.com/adrianmross/review-mode.nvim/issues/64)) ([a654a24](https://github.com/adrianmross/review-mode.nvim/commit/a654a24536f50fa8aaff790b00ac39efb80c8bfd))
+* **comments:** add and remove reactions ([#65](https://github.com/adrianmross/review-mode.nvim/issues/65)) ([0428afd](https://github.com/adrianmross/review-mode.nvim/commit/0428afd169f7fb314df9d5ea16fe52a6e0e2da63))
+* **comments:** edit and delete your own review comments ([#61](https://github.com/adrianmross/review-mode.nvim/issues/61)) ([45bdd65](https://github.com/adrianmross/review-mode.nvim/commit/45bdd657a6c3b140496c0ca59c44c49f7af0b4d7))
+* **diagnostics:** expose review threads as diagnostics and quickfix ([#63](https://github.com/adrianmross/review-mode.nvim/issues/63)) ([89683a4](https://github.com/adrianmross/review-mode.nvim/commit/89683a4a7498a0853eb53748a146d2d4ecf4423f))
+* **providers:** review GitLab merge requests ([#66](https://github.com/adrianmross/review-mode.nvim/issues/66)) ([fd54c08](https://github.com/adrianmross/review-mode.nvim/commit/fd54c08d2ea55058a470455a956735f5645e5354))
+* **review:** submit reviews with batched pending comments ([#62](https://github.com/adrianmross/review-mode.nvim/issues/62)) ([94649ea](https://github.com/adrianmross/review-mode.nvim/commit/94649ea3ec6868baa13232ebd83b20124f1eaa5c))
+
+
+### Performance Improvements
+
+* **picker:** load the viewed-file diff preview asynchronously ([#67](https://github.com/adrianmross/review-mode.nvim/issues/67)) ([13b9034](https://github.com/adrianmross/review-mode.nvim/commit/13b9034c6748fd1725295e4fcd676be5f42c1711)), closes [#58](https://github.com/adrianmross/review-mode.nvim/issues/58)
+
+## [0.12.0](https://github.com/adrianmross/review-mode.nvim/compare/v0.11.0...v0.12.0) (2026-09-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* **api:** the query functions moved off the module root to review_mode.api, and unresolved_comment_count is now api.unresolved_count. is_active, root, is_changed_file, is_changed_dir, is_viewed_file, is_viewed_dir, unviewed_count and comment_count are affected. setup, statusline, mode_text and the command-backing functions stay on the root, so :ReviewMode* commands and existing keymaps are unaffected.
+
+### Features
+
+* **api:** add a public API, hooks, and a richer comment UI ([#59](https://github.com/adrianmross/review-mode.nvim/issues/59)) ([aa35866](https://github.com/adrianmross/review-mode.nvim/commit/aa358667427f316f6093e4625f91ae295967b291))
+
+## [0.11.0](https://github.com/adrianmross/review-mode.nvim/compare/v0.10.2...v0.11.0) (2026-09-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* the "native" picker provider no longer has a diff preview, live filtering or an in-picker viewed toggle. Install snacks.nvim or Telescope for those; :ReviewModeViewedToggle still works everywhere.
+
+### Features
+
+* **mode:** step in and out without ending the session ([#54](https://github.com/adrianmross/review-mode.nvim/issues/54)) ([0d33012](https://github.com/adrianmross/review-mode.nvim/commit/0d3301272c5569486afdaf241dadc1ca2467e8b8))
+* **review:** follow HEAD so mid-review commits join the review ([#55](https://github.com/adrianmross/review-mode.nvim/issues/55)) ([b46e28f](https://github.com/adrianmross/review-mode.nvim/commit/b46e28fde2a206e979a6de45200efae292955a40))
+
+
+### Bug Fixes
+
+* **cache:** prune stale PR comment cache entries ([#50](https://github.com/adrianmross/review-mode.nvim/issues/50)) ([ccd926c](https://github.com/adrianmross/review-mode.nvim/commit/ccd926c4866ea96b5cbb8ac0ad8bf2c8e972bd45))
+* **diff:** stop reading changed lines as diff headers ([#43](https://github.com/adrianmross/review-mode.nvim/issues/43)) ([6feede9](https://github.com/adrianmross/review-mode.nvim/commit/6feede9d0d0bf1fa38bb445de39fe49b3cd26979))
+* **github:** stop blocking the editor on PR writes ([#45](https://github.com/adrianmross/review-mode.nvim/issues/45)) ([0672dc7](https://github.com/adrianmross/review-mode.nvim/commit/0672dc7578aa40e7341ceca8ce174103cb181d93))
+* **gitsigns:** hand the gutter base back when the session ends ([#51](https://github.com/adrianmross/review-mode.nvim/issues/51)) ([ce072d4](https://github.com/adrianmross/review-mode.nvim/commit/ce072d460ae6c1620d649fc4d3479faba54e0c05))
+* **viewed:** release the sync guard on completion, not on a timer ([#44](https://github.com/adrianmross/review-mode.nvim/issues/44)) ([b8bd98f](https://github.com/adrianmross/review-mode.nvim/commit/b8bd98f9eb52e45378d772fab6b0109b6c1be329))
+
+
+### Performance Improvements
+
+* **nvim-tree:** roll up directory totals once per render ([#47](https://github.com/adrianmross/review-mode.nvim/issues/47)) ([3bb05d5](https://github.com/adrianmross/review-mode.nvim/commit/3bb05d524004007f803ce9f5de18da83cc41dff7))
+* **picker:** build snacks previews per selection ([#46](https://github.com/adrianmross/review-mode.nvim/issues/46)) ([9ef4de7](https://github.com/adrianmross/review-mode.nvim/commit/9ef4de7f177d0d22fde9d0f154ba1af4ffb4900f))
+
+
+### Code Refactoring
+
+* replace the native picker with vim.ui.select ([#48](https://github.com/adrianmross/review-mode.nvim/issues/48)) ([b71d8b4](https://github.com/adrianmross/review-mode.nvim/commit/b71d8b4032e477c0c041617bd10de5c91691eff8))
+
 ## [0.10.2](https://github.com/adrianmross/review-mode.nvim/compare/v0.10.1...v0.10.2) (2026-06-11)
 
 

@@ -1,6 +1,9 @@
+-- fixture: gh
+local harness = dofile(os.getenv("REVIEW_MODE_PLUGIN_ROOT") .. "/scripts/lib/prelude.lua")
 local root = assert(os.getenv("REVIEW_MODE_PLUGIN_ROOT"))
 vim.opt.runtimepath:prepend(root)
 local review = require("review_mode")
+local api = require("review_mode.api")
 local seen = {}
 local provider = {
   command = "fixture-scm",
@@ -47,6 +50,8 @@ review.register_provider("fixture", provider)
 local project = vim.uv.cwd()
 review.setup({
   auto_open_first_change = false,
+  provider = "github",
+  follow_head = false,
   gitsigns = { enabled = false },
   nvim_tree = { enabled = false },
   scm = {
@@ -65,7 +70,7 @@ assert(not unknown and err:find("not installed", 1, true), "missing provider sil
 review.start()
 assert(
   vim.wait(5000, function()
-    return review.comment_count("file.txt") == 2
+    return api.comment_count("file.txt") == 2
   end, 20),
   "provider comments not loaded"
 )
@@ -74,22 +79,23 @@ vim.api.nvim_win_set_cursor(0, { 2, 0 })
 local marks =
   vim.api.nvim_buf_get_extmarks(0, vim.api.nvim_get_namespaces().review_mode_normal, 0, -1, { details = true })
 assert(#marks > 0, "external comments did not reach gutter annotations")
-local input = vim.ui.input
-vim.ui.input = function(_, callback)
-  callback("My provider reply")
-end
-review.reply()
+api.reply({ thread_id = "root-thread", body = "My provider reply" }, function(ok, err)
+  assert(ok, err)
+end)
 assert(seen.reply[1] == "root-thread" and seen.reply[2] == "My provider reply", "reply did not use provider")
-review.comment({ range = 1, line1 = 2, line2 = 2 })
+api.comment({ path = "file.txt", line = 2, body = "My provider reply" }, function(ok, err)
+  assert(ok, err)
+end)
 assert(
   seen.comment and seen.comment[1] == "file.txt" and seen.comment[4] == "My provider reply",
   "inline comment did not use provider"
 )
-vim.ui.input = input
-review.resolve_thread()
-review.sync_viewed()
+api.resolve("root-thread", true, function(ok)
+  assert(not ok, "unsupported resolution submitted")
+end)
 review.copy_url()
 assert(vim.fn.getreg('"') == "https://example.test/pr/fixture", "provider URL not used")
 review.stop()
+harness.done()
 print("provider fixture passed")
 vim.cmd.qa()
