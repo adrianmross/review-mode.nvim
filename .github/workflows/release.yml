@@ -39,6 +39,8 @@ jobs:
     name: Release Please
     runs-on: ubuntu-latest
     needs: validate
+    env:
+      RELEASE_APP_CONFIGURED: ${{ secrets.RELEASE_APP_ID != '' && secrets.RELEASE_APP_PRIVATE_KEY != '' }}
     if: github.ref == 'refs/heads/main'
     steps:
       # A PR opened with GITHUB_TOKEN never triggers a workflow, so a release PR
@@ -49,7 +51,7 @@ jobs:
       # reopen to pick up its checks).
       - name: Mint an App token
         id: app-token
-        if: ${{ secrets.RELEASE_APP_ID != '' && secrets.RELEASE_APP_PRIVATE_KEY != '' }}
+        if: env.RELEASE_APP_CONFIGURED == 'true'
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
