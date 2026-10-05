@@ -20,7 +20,7 @@ nvim --headless -u NONE -i NONE \
   -c "helptags $help_dir" \
   -c qa
 
-stylua --check lua plugin scripts/fixture.lua scripts/rest_fallback_fixture.lua
+stylua --check lua plugin scripts/fixture.lua scripts/rest_fallback_fixture.lua scripts/provider_fixture.lua
 git diff --check
 bash scripts/release-check.sh
 
@@ -147,3 +147,8 @@ REVIEW_MODE_FORCE_REST_COMMENTS=1 \
 nvim --headless -u NONE -i NONE \
   -c "set noswapfile" \
   -l "$repo_root/scripts/rest_fallback_fixture.lua"
+
+XDG_CACHE_HOME="$tmp/provider-cache" \
+XDG_STATE_HOME="$tmp/provider-state" \
+REVIEW_MODE_PLUGIN_ROOT="$repo_root" \
+nvim --headless -u NONE -i NONE -c "set noswapfile" -l "$repo_root/scripts/provider_fixture.lua"

@@ -1,4 +1,5 @@
 local M = {}
+local scm = require("review_mode.scm")
 
 local ns = vim.api.nvim_create_namespace("review_mode_normal")
 local diff_ns = vim.api.nvim_create_namespace("review_mode_diff")
@@ -6,6 +7,7 @@ local picker_ns = vim.api.nvim_create_namespace("review_mode_picker")
 local cache_dir = vim.fs.joinpath(vim.fn.stdpath("cache"), "review-mode-comments")
 local default_comment_sign_text = ""
 local defaults = {
+  scm = { provider = "github", args = {}, pr = nil, base_remote = "origin", projects = {} },
   auto_open_first_change = true,
   comments = {
     enabled = true,
@@ -59,6 +61,8 @@ local defaults = {
 local state = {
   active = false,
   config = vim.deepcopy(defaults),
+  scm = vim.deepcopy(defaults.scm),
+  provider = { command = "gh", env_prefix = "GH_REVIEW_", capabilities = { viewed = true, resolve = true } },
   repo = nil,
   pr = nil,
   base = nil,
@@ -80,6 +84,7 @@ local state = {
   comments = {},
   comment_threads = {},
   comments_loading = false,
+  comments_refresh_pending = false,
   viewed = {},
   viewed_order = {},
   viewed_sync_queue = {},
@@ -182,20 +187,20 @@ local function system_async(args, opts, callback)
 end
 
 local function gh_json(args)
-  local full = vim.list_extend({ "gh" }, args)
+  local full = scm.command(state.scm, state.provider, args)
   local stdout, err = system(full)
   if not stdout then
     return nil, err
   end
   local ok, decoded = pcall(vim.json.decode, stdout)
   if not ok then
-    return nil, "Failed to decode gh JSON output"
+    return nil, "Failed to decode SCM JSON output"
   end
   return decoded
 end
 
 local function gh_json_async(args, callback)
-  local full = vim.list_extend({ "gh" }, args)
+  local full = scm.command(state.scm, state.provider, args)
   system_async(full, {}, function(stdout, err)
     if not stdout then
       callback(nil, err)
@@ -203,7 +208,7 @@ local function gh_json_async(args, callback)
     end
     local ok, decoded = pcall(vim.json.decode, stdout)
     if not ok then
-      callback(nil, "Failed to decode gh JSON output")
+      callback(nil, "Failed to decode SCM JSON output")
       return
     end
     callback(decoded, nil)
@@ -228,17 +233,23 @@ local function active_pr_arg()
   if state.pr and state.pr ~= "" then
     return tostring(state.pr)
   end
-  return env_value("GH_REVIEW_PR")
+  return state.scm.pr or env_value((state.provider.env_prefix or "REVIEW_MODE_") .. "PR")
 end
 
+local provider_context
+
 local function pr_url_async(callback)
+  if state.provider.url then
+    state.provider.url(provider_context(), callback)
+    return
+  end
   local args = { "pr", "view" }
   local pr = active_pr_arg()
   if pr then
     args[#args + 1] = pr
   end
   vim.list_extend(args, { "--json", "url", "-q", ".url" })
-  system_async(vim.list_extend({ "gh" }, args), {}, callback)
+  system_async(scm.command(state.scm, state.provider, args), {}, callback)
 end
 
 local is_current
@@ -250,12 +261,16 @@ local function repo_slug_async(generation, callback)
     return
   end
 
-  system_async({ "gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner" }, {}, function(slug, err)
-    if not is_current(generation) then
-      return
+  system_async(
+    scm.command(state.scm, state.provider, { "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner" }),
+    {},
+    function(slug, err)
+      if not is_current(generation) then
+        return
+      end
+      callback(slug, err)
     end
-    callback(slug, err)
-  end)
+  )
 end
 
 local function pr_view_args()
@@ -264,7 +279,7 @@ local function pr_view_args()
     "view",
   }
 
-  local pr = env_value("GH_REVIEW_PR")
+  local pr = active_pr_arg()
   if pr then
     args[#args + 1] = pr
   end
@@ -301,12 +316,15 @@ local function base_ref()
   if base:match("^origin/") or base:match("^refs/") or base:match("^%x%x%x%x%x%x%x+") then
     return base
   end
-  return "origin/" .. base
+  return state.scm.base_remote .. "/" .. base
 end
 
 local function cache_key()
   if not state.repo or not state.pr then
     return nil
+  end
+  if state.scm.provider ~= "github" then
+    return string.format("%s:%s#%s", state.scm.provider, state.repo, state.pr)
   end
   return string.format("%s#%s", state.repo, state.pr)
 end
@@ -318,6 +336,26 @@ end
 
 is_current = function(generation)
   return state.active and state.generation == generation
+end
+
+provider_context = function()
+  local generation = state.generation
+  return {
+    root = state.root,
+    config = state.scm,
+    repo = state.repo,
+    pr = active_pr_arg(),
+    head = state.head,
+    json = function(args, callback)
+      gh_json_async(args, function(result, err)
+        if is_current(generation) then
+          callback(result, err)
+        end
+      end)
+    end,
+    json_sync = gh_json,
+    system = system,
+  }
 end
 
 local function reset_changed_data()
@@ -343,6 +381,7 @@ local function reset_review_data()
   state.comments = {}
   state.comment_threads = {}
   state.comments_loading = false
+  state.comments_refresh_pending = false
   state.viewed = {}
   state.viewed_order = {}
   state.viewed_sync_queue = {}
@@ -797,6 +836,10 @@ local function rest_comments_async(generation, page, comments, callback)
 end
 
 local function review_threads_async(generation, after, threads, callback)
+  if state.provider.threads then
+    state.provider.threads(provider_context(), callback)
+    return
+  end
   local owner, name = repo_parts()
   if not owner or not name or not state.pr then
     callback(nil, "could not determine GitHub repository or PR")
@@ -886,6 +929,8 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
   end)
 end
 
+local load_comments_async
+
 local function load_comments_from_rest_async(generation)
   rest_comments_async(generation, 1, {}, function(comments, err)
     if not is_current(generation) then
@@ -905,10 +950,18 @@ local function load_comments_from_rest_async(generation)
       write_comment_cache_entry(key, state.comments, state.comment_threads)
     end
     schedule_comments_ui_refresh()
+    if state.comments_refresh_pending then
+      state.comments_refresh_pending = false
+      load_comments_async(true)
+    end
   end)
 end
 
-local function load_comments_async()
+load_comments_async = function(force)
+  if force and state.comments_loading then
+    state.comments_refresh_pending = true
+    return
+  end
   if
     not state.config.comments.enabled
     or not state.active
@@ -922,7 +975,7 @@ local function load_comments_async()
   local generation = state.generation
   local fresh = hydrate_comments()
   schedule_comments_ui_refresh()
-  if fresh then
+  if fresh and not force then
     return
   end
 
@@ -932,6 +985,11 @@ local function load_comments_async()
       return
     end
 
+    if not threads and state.provider.threads then
+      state.comments_loading = false
+      vim.notify("Failed to load provider comments: " .. tostring(err), vim.log.levels.WARN)
+      return
+    end
     if not threads then
       load_comments_from_rest_async(generation)
       return
@@ -944,6 +1002,10 @@ local function load_comments_async()
     end
     state.comments_loading = false
     schedule_comments_ui_refresh()
+    if state.comments_refresh_pending then
+      state.comments_refresh_pending = false
+      load_comments_async(true)
+    end
   end)
 end
 
@@ -1042,6 +1104,9 @@ local function apply_queued_viewed_changes()
 end
 
 local function sync_viewed_from_github_async(generation, force)
+  if not (state.provider.capabilities or {}).viewed then
+    return
+  end
   if
     not state.config.viewed.enabled
     or (not force and not state.config.viewed.sync)
@@ -1142,6 +1207,9 @@ local function clear_queued_viewed_sync(path)
 end
 
 local function sync_viewed_path_to_github_async(path, viewed, opts)
+  if not (state.provider.capabilities or {}).viewed then
+    return
+  end
   opts = opts or {}
   if not state.config.viewed.enabled or not state.config.viewed.sync or not path then
     return
@@ -1196,6 +1264,9 @@ mutation($pullRequestId: ID!, $path: String!) {
 end
 
 function M.flush_viewed_sync()
+  if not (state.provider.capabilities or {}).viewed then
+    return
+  end
   if
     not state.config.viewed.enabled
     or not state.config.viewed.sync
@@ -2042,6 +2113,10 @@ local function load_review_async(generation, opts)
 end
 
 local function load_metadata_async(generation, callback)
+  if state.provider.metadata then
+    state.provider.metadata(provider_context(), callback)
+    return
+  end
   local pending = 2
   local slug_result = nil
   local meta_result = nil
@@ -2085,13 +2160,23 @@ function M.start()
     return
   end
 
+  local selected, provider = scm.resolve(state.config.scm, root)
+  if not selected then
+    if state.active then
+      M.stop()
+    end
+    vim.notify("Review Mode: " .. tostring(provider), vim.log.levels.ERROR)
+    return
+  end
+  state.scm, state.provider = selected, provider
   state.root = root
   state.active = true
   state.metadata_loaded = false
-  state.repo = env_value("GH_REVIEW_REPO")
-  state.pr = env_value("GH_REVIEW_PR")
-  state.base = env_value("GH_REVIEW_BASE")
-  state.head = env_value("GH_REVIEW_HEAD")
+  local prefix = state.provider.env_prefix or "REVIEW_MODE_"
+  state.repo = env_value(prefix .. "REPO")
+  state.pr = state.scm.pr or env_value(prefix .. "PR")
+  state.base = env_value(prefix .. "BASE")
+  state.head = env_value(prefix .. "HEAD")
   local generation = next_generation()
   reset_review_data()
   close_old_view()
@@ -2127,9 +2212,9 @@ function M.start()
 
     local meta = result.meta or {}
     state.repo = state.repo or result.repo
-    state.pr = state.pr or tostring(meta.number or env_value("GH_REVIEW_PR") or "")
+    state.pr = tostring(meta.number or state.pr or "")
     state.base = state.base or meta.baseRefName or "main"
-    state.head = state.head or meta.headRefOid
+    state.head = state.provider.metadata and meta.headRefOid or state.head or meta.headRefOid
     state.metadata_loaded = true
 
     load_viewed_state()
@@ -2166,6 +2251,11 @@ function M.refresh()
 
   if not state.metadata_loaded then
     vim.notify("Review Mode: metadata is still loading", vim.log.levels.INFO)
+    return
+  end
+
+  if state.provider.metadata then
+    M.start()
     return
   end
 
@@ -2790,6 +2880,10 @@ function M.clear_viewed()
 end
 
 function M.sync_viewed()
+  if not (state.provider.capabilities or {}).viewed then
+    vim.notify("Provider viewed state is local only", vim.log.levels.INFO)
+    return
+  end
   if not ensure_active() then
     return
   end
@@ -2804,6 +2898,10 @@ function M.sync_viewed()
 end
 
 function M.toggle_viewed_sync()
+  if not (state.provider.capabilities or {}).viewed then
+    vim.notify("Provider viewed state is local only", vim.log.levels.INFO)
+    return
+  end
   state.config.viewed.sync = not state.config.viewed.sync
   vim.notify("Review Mode GitHub viewed sync " .. (state.config.viewed.sync and "enabled" or "disabled"))
   if state.config.viewed.sync and state.active then
@@ -3823,21 +3921,25 @@ function M.reply()
       return
     end
 
-    local created, err = gh_json({
-      "api",
-      string.format("repos/%s/pulls/%s/comments/%s/replies", state.repo, state.pr, target.id),
-      "--method",
-      "POST",
-      "-f",
-      "body=" .. body,
-    })
+    local created, err
+    if state.provider.reply then
+      created, err = state.provider.reply(provider_context(), target, body)
+    else
+      created, err = gh_json({
+        "api",
+        string.format("repos/%s/pulls/%s/comments/%s/replies", state.repo, state.pr, target.id),
+        "--method",
+        "POST",
+        "-f",
+        "body=" .. body,
+      })
+    end
     if not created then
       vim.notify("Review Mode reply failed: " .. tostring(err or "unknown error"), vim.log.levels.ERROR)
       return
     end
 
-    state.comments = {}
-    load_comments_async()
+    load_comments_async(true)
     vim.notify("Submitted PR thread reply")
   end)
 end
@@ -3866,6 +3968,10 @@ local function thread_comment_on_current_line()
 end
 
 local function set_thread_resolved(resolved)
+  if not (state.provider.capabilities or {}).resolve then
+    vim.notify("Provider does not support resolving review threads", vim.log.levels.WARN)
+    return
+  end
   if not state.repo or not state.pr then
     vim.notify("Review Mode thread: start Review Mode first", vim.log.levels.WARN)
     return
@@ -3874,6 +3980,16 @@ local function set_thread_resolved(resolved)
   local target, err = thread_comment_on_current_line()
   if not target then
     vim.notify("Review Mode thread: " .. tostring(err), vim.log.levels.WARN)
+    return
+  end
+
+  if state.provider.resolve then
+    local result, mutation_err = state.provider.resolve(provider_context(), target, resolved)
+    if not result then
+      vim.notify("Review Mode thread update failed: " .. tostring(mutation_err), vim.log.levels.ERROR)
+      return
+    end
+    load_comments_async(true)
     return
   end
 
@@ -3905,9 +4021,7 @@ mutation($threadId: ID!) {
     return
   end
 
-  state.comments = {}
-  state.comment_threads = {}
-  load_comments_async()
+  load_comments_async(true)
   vim.notify(resolved and "Resolved PR review thread" or "Unresolved PR review thread")
 end
 
@@ -3948,7 +4062,21 @@ local function submit_review_comment(path, start_line, end_line, body)
     return false
   end
 
-  local commit_id = state.head or system({ "gh", "pr", "view", state.pr, "--json", "headRefOid", "-q", ".headRefOid" })
+  if state.provider.comment then
+    local created, err = state.provider.comment(provider_context(), path, start_line, end_line, body)
+    if not created then
+      vim.notify("Review Mode comment failed: " .. tostring(err), vim.log.levels.ERROR)
+      return false
+    end
+    load_comments_async(true)
+    vim.notify(string.format("Submitted PR comment on %s:%d", path, end_line))
+    return true
+  end
+
+  local commit_id = state.head
+    or system(
+      scm.command(state.scm, state.provider, { "pr", "view", state.pr, "--json", "headRefOid", "-q", ".headRefOid" })
+    )
   if not commit_id then
     vim.notify("Review Mode comment: could not determine PR head SHA", vim.log.levels.ERROR)
     return false
@@ -3986,8 +4114,7 @@ local function submit_review_comment(path, start_line, end_line, body)
     return false
   end
 
-  state.comments = {}
-  load_comments_async()
+  load_comments_async(true)
   vim.notify(string.format("Submitted PR comment on %s:%d", path, end_line))
   return true
 end
@@ -4066,12 +4193,17 @@ function M.copy_url()
 end
 
 function M.checks()
-  local args = { "gh", "pr", "checks" }
+  local args = scm.command(state.scm, state.provider, { "pr", "checks" })
   local pr = active_pr_arg()
   if pr then
     args[#args + 1] = pr
   end
-  system_async(args, { raw = true }, function(stdout, err)
+  local request = state.provider.checks
+      and function(_, _, callback)
+        state.provider.checks(provider_context(), callback)
+      end
+    or system_async
+  request(args, { raw = true }, function(stdout, err)
     if not stdout then
       vim.notify("Review Mode checks: " .. tostring(err or "could not load checks"), vim.log.levels.ERROR)
       return
@@ -4093,7 +4225,12 @@ function M.status()
   end
   vim.list_extend(args, { "--json", "title,state,isDraft,mergeable,reviewDecision,headRefName,baseRefName,url" })
 
-  gh_json_async(args, function(result, err)
+  local request = state.provider.status
+      and function(_, callback)
+        state.provider.status(provider_context(), callback)
+      end
+    or gh_json_async
+  request(args, function(result, err)
     if not result then
       vim.notify("Review Mode status: " .. tostring(err or "could not load PR status"), vim.log.levels.ERROR)
       return
@@ -4343,6 +4480,14 @@ end
 
 function M.config()
   return state.config
+end
+
+function M.register_provider(name, provider)
+  scm.register(name, provider)
+end
+
+function M.scm_config(root)
+  return scm.resolve(state.config.scm, root or repo_root() or vim.uv.cwd())
 end
 
 function M.setup(opts)

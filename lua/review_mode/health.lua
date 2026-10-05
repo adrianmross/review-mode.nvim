@@ -48,10 +48,12 @@ function M.check()
   end
 
   local has_git = executable("git")
-  local has_gh = executable("gh")
-
-  if has_gh then
-    system_ok({ "gh", "auth", "status" }, "gh authentication available", "gh authentication check failed")
+  local config, provider = require("review_mode").scm_config()
+  if not config then
+    call("error", tostring(provider))
+  elseif executable(config.command or provider.command) then
+    local args = require("review_mode.scm").command(config, provider, { "auth", "status" })
+    system_ok(args, "SCM authentication available", "SCM authentication check failed")
   end
 
   if has_git then
