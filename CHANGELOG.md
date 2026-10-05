@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.13.11](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.10...v0.13.11) (2026-10-05)
+
+
+### Features
+
+* support external SCM providers per project ([#137](https://github.com/adrianmross/review-mode.nvim/issues/137)) ([5052384](https://github.com/adrianmross/review-mode.nvim/commit/50523843bda04ae3a75c440e6859fd1481e68927))
+
+
+### Bug Fixes
+
+* keep the code window out of insert mode after closing a draft ([#136](https://github.com/adrianmross/review-mode.nvim/issues/136)) ([6677091](https://github.com/adrianmross/review-mode.nvim/commit/66770914f1835e43afe16c4da45d5d59d97731e5))
+* validate release App condition through job environment ([#138](https://github.com/adrianmross/review-mode.nvim/issues/138)) ([b3d15ab](https://github.com/adrianmross/review-mode.nvim/commit/b3d15ab3922aa62eabb19cb2ba29dd6ec388ae48))
+
 ## [0.13.10](https://github.com/adrianmross/review-mode.nvim/compare/v0.13.9...v0.13.10) (2026-09-22)
 
 
