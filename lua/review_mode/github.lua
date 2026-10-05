@@ -528,6 +528,25 @@ function M.load_comments_async(opts)
     return
   end
 
+  if state.external_provider then
+    state.comments_loading, state.comments_reload_queued = true, false
+    return state.external_provider.threads(require("review_mode.providers").context(), function(threads, err)
+      if not core.is_current(generation) or M.superseded() then
+        return
+      end
+      if not threads then
+        vim.notify("Failed to load provider comments: " .. tostring(err), vim.log.levels.WARN)
+        return
+      end
+      state.comments, state.comment_threads = M.group_review_threads(threads)
+      local key = core.cache_key()
+      if key then
+        M.write_comment_cache_entry(key, state.comments, state.comment_threads)
+      end
+      hooks.emit("comments_loaded", { repo = state.repo, pr = state.pr })
+    end)
+  end
+
   if state.provider == "gitlab" then
     return require("review_mode.providers.gitlab").fetch_comments_async(generation)
   end
@@ -575,7 +594,7 @@ function M.toggle_reaction(comment, content, callback)
     end
   end
 
-  if state.provider == "gitlab" then
+  if state.provider ~= "github" then
     require("review_mode.providers").unsupported("Reactions", callback)
     return
   end
@@ -679,7 +698,7 @@ local function finish_comment_write(event, comment, callback)
 end
 
 function M.edit_comment(opts, callback)
-  if state.provider == "gitlab" then
+  if state.provider ~= "github" then
     require("review_mode.providers").unsupported("Editing a comment", callback)
     return false
   end
@@ -705,7 +724,7 @@ function M.edit_comment(opts, callback)
 end
 
 function M.delete_comment(comment_id, callback)
-  if state.provider == "gitlab" then
+  if state.provider ~= "github" then
     require("review_mode.providers").unsupported("Deleting a comment", callback)
     return false
   end
@@ -837,7 +856,7 @@ end
 --- no forge to ask, so it is a no-op rather than an error.
 function M.load_conversation_async(opts)
   opts = opts or {}
-  if state.provider == "local" or not state.active then
+  if state.external_provider or state.provider == "local" or not state.active then
     return
   end
   if state.conversation_loading then

@@ -158,8 +158,13 @@ function M.prepare(opts, callback)
   if not root then
     return callback(nil, "not in a git repository")
   end
-  if require("review_mode.providers").select(root) == "gitlab" then
-    return callback(nil, "Reviewing in a separate checkout is not supported on GitLab yet")
+  local provider = require("review_mode.providers").select(root)
+  if provider ~= "github" then
+    return callback(
+      nil,
+      provider == "gitlab" and "Reviewing in a separate checkout is not supported on GitLab yet"
+        or "Reviewing in a separate checkout currently requires the GitHub provider"
+    )
   end
   coroutine.wrap(function()
     local pr, repo, host = M.parse_target(opts.pr, opts.repo)

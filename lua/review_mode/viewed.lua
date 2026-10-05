@@ -160,7 +160,7 @@ end
 -- End hunk-level viewed --------------------------------------------------------
 
 function M.github_viewed_files_async(generation, after, viewed, callback)
-  if state.provider == "gitlab" then
+  if state.provider ~= "github" then
     callback(nil, "GitHub viewed-state sync is not supported on GitLab yet")
     return
   end
@@ -295,7 +295,7 @@ function M.sync_viewed_from_github_async(generation, force, merge_local)
 end
 
 function M.github_pr_node_id_async(generation, callback)
-  if state.provider == "gitlab" then
+  if state.provider ~= "github" then
     callback(nil, "GitHub viewed-state sync is not supported on GitLab yet")
     return
   end

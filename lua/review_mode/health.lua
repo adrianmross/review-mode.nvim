@@ -73,6 +73,19 @@ function M.check()
     end
   end
 
+  if provider ~= "github" and provider ~= "gitlab" and provider ~= "local" then
+    local config, plugin = require("review_mode").scm_config(root.code == 0 and vim.trim(root.stdout) or nil)
+    if not config then
+      call("error", tostring(plugin))
+    elseif executable(config.command or plugin.command, "error", "selected SCM provider") then
+      system_ok(
+        require("review_mode.scm").command(config, plugin, { "auth", "status" }),
+        "SCM authentication available",
+        "SCM authentication check failed"
+      )
+    end
+  end
+
   if has_git then
     system_ok(
       { "git", "rev-parse", "--show-toplevel" },

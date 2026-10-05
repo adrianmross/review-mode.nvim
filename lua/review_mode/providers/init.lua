@@ -13,6 +13,91 @@ local core = require("review_mode.state")
 local util = require("review_mode.util")
 
 local state = core.state
+local scm = require("review_mode.scm")
+
+function M.project_config(root)
+  local config = vim.deepcopy(state.config.scm or {})
+  local project = (config.projects or {})[root]
+  config.projects = nil
+  config = vim.tbl_deep_extend("force", config, project or {})
+  if project and project.args then
+    config.args = vim.deepcopy(project.args)
+  end
+  return config
+end
+
+function M.configure(root, name)
+  local config = M.project_config(root)
+  config.provider = name
+  state.scm, state.external_provider = config, nil
+  if name == "github" or name == "gitlab" or name == "local" then
+    return true
+  end
+  local selected, provider = scm.resolve(config, root)
+  if not selected then
+    return nil, provider
+  end
+  state.scm, state.external_provider = selected, provider
+  return true
+end
+
+function M.context()
+  local generation = state.generation
+  local config, provider = state.scm, state.external_provider
+  local function command(args)
+    return scm.command(config, provider, args)
+  end
+  local function decode(text)
+    local ok, value = pcall(vim.json.decode, text)
+    if not ok then
+      return nil, "Failed to decode SCM JSON"
+    end
+    return value
+  end
+  return {
+    root = state.root,
+    config = config,
+    repo = state.repo,
+    pr = state.pr,
+    head = state.head,
+    system = util.system,
+    json_sync = function(args)
+      local out, err = util.system(command(args))
+      if not out then
+        return nil, err
+      end
+      return decode(out)
+    end,
+    json = function(args, callback)
+      util.system_async(command(args), {}, function(out, err)
+        if not core.is_current(generation) then
+          return
+        end
+        if not out then
+          callback(nil, err)
+          return
+        end
+        local value, decode_err = decode(out)
+        callback(value, decode_err)
+      end)
+    end,
+  }
+end
+
+function M.external_write(method, args, callback)
+  local provider = state.external_provider
+  local result, err = provider[method](M.context(), unpack(args))
+  if result then
+    require("review_mode.github").load_comments_async({ force = true })
+  end
+  if callback then
+    callback(result ~= nil, err)
+  end
+  if not result then
+    vim.notify("Review Mode: " .. tostring(err), vim.log.levels.WARN)
+  end
+  return result ~= nil
+end
 
 --- The host of a git remote URL: https://, ssh:// and scp-style git@host:path.
 function M.remote_host(url)
@@ -41,6 +126,10 @@ end
 
 --- Pick the provider for a review starting in `root`.
 function M.select(root)
+  local project = M.project_config(root)
+  if project.provider then
+    return project.provider
+  end
   local configured = state.config.provider
   if configured == "github" or configured == "gitlab" or configured == "local" then
     return configured

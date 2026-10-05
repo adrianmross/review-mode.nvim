@@ -1,5 +1,10 @@
 # review-mode.nvim
 
+SCM providers can be supplied by external plugins and selected per project.
+GitHub remains the default. See [SCM provider setup and interface](doc/scm-providers.md)
+for registration, project settings, and the external OCI adapter supplied by
+[oci-scm](https://github.com/adrianmross/oci-scm/tree/main/integrations/review-mode.nvim).
+
 Fast GitHub pull request review mode for ordinary Neovim buffers.
 
 The goal is to keep review inside normal files instead of a dedicated diff UI:

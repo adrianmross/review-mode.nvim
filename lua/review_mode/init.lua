@@ -1,4 +1,5 @@
 local M = {}
+local providers = require("review_mode.providers")
 
 local comments_ui = require("review_mode.comments")
 local core = require("review_mode.state")
@@ -55,6 +56,9 @@ local function active_pr_arg()
 end
 
 local function pr_url_async(callback)
+  if state.external_provider then
+    return state.external_provider.url(providers.context(), callback)
+  end
   if state.provider == "gitlab" then
     local url = require("review_mode.providers.gitlab").web_url()
     callback(url, not url and "merge request metadata is still loading" or nil)
@@ -107,6 +111,11 @@ local function pr_view_args()
 end
 
 local function pr_meta_async(generation, callback)
+  if state.external_provider then
+    return state.external_provider.metadata(providers.context(), function(value, err)
+      callback(value and value.meta, err)
+    end)
+  end
   if state.provider == "gitlab" then
     return require("review_mode.providers.gitlab").mr_meta_async(generation, callback)
   end
@@ -1472,6 +1481,9 @@ local function load_review_async(generation, opts)
 end
 
 local function load_metadata_async(generation, callback)
+  if state.external_provider then
+    return state.external_provider.metadata(providers.context(), callback)
+  end
   if state.provider == "gitlab" then
     return require("review_mode.providers.gitlab").load_metadata_async(generation, callback)
   end
@@ -1545,6 +1557,7 @@ local function teardown()
   -- after the event, which still reports where the session was
   state.root = nil
   state.provider = nil
+  state.external_provider, state.scm = nil, nil
 end
 
 --- opts (all optional; no opts keeps the env/`gh` discovery):
@@ -1597,6 +1610,19 @@ function M.start(opts)
   state.base_ref = opts.base_ref
   state.local_store = opts.local_store
   state.provider = provider
+  local ready, provider_err = providers.configure(root, provider)
+  if not ready then
+    teardown()
+    vim.notify(tostring(provider_err), vim.log.levels.ERROR)
+    return
+  end
+  if state.external_provider then
+    local prefix = state.external_provider.env_prefix or "REVIEW_MODE_"
+    state.repo = opts.repo or util.env_value(prefix .. "REPO")
+    state.pr = opts.pr or state.scm.pr or util.env_value(prefix .. "PR")
+    state.base = opts.base or util.env_value(prefix .. "BASE")
+    state.head = opts.head or util.env_value(prefix .. "HEAD")
+  end
   if state.provider == "gitlab" then
     require("review_mode.providers.gitlab").apply_env()
   end
@@ -1679,9 +1705,11 @@ function M.start(opts)
 
     local meta = result.meta or {}
     state.repo = state.repo or result.repo
-    state.pr = state.pr or tostring(meta.number or util.env_value("GH_REVIEW_PR") or "")
+    state.pr = state.external_provider and tostring(meta.number)
+      or state.pr
+      or tostring(meta.number or util.env_value("GH_REVIEW_PR") or "")
     state.base = state.base or meta.baseRefName or "main"
-    state.head = state.head or meta.headRefOid
+    state.head = state.external_provider and meta.headRefOid or state.head or meta.headRefOid
     state.metadata_loaded = true
     if state.provider == "github" then
       github.remember_branch(root)
@@ -2292,6 +2320,12 @@ local function set_thread_resolved(resolved, thread_id, callback)
     return
   end
 
+  if state.external_provider then
+    if not (state.external_provider.capabilities or {}).resolve then
+      return providers.unsupported("Resolving review threads", callback)
+    end
+    return providers.external_write("resolve", { { thread_id = thread_id }, resolved }, callback)
+  end
   if state.provider == "gitlab" then
     return require("review_mode.providers.gitlab").set_resolved(thread_id, resolved, callback)
   end
@@ -2436,6 +2470,9 @@ local function post_review_comment(path, start_line, end_line, body, commit_id, 
 end
 
 local function submit_review_comment(path, start_line, end_line, body, callback)
+  if state.external_provider then
+    return providers.external_write("comment", { path, start_line, end_line, body }, callback)
+  end
   if not state.repo or not state.pr then
     vim.notify("Review Mode comment: start Review Mode first", vim.log.levels.WARN)
     if callback then
@@ -2504,6 +2541,17 @@ function M.submit_comment(opts, callback)
 end
 
 function M.submit_reply(opts, callback)
+  if state.external_provider then
+    opts = opts or {}
+    local target = { id = opts.comment_id, thread_id = opts.thread_id }
+    if not target.id and not target.thread_id then
+      if callback then
+        callback(false, "comment_id or thread_id is required")
+      end
+      return false
+    end
+    return providers.external_write("reply", { target, opts.body or "" }, callback)
+  end
   if state.provider == "gitlab" then
     return require("review_mode.providers.gitlab").submit_reply(opts, callback)
   end
@@ -2835,7 +2883,17 @@ function M.checks()
   if pr then
     args[#args + 1] = pr
   end
-  system_async(args, { raw = true }, function(stdout, err)
+  local request = state.external_provider
+      and function(_, _, callback)
+        local plugin = state.external_provider
+        if plugin.checks then
+          return plugin.checks(providers.context(), callback)
+        end
+        local argv = require("review_mode.scm").command(state.scm, plugin, { "pr", "checks", tostring(state.pr) })
+        return system_async(argv, { raw = true }, callback)
+      end
+    or system_async
+  request(args, { raw = true }, function(stdout, err)
     if not stdout then
       vim.notify("Review Mode checks: " .. tostring(err or "could not load checks"), vim.log.levels.ERROR)
       return
@@ -2860,7 +2918,12 @@ function M.status()
   end
   vim.list_extend(args, { "--json", "title,state,isDraft,mergeable,reviewDecision,headRefName,baseRefName,url" })
 
-  gh_json_async(args, function(result, err)
+  local request = state.external_provider
+      and function(_, callback)
+        state.external_provider.status(providers.context(), callback)
+      end
+    or gh_json_async
+  request(args, function(result, err)
     if not result then
       vim.notify("Review Mode status: " .. tostring(err or "could not load PR status"), vim.log.levels.ERROR)
       return
@@ -3122,6 +3185,26 @@ end
 
 function M.config()
   return state.config
+end
+
+function M.register_provider(name, provider)
+  require("review_mode.scm").register(name, provider)
+end
+
+function M.scm_config(root)
+  root = root or util.repo_root() or vim.uv.cwd()
+  local config = providers.project_config(root)
+  config.provider = config.provider or providers.select(root)
+  if config.provider == "github" then
+    return config, { command = "gh" }
+  end
+  if config.provider == "gitlab" then
+    return config, { command = "glab" }
+  end
+  if config.provider == "local" then
+    return config, { command = "git" }
+  end
+  return require("review_mode.scm").resolve(config, root)
 end
 
 function M.setup(opts)

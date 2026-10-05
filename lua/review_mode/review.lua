@@ -59,12 +59,12 @@ end
 --- False where a draft could not be queued (GitLab, a local review), so a UI
 --- need not offer it only to refuse.
 function M.can_queue()
-  return state.provider ~= "gitlab" and state.provider ~= "local" and store_path() ~= nil
+  return state.provider == "github" and store_path() ~= nil
 end
 
 --- Queue a comment for the next review. Returns the draft, or nil and an error.
 function M.add(opts)
-  if state.provider == "gitlab" or state.provider == "local" then
+  if state.provider ~= "github" then
     return nil, require("review_mode.providers").unsupported("Pending review comments")
   end
   opts = opts or {}
@@ -282,7 +282,7 @@ end
 --- Submit every pending draft as one review. opts.event is COMMENT, APPROVE or
 --- REQUEST_CHANGES (any case). Drafts are cleared only after GitHub accepts it.
 function M.submit(opts, callback)
-  if state.provider == "gitlab" or state.provider == "local" then
+  if state.provider ~= "github" then
     return (callback or function() end)(false, require("review_mode.providers").unsupported("Submitting a review"))
   end
   opts = opts or {}

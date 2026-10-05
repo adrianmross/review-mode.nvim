@@ -62,7 +62,7 @@ end
 --- reviews and GitLab have no check runs to ask.
 function M.load_async()
   M.clear()
-  if not M.enabled() or state.provider == "local" or state.provider == "gitlab" or not state.repo or not state.head then
+  if not M.enabled() or state.provider ~= "github" or not state.repo or not state.head then
     hooks.emit("ci_loaded", {})
     return
   end

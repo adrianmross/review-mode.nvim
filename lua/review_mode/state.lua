@@ -10,6 +10,7 @@ local M = {}
 local default_comment_sign_text = ""
 
 local defaults = {
+  scm = { args = {}, projects = {}, base_remote = "origin" },
   auto_open_first_change = true,
   follow_head = true,
   -- when the PR is yours and a commit lands mid-review, offer (always with a
@@ -400,7 +401,7 @@ function M.base_ref()
   if sha or base:match("^origin/") or base:match("^refs/") then
     return base
   end
-  return "origin/" .. base
+  return ((state.scm or {}).base_remote or "origin") .. "/" .. base
 end
 
 --- The commit the base side of the review is read from (`git show`, the
@@ -469,6 +470,9 @@ function M.cache_key()
   end
   if state.provider == "gitlab" then
     return string.format("gitlab:%s:%s", require("review_mode.providers.gitlab").host(), key)
+  end
+  if state.external_provider then
+    return state.provider .. ":" .. key
   end
   local host = state.root and origin_host() or ""
   if host ~= "" and host ~= "github.com" then
