@@ -3187,10 +3187,6 @@ function M.config()
   return state.config
 end
 
-function M.register_issue_provider(name, provider)
-  require("review_mode.issues").register(name, provider)
-end
-
 function M.register_provider(name, provider)
   require("review_mode.scm").register(name, provider)
 end

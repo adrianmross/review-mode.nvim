@@ -10,7 +10,6 @@ local M = {}
 local default_comment_sign_text = ""
 
 local defaults = {
-  issues = { projects = {} },
   scm = { args = {}, projects = {}, base_remote = "origin" },
   auto_open_first_change = true,
   follow_head = true,

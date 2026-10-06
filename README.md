@@ -1491,37 +1491,17 @@ devenv test --no-eval-cache
 bash scripts/release-check.sh
 ```
 
-## Optional issue-provider plugins
+## Optional issue context
 
-Issue trackers are independent from SCM providers. The base plugin contains no Jira, GitHub Issues, or Linear adapter and performs no automatic tracker calls. Install the separate provider package with your plugin manager:
+Install and configure [issues.nvim](https://github.com/adrianmross/issues.nvim) separately. It owns issue UI, provider loading and project configuration; review-mode contains only an optional bridge. Neither plugin bundles tracker adapters.
 
-```lua
-{ "adrianmross/issue-providers" },
-{
-  "adrianmross/review-mode.nvim",
-  opts = {
-    issues = {
-      projects = {
-        ["/path/to/project"] = {
-          provider = "jira",
-          options = { target = "jira-oci" },
-        },
-        ["/path/to/github-project"] = {
-          provider = "github",
-          options = { repo = "owner/repository" },
-        },
-        ["/path/to/linear-project"] = {
-          provider = "linear",
-          options = { team = "ENG" },
-        },
-      },
+    {
+      "adrianmross/issues.nvim",
+      dependencies = { "adrianmross/issue-providers" },
+      opts = { provider = "github", options = { repo = "owner/repository" } },
     },
-  },
-},
-```
+    { "adrianmross/review-mode.nvim" },
 
-`:ReviewModeIssue [KEY]` opens the issue description, status, assignee and cache provenance beside your review. With no key, the provider pattern detects keys in the current branch or prompts. `:ReviewModeIssueSearch QUERY` searches and picks an issue. `:ReviewModeIssueOffline [KEY]` never contacts the tracker; `:ReviewModeIssueRefresh [KEY]` requires fresh data. Jira search uses JQL; Linear search matches title text. No tracker writes occur.
+:ReviewModeIssue [KEY], :ReviewModeIssueOffline [KEY], :ReviewModeIssueRefresh [KEY] and :ReviewModeIssueSearch QUERY delegate to issues.nvim using the current review root. Responses from a previous review are ignored. If issues.nvim is absent, these commands explain how to install it; normal review functionality remains available. Use :IssueHealth to diagnose the separate plugin and provider prerequisites.
 
-Providers can be registered with `register_issue_provider(name, provider)`. A provider supplies `command` as an argv array or `request(context, request, callback)` plus an optional Lua key `pattern`. Installed modules load lazily from `review_mode.issue_providers.NAME`. An explicit `issues.command` argv override can invoke an installed executable directly, without oscm. The shared executable contract is `--request JSON` using `issue-provider.request.v1` and `issue-provider.response.v1`; see the providers package for canonical fields. Repository paths select per-project configuration, and SCM configuration remains independent.
-
-When no editor issue provider is selected, review-mode reads the explicit `issues` provider/options from the repository `.oci-scm.json`, sharing oscm configuration. Repository files cannot supply executable overrides. User editor configuration takes precedence.
+Configure issue providers through issues.nvim or shared repository metadata, independently of scm.provider. See its documentation for command providers, authentication ownership and cache provenance. No tracker writes or implicit login occur.
