@@ -223,7 +223,14 @@ end
 
 function M.search(query)
   local root = core.state.root or util.repo_root() or vim.uv.cwd()
+  local generation = core.state.generation
+  local function current()
+    return core.state.generation == generation and (not core.state.root or core.state.root == root)
+  end
   M.request(root, "search", query, {}, function(response, err)
+    if not current() then
+      return
+    end
     if not response then
       vim.notify("Review Mode: " .. tostring(err), vim.log.levels.WARN)
       return
@@ -234,7 +241,7 @@ function M.search(query)
         return v.key .. ": " .. v.title
       end,
     }, function(issue)
-      if issue then
+      if issue and current() then
         M.view(issue.key)
       end
     end)
