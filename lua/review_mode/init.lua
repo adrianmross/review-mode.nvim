@@ -3187,6 +3187,10 @@ function M.config()
   return state.config
 end
 
+function M.register_issue_provider(name, provider)
+  require("review_mode.issues").register(name, provider)
+end
+
 function M.register_provider(name, provider)
   require("review_mode.scm").register(name, provider)
 end
@@ -3213,6 +3217,18 @@ function M.setup(opts)
   state.config = core.normalize_config(opts)
 
   if state.config.commands then
+    vim.api.nvim_create_user_command("ReviewModeIssue", function(command)
+      require("review_mode.issues").view(command.args)
+    end, { nargs = "?", desc = "Show an issue through the project issue provider" })
+    vim.api.nvim_create_user_command("ReviewModeIssueOffline", function(command)
+      require("review_mode.issues").view(command.args, { offline = true })
+    end, { nargs = "?", desc = "Show a cached issue snapshot without network access" })
+    vim.api.nvim_create_user_command("ReviewModeIssueRefresh", function(command)
+      require("review_mode.issues").view(command.args, { refresh = true })
+    end, { nargs = "?", desc = "Require a fresh issue snapshot" })
+    vim.api.nvim_create_user_command("ReviewModeIssueSearch", function(command)
+      require("review_mode.issues").search(command.args)
+    end, { nargs = "+", desc = "Search through the selected issue provider" })
     vim.api.nvim_create_user_command("ReviewMode", function()
       M.toggle()
     end, { desc = "Toggle Review Mode (starts the review session if needed)" })
