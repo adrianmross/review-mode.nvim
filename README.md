@@ -1490,3 +1490,18 @@ Local release checks:
 devenv test --no-eval-cache
 bash scripts/release-check.sh
 ```
+
+## Optional issue context
+
+Install and configure [issues.nvim](https://github.com/adrianmross/issues.nvim) separately. It owns issue UI, provider loading and project configuration; review-mode contains only an optional bridge. Neither plugin bundles tracker adapters.
+
+    {
+      "adrianmross/issues.nvim",
+      dependencies = { "adrianmross/issue-providers" },
+      opts = { provider = "github", options = { repo = "owner/repository" } },
+    },
+    { "adrianmross/review-mode.nvim" },
+
+:ReviewModeIssue [KEY], :ReviewModeIssueOffline [KEY], :ReviewModeIssueRefresh [KEY] and :ReviewModeIssueSearch QUERY delegate to issues.nvim using the current review root. Responses from a previous review are ignored. If issues.nvim is absent, these commands explain how to install it; normal review functionality remains available. Use :IssueHealth to diagnose the separate plugin and provider prerequisites.
+
+Configure issue providers through issues.nvim or shared repository metadata, independently of scm.provider. See its documentation for command providers, authentication ownership and cache provenance. No tracker writes or implicit login occur.
